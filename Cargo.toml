@@ -4,3 +4,10 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+itoa = "1" # fast int -> string conversion
+vte = "0.15" # terminal control code parsing
+smallvec = "1" # heap fragmentation optimization
+static_assertions = "1"
+unicode-width = "0.2" # detecting zero width modifier codepoints
+log = "0.4" # logging facade (not used directly, but required if we have tracing-log enabled)
+tracing = "0.1" # logging and performance monitoring facade

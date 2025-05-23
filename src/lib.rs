@@ -1,4 +1,24 @@
-use std::collections::VecDeque;
+// Copyright 2025 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+mod attrs;
+mod cell;
+mod line;
+mod scrollback;
+mod term;
+
+use term::BufWrite;
 
 /// A representation of a terminal.
 ///
@@ -16,10 +36,9 @@ use std::collections::VecDeque;
 /// use some sort of weird tree structure that notes the grid line that
 /// each logical line starts on and then allows you to find the logical
 /// line for each grid line.
-#[derive(Debug, Clone)]
 pub struct Term {
-    size: Size,
-    lines: VecDeque<LogicalLine>,
+    parser: vte::Parser,
+    scrollback: scrollback::Buffer,
 }
 
 impl Term {
@@ -29,25 +48,25 @@ impl Term {
     /// to determine where wrapping should be place.
     pub fn new(size: Size) -> Self {
         Term {
-            size,
-            lines: VecDeque::with_capacity(size.height),
+            parser: vte::Parser::new(),
+            scrollback: scrollback::Buffer::new(size),
         }
     }
 
     /// Get the current terminal size.
     pub fn size(&self) -> Size {
-        self.size
+        self.scrollback.size()
     }
 
     /// Set the terminal size.
     pub fn set_size(&mut self, size: Size) {
-        self.size = size;
+        self.scrollback.set_size(size);
     }
 
     /// Process the given chunk of input. This should be the data read off
     /// a pty running a shell.
-    pub fn process(&mut self, _buf: &[u8]) {
-        // TODO: stub
+    pub fn process(&mut self, buf: &[u8]) {
+        self.parser.advance(&mut self.scrollback, buf);
     }
 
     /// Get the current contents of the terminal encoded via terminal
@@ -59,39 +78,42 @@ impl Term {
     /// a terminal of the given size. This is mostly useful if the
     /// virtual terminal has more lines than are desired.
     pub fn contents(&self, size: Option<Size>) -> Vec<u8> {
-        // TODO: stub
-        vec![]
-    }
+        let mut buf = vec![];
+        term::ClearAttrs::default().write_buf(&mut buf);
+        term::ClearScreen::default().write_buf(&mut buf);
 
-    //
-    // Internal helpers
-    //
+        for (i, l) in self.scrollback.lines.iter().enumerate().rev() {
+            l.write_buf(&mut buf);
 
-    /// Push a new line, making sure old lines are discared.
-    fn push_line(&mut self, line: LogicalLine) {
-        // TODO: if lines maintain a mapping to their grid position,
-        // this would invalidate that mapping. It should either be
-        // recomputed or if we are lazy about it, invalidated.
-        self.lines.truncate(self.size.height - 1);
-        self.lines.push_front(line);
+            // inject \r\n in between lines, but not after the last
+            // line
+            if i != 0 {
+                term::Crlf::default().write_buf(&mut buf);
+            }
+        }
+
+        buf
     }
 }
 
 /// The size of the terminal.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct Size {
     width: usize,
     height: usize,
 }
 
-/// A logical line. May be arbitrarily long and will only get wrapped
-/// when transforming the term into a grid view.
-#[derive(Debug, Clone)]
-struct LogicalLine {
+/// A position within the terminal. Generally, this refers to a grid
+/// mode view of the terminal, not the underlying logical lines mode
+/// that we actually store the data in.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+struct Pos {
+    pub row: u16,
+    pub col: u16,
 }
 
+// Plan: use the vte crate as a parser and fill in its callbacks.
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-}
+// TODO: get this working end-to-end with basic text on a single line
+// TODO: get newlines / carrage returns working
+// TODO: handle clear
