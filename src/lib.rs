@@ -117,3 +117,46 @@ struct Pos {
 // TODO: get this working end-to-end with basic text on a single line
 // TODO: get newlines / carrage returns working
 // TODO: handle clear
+
+#[cfg(test)]
+mod test {
+    use crate::term;
+    use crate::term::BufWrite;
+
+    macro_rules! frag {
+        {
+            $test_name:ident
+            { width: $width:expr , height: $height:expr }
+            <= $( $input_expr:expr ),*
+            => $( $output_expr:expr ),*
+        } => {
+            #[test]
+            fn $test_name() {
+                let mut input: Vec<u8> = vec![];
+                $(
+                    $input_expr.write_buf(&mut input);
+                )*
+                let mut output: Vec<u8> = vec![];
+                $(
+                    $output_expr.write_buf(&mut output);
+                )*
+                round_trip_frag(input.as_slice(), output.as_slice(),
+                                crate::Size{width: $width, height: $height});
+            }
+        }
+    }
+
+    frag! {
+        simple_str { width: 100, height: 100 }
+        <= term::Raw::from("foobar")
+        => term::ClearAttrs::default(),
+            term::ClearScreen::default(),
+            term::Raw::from("foobar")
+    }
+
+    fn round_trip_frag(input: &[u8], output: &[u8], size: crate::Size) {
+        let mut term = crate::Term::new(size);
+        term.process(input);
+        assert_eq!(term.contents(None).as_slice(), output);
+    }
+}

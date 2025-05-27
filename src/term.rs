@@ -1,17 +1,17 @@
 // The MIT License (MIT)
-// 
+//
 // Copyright (c) 2016 Jesse Luehrs
-// 
+//
 // Permission is hereby granted, free of charge, to any person obtaining a copy of
 // this software and associated documentation files (the "Software"), to deal in
 // the Software without restriction, including without limitation the rights to
 // use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
 // of the Software, and to permit persons to whom the Software is furnished to do
 // so, subject to the following conditions:
-// 
+//
 // The above copyright notice and this permission notice shall be included in all
 // copies or substantial portions of the Software.
-// 
+//
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 // FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -45,6 +45,32 @@ pub struct ClearAttrs;
 impl BufWrite for ClearAttrs {
     fn write_buf(&self, buf: &mut Vec<u8>) {
         buf.extend_from_slice(b"\x1b[m");
+    }
+}
+
+#[derive(Debug)]
+#[must_use = "this struct does nothing unless you call write_buf"]
+pub struct Raw {
+    inner: Vec<u8>,
+}
+
+impl Raw {
+    pub fn new(inner: Vec<u8>) -> Self {
+        Raw { inner }
+    }
+}
+
+impl std::convert::From<&str> for Raw {
+    fn from(value: &str) -> Self {
+        Raw {
+            inner: Vec::from(value.as_bytes()),
+        }
+    }
+}
+
+impl BufWrite for Raw {
+    fn write_buf(&self, buf: &mut Vec<u8>) {
+        buf.extend_from_slice(self.inner.as_slice());
     }
 }
 
@@ -216,7 +242,6 @@ impl BufWrite for Crlf {
         buf.extend_from_slice(b"\r\n");
     }
 }
-
 
 /* Not yet used, but we will likely need them in the future.
  *

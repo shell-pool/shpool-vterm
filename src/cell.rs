@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use smallvec::{smallvec, SmallVec};
 use unicode_width::UnicodeWidthChar;
-use smallvec::{SmallVec, smallvec};
 
 use crate::term::BufWrite;
 
@@ -40,8 +40,8 @@ pub struct Cell {
 // is a minimum size to the array.
 static_assertions::const_assert!(
     (std::mem::size_of::<SmallVec<[char; 2]>>() == std::mem::size_of::<SmallVec<[char; 1]>>())
-    || std::mem::size_of::<usize>() != 8);
-
+        || std::mem::size_of::<usize>() != 8
+);
 
 impl Cell {
     /// Create a new cell wrapping the given char.
@@ -60,8 +60,10 @@ impl Cell {
 
     /// Append a modifier char to the grapheme_cluster.
     pub fn add_char(&mut self, c: char) {
-        assert!(UnicodeWidthChar::width(c).unwrap_or(0) > 0,
-            "non-zero width char added to cell");
+        assert!(
+            UnicodeWidthChar::width(c).unwrap_or(0) > 0,
+            "non-zero width char added to cell"
+        );
 
         self.grapheme_cluster.push(c);
     }
@@ -71,7 +73,7 @@ impl BufWrite for Cell {
     fn write_buf(&self, buf: &mut Vec<u8>) {
         // TODO: apply attrs once we implement support for them by
         // transforming them into the appropriate escape sequences.
-        
+
         let mut utf8_buf = [0u8; 4];
         for c in self.grapheme_cluster.iter() {
             let utf8_slice = c.encode_utf8(&mut utf8_buf);

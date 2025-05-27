@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use tracing::{error, warn};
 use unicode_width::UnicodeWidthChar;
-use tracing::{warn, error};
 
 use crate::cell::Cell;
 use crate::term::BufWrite;
@@ -27,9 +27,7 @@ pub struct Logical {
 
 impl Logical {
     pub fn new() -> Self {
-        Logical {
-            contents: vec![],
-        }
+        Logical { contents: vec![] }
     }
 
     /// Insert the given char into the line.

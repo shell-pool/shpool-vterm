@@ -72,13 +72,7 @@ impl vte::Perform for Buffer {
         // TODO: stub
     }
 
-    fn hook(
-        &mut self,
-        _params: &vte::Params,
-        _intermediates: &[u8],
-        _ignore: bool,
-        _action: char,
-    ) {
+    fn hook(&mut self, _params: &vte::Params, _intermediates: &[u8], _ignore: bool, _action: char) {
         // TODO: stub
     }
 
@@ -113,4 +107,3 @@ impl vte::Perform for Buffer {
         false
     }
 }
-
