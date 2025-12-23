@@ -31,6 +31,7 @@ pub struct Cell {
     /// The width of the cell. It might be more than one if the grapheme cluster
     /// is wide. Some emojis and east asian characters have this property.
     width: u8,
+    empty: bool,
     // TODO: add attrs like underline and whatnot
 }
 
@@ -55,6 +56,16 @@ impl Cell {
         Cell {
             grapheme_cluster: smallvec![c],
             width: width as u8,
+            empty: false,
+        }
+    }
+
+    /// Create an empty or blank cell.
+    pub fn empty() -> Self {
+        Cell {
+            grapheme_cluster: smallvec![],
+            width: 1,
+            empty: true,
         }
     }
 
@@ -66,6 +77,10 @@ impl Cell {
         );
 
         self.grapheme_cluster.push(c);
+    }
+
+    pub fn width(&self) -> u8 {
+        self.width
     }
 }
 

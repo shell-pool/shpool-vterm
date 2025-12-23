@@ -16,6 +16,7 @@ mod attrs;
 mod cell;
 mod line;
 mod scrollback;
+mod grid;
 mod term;
 
 use term::BufWrite;
