@@ -100,8 +100,8 @@ impl Term {
 /// The size of the terminal.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct Size {
-    width: usize,
-    height: usize,
+    pub width: usize,
+    pub height: usize,
 }
 
 /// A position within the terminal. Generally, this refers to a grid
@@ -109,8 +109,8 @@ pub struct Size {
 /// that we actually store the data in.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 struct Pos {
-    pub row: u16,
-    pub col: u16,
+    pub row: usize,
+    pub col: usize,
 }
 
 // Plan: use the vte crate as a parser and fill in its callbacks.

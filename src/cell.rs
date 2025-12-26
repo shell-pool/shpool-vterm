@@ -14,11 +14,21 @@
 
 use smallvec::{smallvec, SmallVec};
 use unicode_width::UnicodeWidthChar;
+use std::sync::OnceLock;
 
 use crate::term::BufWrite;
 
+static EMPTY_CELL: OnceLock<Cell> = OnceLock::new();
+
+// A shared empty cell const. Should be used to generate empty cell
+// references when needed to avoid duplicating empty cells to reference
+// everywhere.
+pub fn empty() -> &'static Cell {
+    EMPTY_CELL.get_or_init(|| { Cell::empty() })
+}
+
 /// A cell in a terminal.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Cell {
     /// The contents of a cell. Usually just a single character,
     /// but in some cases there might be modifier codepoints like
@@ -32,6 +42,9 @@ pub struct Cell {
     /// is wide. Some emojis and east asian characters have this property.
     width: u8,
     empty: bool,
+    // Indicates a special type of empty cell inserted after wide chars
+    // to keep the grid correctly aligned.
+    wide_padding: bool,
     // TODO: add attrs like underline and whatnot
 }
 
@@ -57,15 +70,25 @@ impl Cell {
             grapheme_cluster: smallvec![c],
             width: width as u8,
             empty: false,
+            wide_padding: false,
         }
     }
 
-    /// Create an empty or blank cell.
     pub fn empty() -> Self {
         Cell {
             grapheme_cluster: smallvec![],
-            width: 1,
+            width: 0,
             empty: true,
+            wide_padding: false,
+        }
+    }
+
+    pub fn wide_pad() -> Self {
+        Cell {
+            grapheme_cluster: smallvec![],
+            width: 0,
+            empty: true,
+            wide_padding: true,
         }
     }
 
@@ -82,6 +105,10 @@ impl Cell {
     pub fn width(&self) -> u8 {
         self.width
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.empty
+    }
 }
 
 impl BufWrite for Cell {
@@ -94,5 +121,14 @@ impl BufWrite for Cell {
             let utf8_slice = c.encode_utf8(&mut utf8_buf);
             buf.extend(utf8_slice.as_bytes());
         }
+    }
+}
+
+impl std::fmt::Display for Cell {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for c in &self.grapheme_cluster {
+            write!(f, "{}", c)?;
+        }
+        Ok(())
     }
 }

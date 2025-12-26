@@ -17,258 +17,467 @@
 //! dump the precise information requested and is also used to display
 //! some commands.
 
-use crate::cell::Cell;
+use std::collections::VecDeque;
+use crate::cell::{self, Cell};
 
-// A grid line is a list of slices into the underlying scrollback.
-// A sorted list of starting indexes is maintained to support O(lg(n))
-// indexing.
+// Plan:
+//    A grid is a ring buffer (VecDequeue) of lines.
 //
-// The CellSlice type param is either a `&'scrollback [Cell]` or a
-// `&'scrollback mut [Cell]`. We just use this pattern to be able
-// to add mutable methods 
-struct Line<'scrollback> {
-    /// The column indexes at which each cell slice starts. This list is kept
-    /// sorted, and is used to binary search for the right slice while indexing.
-    start_offsets: Vec<usize>,
-    cells: Vec<Vec<&'scrollback Cell>>,
-    capacity: usize,
-    empty: &'scrollback Cell,
+//    Internally, lines are jagged, using a vector that is short if the
+//    right side of the line is all blank.
+//
+//    Logically, lines are always the width of the grid.
+//
+//    Lines have a boolean flag indicating if they ended because of a logical
+//    carrage return. This bit is required for correct reflow because we need
+//    to know if we need to "steal" cells from following lines when resizing
+//    up.
+//
+//    Grid operations always work on an entire cell at a time. To mutate
+//    a cell, you must read it, modify it, then write the entire cell back
+//    to the grid. This allows us to always represent Empty with a reference
+//    to the same cell.
+
+// A grid stores all the termianal state.
+#[derive(Clone, Eq, PartialEq)]
+pub struct Grid {
+    /// The entire scrollback buffer for the terminal.
+    ///
+    /// The bottom of the terminal is stored at the front of the deque
+    /// and the top is stored at the back of the deque.
+    scrollback: VecDeque<Line>,
+    // The number of lines at the bottom of the scrollback (front of the deque)
+    // which are logically in view. This is the height of the terminal that the user
+    // has configured or resized to.
+    size: crate::Size,
 }
 
-impl<'scrollback> Line<'scrollback>
-{
-    /// An empty line of the given length.
-    pub fn new(empty: &'scrollback Cell, capacity: usize) -> Self {
-        Line {
-            start_offsets: vec![],
-            cells: vec![],
-            capacity,
-            empty: empty,
+impl std::fmt::Debug for Grid {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for line in self.scrollback.iter().rev() {
+            for cell in &line.cells {
+                write!(f, "{}", cell)?;
+            }
+            if !line.is_wrapped {
+                writeln!(f, "⏎")?;
+            } else {
+                writeln!(f)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct Line {
+    /// The cells stored in this line.
+    cells: Vec<Cell>,
+    /// If true, indicates that this line was automatically wrapped due to
+    /// the terminal width. The following line is part of the same logical
+    /// line and should be reflowed together with this line on terminal resize.
+    is_wrapped: bool,
+}
+
+impl Grid {
+    /// Create a new grid of the given size.
+    fn new(size: crate::Size) -> Self {
+        Grid {
+            scrollback: VecDeque::new(),
+            size,
         }
     }
 
-    // Add a new chunk of cells to the grid line.
-    // 
-    // Returns: the number of cells from the chunk added to the line.
-    pub fn add_chunk(&mut self, chunk: &'scrollback [Cell]) -> usize
-    {
-        assert_eq!(self.cells.len(), self.start_offsets.len(), "out of sync vecs");
+    /// Resize the grid to the new size, reflowing all lines to match the new
+    /// width.
+    pub fn resize(&mut self, size: crate::Size) {
+        self.reflow(size.width);
+        self.size = size;
+    }
 
-        let mut consumed = 0;
-        let next_chunk = {
-            let current_len = self.len();
-            let remaining_slots = self.capacity - current_len;
-            let mut total_width = 0;
-            while total_width < remaining_slots && consumed < chunk.len() {
-                total_width += chunk[consumed].width() as usize;
-                consumed += 1;
-            }
+    /// Get the cell at the given grid coordinates.
+    pub fn get(&self, pos: crate::Pos) -> Option<&Cell> {
+        if let Some(line) = self.get_line(pos.row) {
+            return line.get(self.size.width, pos.col);
+        }
+        None
+    }
 
-            // Pull back from any wide cells at the end.
-            let mut fill_to_end_with_empties = false;
-            if current_len + total_width > self.capacity {
-                while current_len + total_width > self.capacity {
-                    total_width -= chunk[consumed].width() as usize;
-                    consumed -= 1;
-                }
-                fill_to_end_with_empties = true;
-            }
+    /// Set the cell at the given grid coordinates.
+    pub fn set(&mut self, pos: crate::Pos, cell: Cell) {
+        let width = self.size.width;
+        if let Some(line) = self.get_line_mut(pos.row) {
+            return line.set(width, pos.col, cell);
+        }
+    }
 
-            // wide chars take up multiple grid slots, so we store a reference to the
-            // cell multiple times to ensure indexing works as expected.
-            chunk[..consumed].iter()
-                .flat_map(|cell| std::iter::repeat(cell).take(cell.width() as usize))
-                .chain(
-                    if fill_to_end_with_empties {
-                        Some(std::iter::repeat(self.empty).take(self.capacity - (current_len + total_width)))
+    /// Push the given cell to the grid.
+    pub fn push(&mut self, cell: Cell) {
+        if self.scrollback.is_empty() {
+            self.scrollback.push_front(Line::new());
+        }
+
+        let mut bottom_line = &mut self.scrollback[0];
+        if bottom_line.cells.len() >= self.size.width {
+            bottom_line.is_wrapped = true;
+            self.scrollback.push_front(Line::new());
+            bottom_line = &mut self.scrollback[0];
+        }
+        bottom_line.push(self.size.width, cell);
+    }
+
+    /// Enter a carrage return, causing the terminal to begin placing text on
+    /// a new line.
+    pub fn push_newline(&mut self) {
+        self.scrollback.push_front(Line::new());
+    }
+
+    fn reflow(&mut self, new_width: usize) {
+        let mut new_scrollback = VecDeque::with_capacity(self.scrollback.len());
+        let mut logical_line = VecDeque::new();
+        while let Some(grid_line) = self.scrollback.pop_back() {
+            let is_wrapped = grid_line.is_wrapped;
+            logical_line.push_back(grid_line);
+
+            if !is_wrapped {
+                // We've gotten to the end of the logical line. We now
+                // need to chop it up into grid lines by the new width.
+                let mut line = Line::new();
+                while let Some(chunk) = logical_line.pop_front() {
+                    let remainder = new_width - line.cells.len();
+                    if chunk.cells.len() < remainder {
+                        line.cells.extend_from_slice(chunk.cells.as_slice());
+
+                        if line.cells.len() == new_width {
+                            new_scrollback.push_front(line);
+                            line = Line::new();
+                        }
                     } else {
-                        None
-                    }.into_iter().flatten()
-                )
-                .collect::<Vec<&Cell>>()
-        };
+                        // Complete the partial line.
+                        line.cells.extend_from_slice(&chunk.cells[..remainder]);
+                        line.is_wrapped = chunk.cells.len() > remainder || !logical_line.is_empty();
+                        new_scrollback.push_front(line);
+                        line = Line::new();
 
-        self.start_offsets.push(self.len());
-        self.cells.push(next_chunk);
+                        let remaining_chunks: Vec<_> =
+                            chunk.cells[remainder..].chunks(new_width).collect();
+                        for (i, c) in remaining_chunks.iter().enumerate() {
+                            line.cells.extend_from_slice(c);
+                            if i < remaining_chunks.len() - 1 {
+                                line.is_wrapped = true;
+                            } else {
+                                line.is_wrapped = !logical_line.is_empty();
+                            }
 
-        consumed
+                            if line.cells.len() == new_width {
+                                new_scrollback.push_front(line);
+                                line = Line::new();
+                            }
+                        }
+                    }
+                }
+
+                if line.cells.len() != 0 {
+                    new_scrollback.push_front(line);
+                    line = Line::new();
+                }
+            }
+        }
+
+        self.scrollback = new_scrollback;
     }
 
-    pub fn len(&self) -> usize {
-        if self.cells.is_empty() {
-            0
-        } else {
-            // N.B. though some cells can be variable width, in a grid view,
-            // variable width cells take up multiple grid slots, so we can just
-            // directly use slice length here to figure out the next starting
-            // offset.
-            self.start_offsets[self.start_offsets.len()-1] +
-                self.cells[self.cells.len()-1].len()
+    fn get_line(&self, row: usize) -> Option<&Line> {
+        if row >= self.size.height {
+            return None;
+        }
+        let idx_from_bottom = (self.size.height - 1) - row;
+        Some(&self.scrollback[idx_from_bottom])
+    }
+
+    fn get_line_mut(&mut self, row: usize) -> Option<&mut Line> {
+        if row >= self.size.height {
+            return None;
+        }
+        let idx_from_bottom = (self.size.height - 1) - row;
+        Some(&mut self.scrollback[idx_from_bottom])
+    }
+}
+
+/// A line contains a list of cells.
+///
+/// Note that a line can't really be used on its own because the grid
+/// width is not stored within the line. For this reason, a line is really
+/// an internal implementation detail of a grid, since most operations need
+/// to have the grid width passed down by the grid implementation.
+impl Line {
+    fn new() -> Self {
+        Line {
+            cells: vec![],
+            is_wrapped: false,
         }
     }
 
-    pub fn capacity(&self) -> usize {
-        self.capacity
-    }
-
-    pub fn get(&self, index: usize) -> Option<&Cell> {
-        if index >= self.len() {
+    /// Get the cell at the given grid position.
+    fn get(&self, width: usize, col: usize) -> Option<&Cell> {
+        if col >= width {
             return None;
         }
 
-        let mut low = 0;
-        let mut high = self.start_offsets.len();
-        while low + 1 != high {
-            let probe = low + ((high - low) / 2);
-
-            if index >= self.start_offsets[probe] {
-                low = probe;
-                if probe == self.start_offsets.len() - 1 || self.start_offsets[probe + 1] > index {
-                    break;
-                }
-            } else {
-                high = probe;
-            }
+        if col >= self.cells.len() {
+            return Some(cell::empty());
         }
 
-        Some(&self.cells[low][index - self.start_offsets[low]])
+        return Some(&self.cells[col]);
     }
-}
 
-impl<'scrollback> std::ops::Index<usize> for Line<'scrollback> {
-    type Output = Cell;
-
-    fn index(&self, index: usize) -> &Self::Output {
-        if let Some(v) = self.get(index) {
-            return v;
+    // Set the given column to the given cell.
+    //
+    // Panics: if this is out of bounds.
+    fn set(&mut self, width: usize, col: usize, cell: Cell) {
+        if col >= width {
+            panic!("{} out of bounds (width={})", col, width);
         }
-        panic!("index {} out of bounds (len={})", index, self.len());
+
+        if col >= self.cells.len() {
+            while self.cells.len() < col {
+                self.cells.push(Cell::empty())
+            }
+            self.cells.push(cell);
+            return;
+        }
+
+        self.cells[col] = cell;
+    }
+
+    // Push the cell onto the end of this line.
+    //
+    // Panics: if this push would make line longer than width.
+    fn push(&mut self, width: usize, cell: Cell) {
+        if self.cells.len() >= width {
+            panic!("pushing cell to line of length {} would go over width {}",
+                self.cells.len(), width);
+        }
+
+        self.cells.push(cell);
     }
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
-    use crate::cell::Cell;
+    use crate::{Pos, Size};
 
-    fn make_cells(chars: &str) -> Vec<Cell> {
-        chars.chars().map(|c| Cell::new(c)).collect()
+    #[test]
+    fn test_line_new() {
+        let line = Line::new();
+        assert!(line.cells.is_empty());
+        assert!(!line.is_wrapped);
     }
 
     #[test]
-    fn test_sanity_accessors() {
-        let empty_cell = Cell::empty();
-        let line = Line::new(&empty_cell, 10);
-        assert_eq!(line.len(), 0);
-        assert_eq!(line.capacity(), 10);
-        assert!(line.get(0).is_none());
+    fn test_line_push() {
+        let mut line = Line::new();
+        let width = 5;
+        let c = Cell::new('a');
+
+        line.push(width, c.clone());
+        assert_eq!(line.cells.len(), 1);
+        assert_eq!(line.get(width, 0), Some(&c));
     }
 
     #[test]
-    fn test_single_chunk() {
-        let empty_cell = Cell::empty();
-        let mut line = Line::new(&empty_cell, 10);
-        let cells = make_cells("abc");
-        let consumed = line.add_chunk(&cells);
-
-        assert_eq!(consumed, 3, "should consume 3 cells");
-        assert_eq!(line.len(), 3, "line length should be 3");
-
-        let c0 = &line[0];
-        assert!(format!("{:?}", c0).contains("'a'"));
-
-        let c1 = &line[1];
-        assert!(format!("{:?}", c1).contains("'b'"));
-
-        let c2 = &line[2];
-        assert!(format!("{:?}", c2).contains("'c'"));
+    #[should_panic(expected = "would go over width")]
+    fn test_line_push_full() {
+        let mut line = Line::new();
+        let width = 1;
+        line.push(width, Cell::new('a'));
+        line.push(width, Cell::new('b')); // Should panic
     }
 
     #[test]
-    fn test_multiple_chunks() {
-        let empty_cell = Cell::empty();
-        let mut line = Line::new(&empty_cell, 10);
-        let c1 = make_cells("ab");
-        let c2 = make_cells("cd");
+    fn test_line_set() {
+        let mut line = Line::new();
+        let width = 5;
+        let c1 = Cell::new('a');
+        let c2 = Cell::new('b');
 
-        line.add_chunk(&c1);
-        line.add_chunk(&c2);
+        // Set within current length (needs push first to not be out of bounds of vector if we treated it strictly, 
+        // but set() handles extension)
+        
+        // set at 0
+        line.set(width, 0, c1.clone());
+        assert_eq!(line.get(width, 0), Some(&c1));
 
-        assert_eq!(line.len(), 4);
-
-        assert!(format!("{:?}", &line[0]).contains("'a'"));
-        assert!(format!("{:?}", &line[1]).contains("'b'"));
-        assert!(format!("{:?}", &line[2]).contains("'c'"));
-        assert!(format!("{:?}", &line[3]).contains("'d'"));
+        // set at 2 (should pad with empty)
+        line.set(width, 2, c2.clone());
+        assert_eq!(line.get(width, 0), Some(&c1));
+        assert!(line.get(width, 1).unwrap().is_empty());
+        assert_eq!(line.get(width, 2), Some(&c2));
     }
 
     #[test]
-    fn test_capacity_limit_big_chunk() {
-        let empty_cell = Cell::empty();
-        let mut line = Line::new(&empty_cell, 3);
-        let cells = make_cells("abcde");
-        let consumed = line.add_chunk(&cells);
-
-        assert_eq!(consumed, 3, "should consume only 3 cells");
-        assert_eq!(line.len(), 3, "len should be capped at 3");
-
-        assert!(format!("{:?}", &line[2]).contains("'c'"));
-        assert!(line.get(3).is_none());
+    #[should_panic(expected = "out of bounds")]
+    fn test_line_set_oob() {
+        let mut line = Line::new();
+        let width = 5;
+        line.set(width, 5, Cell::new('a')); // Index 5 is OOB for width 5
     }
 
     #[test]
-    fn test_capacity_limit_small_chunks() {
-        let empty_cell = Cell::empty();
-        let mut line = Line::new(&empty_cell, 3);
-        let c1 = make_cells("a");
-        line.add_chunk(&c1);
-        let c2 = make_cells("b");
-        line.add_chunk(&c2);
-        let c3 = make_cells("c");
-        line.add_chunk(&c3);
-        let c4 = make_cells("d");
-        let consumed = line.add_chunk(&c4);
-
-        assert_eq!(consumed, 0, "should consume 0 cells when full");
-        assert_eq!(line.len(), 3);
-        assert!(format!("{:?}", &line[2]).contains("'c'"));
+    fn test_grid_new() {
+        let size = Size { width: 10, height: 5 };
+        let grid = Grid::new(size);
+        assert_eq!(grid.size, size);
+        assert!(grid.scrollback.is_empty());
     }
 
     #[test]
-    fn test_out_of_bounds() {
-        let empty_cell = Cell::empty();
-        let mut line = Line::new(&empty_cell, 5);
-        let c1 = make_cells("a");
-        line.add_chunk(&c1);
-        assert!(line.get(1).is_none());
-        assert!(line.get(5).is_none());
+    fn test_grid_push_simple() {
+        let size = Size { width: 5, height: 2 };
+        let mut grid = Grid::new(size);
+        let c = Cell::new('x');
+
+        grid.push(c.clone());
+
+        // Should be at the bottom line
+        let bottom_pos = Pos { row: size.height - 1, col: 0 };
+        assert_eq!(grid.get(bottom_pos), Some(&c), "Grid:\n{:?}", grid);
     }
 
     #[test]
-    fn test_wide_chars() {
-        // '螃' is wide.
-        let empty_cell = Cell::empty();
-        let mut line = Line::new(&empty_cell, 4);
-        let cells = make_cells("a螃b"); // '螃' usually width 2
-        // If width is 2:
-        // 'a' -> index 0
-        // '螃' -> index 1, 2
-        // 'b' -> index 3
+    fn test_grid_push_wrapping() {
+        let size = Size { width: 2, height: 5 };
+        let mut grid = Grid::new(size);
+        
+        // Fill first line
+        grid.push(Cell::new('1'));
+        grid.push(Cell::new('2'));
+        
+        // This should wrap to next line
+        grid.push(Cell::new('3'));
 
-        let consumed = line.add_chunk(&cells);
-        assert_eq!(consumed, 3);
-        assert_eq!(line.len(), 4);
+        // Check internal structure for wrapping flag if possible, or just logical position
+        // Row 4 is bottom (height=5, 0-indexed). 
+        // '1','2' should be at row 3 (second from bottom) if we pushed enough to wrap?
+        // Wait, push adds to the *end* of the scrollback (bottom).
+        // If we push '1', '2', they are on the bottom line.
+        // '3' wraps, so '1','2' become the line *above* bottom.
+        
+        // Bottom is row=4. Line above is row=3.
+        assert_eq!(grid.get(Pos { row: 3, col: 0 }), Some(&Cell::new('1')), "Grid:\n{:?}", grid);
+        assert_eq!(grid.get(Pos { row: 3, col: 1 }), Some(&Cell::new('2')), "Grid:\n{:?}", grid);
+        assert_eq!(grid.get(Pos { row: 4, col: 0 }), Some(&Cell::new('3')), "Grid:\n{:?}", grid);
+    }
 
-        assert!(format!("{:?}", &line[0]).contains("'a'"));
+    #[test]
+    fn test_grid_indexing() {
+        let size = Size { width: 10, height: 3 };
+        let mut grid = Grid::new(size);
 
-        let c1 = &line[1];
-        // c1 should be the wide char
-        assert_eq!(c1.width(), 2);
+        // Populate 3 lines
+        // Line 0 (Top)
+        grid.push_newline(); // Ensure we have lines
+        grid.push_newline();
+        grid.push_newline();
 
-        let c2 = &line[2];
-        // c2 should be the same reference/content as c1
-        assert_eq!(c2.width(), 2);
+        // grid.scrollback now has 3 empty lines.
+        // Let's set some values explicitly to test indexing.
+        
+        let top = Pos { row: 0, col: 0 };
+        let middle = Pos { row: 1, col: 0 };
+        let bottom = Pos { row: 2, col: 0 };
 
-        assert!(format!("{:?}", &line[3]).contains("'b'"));
+        let c_top = Cell::new('T');
+        let c_mid = Cell::new('M');
+        let c_bot = Cell::new('B');
+
+        grid.set(top, c_top.clone());
+        grid.set(middle, c_mid.clone());
+        grid.set(bottom, c_bot.clone());
+
+        assert_eq!(grid.get(top), Some(&c_top), "Failed to get top row. Grid:\n{:?}", grid);
+        assert_eq!(grid.get(middle), Some(&c_mid), "Failed to get middle row. Grid:\n{:?}", grid);
+        assert_eq!(grid.get(bottom), Some(&c_bot), "Failed to get bottom row. Grid:\n{:?}", grid);
+    }
+
+    #[test]
+    fn test_resize_narrower() {
+        let size = Size { width: 10, height: 5 };
+        let mut grid = Grid::new(size);
+
+        // Create a line: "0123456789"
+        for i in 0..10 {
+            grid.push(Cell::new(char::from_digit(i, 10).unwrap()));
+        }
+
+        // Resize to width 5. Should split into "01234" and "56789"
+        let new_size = Size { width: 5, height: 5 };
+        grid.resize(new_size);
+
+        // "56789" should be at bottom (row 4)
+        // "01234" should be above (row 3)
+        assert_eq!(grid.get(Pos { row: 4, col: 0 }), Some(&Cell::new('5')), "Grid:\n{:?}", grid);
+        assert_eq!(grid.get(Pos { row: 3, col: 0 }), Some(&Cell::new('0')), "Grid:\n{:?}", grid);
+    }
+
+    #[test]
+    fn test_resize_wider() {
+        let size = Size { width: 5, height: 5 };
+        let mut grid = Grid::new(size);
+
+        // Create two wrapped lines: "01234" (wrapped) -> "56789"
+        for i in 0..10 {
+            grid.push(Cell::new(char::from_digit(i, 10).unwrap()));
+        }
+
+        // Verify initial state
+        assert_eq!(grid.get(Pos { row: 4, col: 0 }), Some(&Cell::new('5')), "Grid:\n{:?}", grid);
+
+        // Resize to width 10. Should merge back to "0123456789"
+        let new_size = Size { width: 10, height: 5 };
+        grid.resize(new_size);
+
+        // Should all be on bottom line (row 4)
+        assert_eq!(grid.get(Pos { row: 4, col: 0 }), Some(&Cell::new('0')), "Grid:\n{:?}", grid);
+        assert_eq!(grid.get(Pos { row: 4, col: 9 }), Some(&Cell::new('9')), "Grid:\n{:?}", grid);
+    }
+
+    #[test]
+    fn test_reflow_roundtrip() {
+        // Parameterized-style test
+        let shapes = vec![
+            (10, 20), // Start wide, go narrow
+            (5, 10),  // Start narrow, go wide
+            (10, 10), // No change
+        ];
+
+        for (start_w, end_w) in shapes {
+            let start_size = Size { width: start_w, height: 10 };
+            let mut grid = Grid::new(start_size);
+
+            // Fill with deterministic data
+            let count = 30;
+            for i in 0..count {
+                grid.push(Cell::new(char::from_u32(65 + i % 26).unwrap()));
+            }
+
+            // Snapshot state (conceptually) - we can't easily clone the grid state to compare 
+            // directly if we don't have access to inner fields easily, but we can verify content.
+            
+            // Resize
+            grid.resize(Size { width: end_w, height: 10 });
+            
+            // Resize back
+            grid.resize(start_size);
+
+            // Verify content is identical to if we just pushed it
+            let mut expected_grid = Grid::new(start_size);
+            for i in 0..count {
+                expected_grid.push(Cell::new(char::from_u32(65 + i % 26).unwrap()));
+            }
+
+            assert_eq!(grid, expected_grid, "Grid state mismatch after roundtrip resize {} -> {} -> {}", start_w, end_w, start_w);
+        }
     }
 }
+
