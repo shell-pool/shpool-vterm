@@ -16,7 +16,7 @@ use smallvec::{smallvec, SmallVec};
 use std::sync::OnceLock;
 use unicode_width::UnicodeWidthChar;
 
-use crate::term::BufWrite;
+use crate::term::{self, BufWrite};
 
 static EMPTY_CELL: OnceLock<Cell> = OnceLock::new();
 
@@ -42,10 +42,11 @@ pub struct Cell {
     /// is wide. Some emojis and east asian characters have this property.
     width: u8,
     empty: bool,
-    // Indicates a special type of empty cell inserted after wide chars
-    // to keep the grid correctly aligned.
+    /// Indicates a special type of empty cell inserted after wide chars
+    /// to keep the grid correctly aligned.
     wide_padding: bool,
-    // TODO: add attrs like underline and whatnot
+    /// The attributes of the cell.
+    attrs: term::Attrs,
 }
 
 // Prove that a `SmallVec<[char, 2]>` is just as memory efficient as a
@@ -59,7 +60,7 @@ static_assertions::const_assert!(
 
 impl Cell {
     /// Create a new cell wrapping the given char.
-    pub fn new(c: char) -> Self {
+    pub fn new(c: char, attrs: term::Attrs) -> Self {
         let width = match UnicodeWidthChar::width(c) {
             None => panic!("control chars cannot create cells"),
             Some(0) => panic!("zero width chars cannot create cells"),
@@ -71,6 +72,7 @@ impl Cell {
             width: width as u8,
             empty: false,
             wide_padding: false,
+            attrs,
         }
     }
 
@@ -80,6 +82,7 @@ impl Cell {
             width: 0,
             empty: true,
             wide_padding: false,
+            attrs: term::Attrs::default(),
         }
     }
 
@@ -89,6 +92,7 @@ impl Cell {
             width: 0,
             empty: true,
             wide_padding: true,
+            attrs: term::Attrs::default(),
         }
     }
 
@@ -109,13 +113,17 @@ impl Cell {
     pub fn is_empty(&self) -> bool {
         self.empty
     }
+
+    pub fn attrs(&self) -> &term::Attrs {
+        &self.attrs
+    }
 }
 
 impl BufWrite for Cell {
     fn write_buf(&self, buf: &mut Vec<u8>) {
-        // TODO: apply attrs once we implement support for them by
-        // transforming them into the appropriate escape sequences.
-
+        // N.B. while cells store attributes, they are not responsible
+        // for generating control codes to display them. Instead, lines
+        // produce attribute control codes at cell boundaries.
         let mut utf8_buf = [0u8; 4];
         for c in self.grapheme_cluster.iter() {
             let utf8_slice = c.encode_utf8(&mut utf8_buf);
@@ -146,11 +154,17 @@ impl std::fmt::Debug for Cell {
         for c in &self.grapheme_cluster {
             write!(f, "{}", c)?;
         }
+
         if self.wide_padding {
             write!(f, "-")?;
         } else if self.empty {
             write!(f, "*")?;
         }
+
+        if self.attrs.has_attrs() {
+            write!(f, "/{}", self.attrs)?;
+        }
+
         write!(f, ">")?;
         Ok(())
     }

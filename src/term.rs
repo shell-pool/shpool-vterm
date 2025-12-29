@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use crate::attrs;
+use std::sync::OnceLock;
 
 // TODO: read all of this from terminfo.
 // https://github.com/meh/rust-terminfo/issues/41#issuecomment-3693863276
@@ -77,162 +77,383 @@ impl BufWrite for Raw {
     }
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Eq, PartialEq, Clone)]
 #[must_use = "this struct does nothing unless you call write_buf"]
 pub struct Attrs {
-    fgcolor: Option<attrs::Color>,
-    bgcolor: Option<attrs::Color>,
-    bold: Option<bool>,
-    italic: Option<bool>,
-    underline: Option<bool>,
-    inverse: Option<bool>,
+    fgcolor: Option<Color>,
+    bgcolor: Option<Color>,
+    bold: bool,
+    italic: bool,
+    underline: bool,
+    inverse: bool,
+}
+
+impl std::fmt::Display for Attrs {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(c) = &self.fgcolor {
+            write!(f, "<FG {c:?}>")?;
+        }
+
+        if let Some(c) = &self.bgcolor {
+            write!(f, "<BG {c:?}>")?;
+        }
+
+        if self.bold {
+            write!(f, "b")?;
+        }
+        if self.italic {
+            write!(f, "i")?;
+        }
+        if self.underline {
+            write!(f, "_")?;
+        }
+        if self.inverse {
+            write!(f, "<")?;
+        }
+
+        Ok(())
+    }
 }
 
 impl Attrs {
-    pub fn fgcolor(mut self, fgcolor: attrs::Color) -> Self {
-        self.fgcolor = Some(fgcolor);
-        self
+    pub fn has_attrs(&self) -> bool {
+        self.fgcolor.is_some() ||
+            self.bgcolor.is_some() ||
+            self.bold ||
+            self.italic ||
+            self.underline ||
+            self.inverse
     }
 
-    pub fn bgcolor(mut self, bgcolor: attrs::Color) -> Self {
-        self.bgcolor = Some(bgcolor);
-        self
+    pub fn set_underline(&mut self, value: bool) {
+        self.underline = value;
     }
 
-    pub fn bold(mut self, bold: bool) -> Self {
-        self.bold = Some(bold);
-        self
-    }
+    /// Given another set of attributes, generate the minimal control codes
+    /// which will transition the terminal to the other set of attributes
+    /// from this one.
+    pub fn transition_to(&self, next: &Self) -> Vec<ControlCode> {
+        let mut codes = vec![];
 
-    pub fn italic(mut self, italic: bool) -> Self {
-        self.italic = Some(italic);
-        self
-    }
+        let controls = control_codes();
 
-    pub fn underline(mut self, underline: bool) -> Self {
-        self.underline = Some(underline);
-        self
-    }
+        if self.fgcolor != next.fgcolor {
+            if let Some(fgcolor) = next.fgcolor {
+                codes.push(fgcolor.fgcode());
+            } else {
+                codes.push(controls.fgcolor_default.clone());
+            }
+        }
 
-    pub fn inverse(mut self, inverse: bool) -> Self {
-        self.inverse = Some(inverse);
-        self
+        if self.bgcolor != next.bgcolor {
+            if let Some(bgcolor) = next.bgcolor {
+                codes.push(bgcolor.bgcode());
+            } else {
+                codes.push(controls.bgcolor_default.clone());
+            }
+        }
+
+        if self.bold && !next.bold {
+            codes.push(controls.undo_bold.clone());
+        } else if !self.bold && next.bold {
+            codes.push(controls.bold.clone());
+        }
+
+        if self.italic && !next.italic {
+            codes.push(controls.undo_italic.clone());
+        } else if !self.italic && next.italic {
+            codes.push(controls.italic.clone());
+        }
+
+        if self.underline && !next.underline {
+            codes.push(controls.undo_underline.clone());
+        } else if !self.italic && next.underline {
+            codes.push(controls.underline.clone());
+        }
+
+        if self.inverse && !next.inverse {
+            codes.push(controls.undo_inverse.clone());
+        } else if !self.inverse && next.inverse {
+            codes.push(controls.inverse.clone());
+        }
+
+        ControlCode::fuse_csi(codes)
     }
 }
 
-impl BufWrite for Attrs {
-    #[allow(unused_assignments)]
-    #[allow(clippy::branches_sharing_code)]
+// A dictionary of standard control codes. Access codes via the
+// control_codes() function. Most are constant struct members.
+// Codes with dynamic params are generated on the fly via methods.
+pub struct ControlCodes {
+    pub fgcolor_default: ControlCode,
+    pub bgcolor_default: ControlCode,
+    pub underline: ControlCode,
+    pub undo_underline: ControlCode,
+    pub bold: ControlCode,
+    pub undo_bold: ControlCode,
+    pub italic: ControlCode,
+    pub undo_italic: ControlCode,
+    pub inverse: ControlCode,
+    pub undo_inverse: ControlCode,
+}
+
+#[derive(Clone, Debug)]
+#[non_exhaustive]
+pub enum ControlCode {
+    CSI {
+        params: Vec<Vec<u16>>,
+        action: char,
+    },
+    __NonExhaustive,
+}
+
+impl BufWrite for ControlCode {
     fn write_buf(&self, buf: &mut Vec<u8>) {
-        if self.fgcolor.is_none()
-            && self.bgcolor.is_none()
-            && self.bold.is_none()
-            && self.italic.is_none()
-            && self.underline.is_none()
-            && self.inverse.is_none()
-        {
-            return;
+        match self {
+            ControlCode::CSI { params, action } => {
+                buf.extend_from_slice(b"\x1b[");  // CSI
+                
+                for (i, param) in params.iter().enumerate() {
+                    if i != 0 {
+                        buf.push(b';');
+                    }
+
+                    for (j, subparam) in param.iter().enumerate() {
+                        if j != 0 {
+                            buf.push(b':');
+                        }
+                        extend_itoa(buf, *subparam);
+                    }
+                }
+
+                let mut action_buf = [0; 4];
+                action.encode_utf8(&mut action_buf);
+                buf.extend_from_slice(&action_buf);
+            }
+            _ => {}
+        }
+    }
+}
+
+impl std::fmt::Display for ControlCode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ControlCode::CSI { params, action } => {
+                write!(f, "CSI ")?;
+                for (i, param) in params.iter().enumerate() {
+                    if i != 0 {
+                        write!(f, "; ")?;
+                    }
+                    for (j, subparam) in param.iter().enumerate() {
+                        if j != 0 {
+                            write!(f, ": ")?;
+                        }
+                        write!(f, "{} ", subparam)?;
+                    }
+                }
+                write!(f, "{}", action)?;
+            },
+            _ => write!(f, "<display unimpl>")?,
         }
 
-        buf.extend_from_slice(b"\x1b[");
-        let mut first = true;
+        Ok(())
+    }
+}
 
-        macro_rules! write_param {
-            ($i:expr) => {
-                if first {
-                    first = false;
+impl ControlCode {
+    fn fuse_csi<I>(control_codes: I) -> Vec<Self>
+        where I: IntoIterator<Item=Self>
+    {
+        eprintln!("fuse_csi: 1");
+        let mut fused_codes = vec![];
+        let mut current_params = vec![];
+        let mut current_action = None;
+        eprintln!("fuse_csi: 2");
+        for code in control_codes.into_iter() {
+            eprintln!("fuse_csi: 3");
+            if let ControlCode::CSI { params, action } = code {
+                eprintln!("fuse_csi: 4");
+                if let Some(cur_action) = current_action {
+                    eprintln!("fuse_csi: 5");
+                    if cur_action == action {
+                        eprintln!("fuse_csi: 6");
+                        current_params.extend(params);
+                    } else {
+                        eprintln!("fuse_csi: 7");
+                        fused_codes.push(ControlCode::CSI {
+                            params: std::mem::take(&mut current_params),
+                            action,
+                        });
+                        current_action = Some(action);
+                    }
+                    eprintln!("fuse_csi: 8");
                 } else {
-                    buf.push(b';');
+                    eprintln!("fuse_csi: 9");
+                    current_action = Some(action);
+                    current_params.extend(params);
                 }
-                extend_itoa(buf, $i);
-            };
-        }
-
-        if let Some(fgcolor) = self.fgcolor {
-            match fgcolor {
-                attrs::Color::Default => {
-                    write_param!(39);
-                }
-                attrs::Color::Idx(i) => {
-                    if i < 8 {
-                        write_param!(i + 30);
-                    } else if i < 16 {
-                        write_param!(i + 82);
-                    } else {
-                        write_param!(38);
-                        write_param!(5);
-                        write_param!(i);
-                    }
-                }
-                attrs::Color::Rgb(r, g, b) => {
-                    write_param!(38);
-                    write_param!(2);
-                    write_param!(r);
-                    write_param!(g);
-                    write_param!(b);
-                }
-            }
-        }
-
-        if let Some(bgcolor) = self.bgcolor {
-            match bgcolor {
-                attrs::Color::Default => {
-                    write_param!(49);
-                }
-                attrs::Color::Idx(i) => {
-                    if i < 8 {
-                        write_param!(i + 40);
-                    } else if i < 16 {
-                        write_param!(i + 92);
-                    } else {
-                        write_param!(48);
-                        write_param!(5);
-                        write_param!(i);
-                    }
-                }
-                attrs::Color::Rgb(r, g, b) => {
-                    write_param!(48);
-                    write_param!(2);
-                    write_param!(r);
-                    write_param!(g);
-                    write_param!(b);
-                }
-            }
-        }
-
-        if let Some(bold) = self.bold {
-            if bold {
-                write_param!(1);
             } else {
-                write_param!(22);
+                eprintln!("fuse_csi: 10");
+                if let Some(action) = current_action {
+                    eprintln!("fuse_csi: 11");
+                    fused_codes.push(ControlCode::CSI {
+                        params: std::mem::take(&mut current_params),
+                        action,
+                    });
+                    current_action = None;
+                }
+                eprintln!("fuse_csi: 12");
+                fused_codes.push(code);
             }
+            eprintln!("fuse_csi: 13");
         }
 
-        if let Some(italic) = self.italic {
-            if italic {
-                write_param!(3);
-            } else {
-                write_param!(23);
-            }
+        if let Some(action) = current_action {
+            fused_codes.push(ControlCode::CSI {
+                params: std::mem::take(&mut current_params),
+                action,
+            })
         }
 
-        if let Some(underline) = self.underline {
-            if underline {
-                write_param!(4);
-            } else {
-                write_param!(24);
+        fused_codes
+    }
+}
+
+static CONTROL_CODES: OnceLock<ControlCodes> = OnceLock::new();
+
+pub fn control_codes() -> &'static ControlCodes {
+    CONTROL_CODES.get_or_init(|| {
+        ControlCodes {
+            fgcolor_default: ControlCode::CSI { params: vec![vec![39]], action: 'm' },
+            bgcolor_default: ControlCode::CSI { params: vec![vec![49]], action: 'm' },
+            underline: ControlCode::CSI { params: vec![vec![4]], action: 'm' },
+            undo_underline: ControlCode::CSI { params: vec![vec![24]], action: 'm' },
+            bold: ControlCode::CSI { params: vec![vec![1]], action: 'm' },
+            undo_bold: ControlCode::CSI { params: vec![vec![22]], action: 'm' },
+            italic: ControlCode::CSI { params: vec![vec![3]], action: 'm' },
+            undo_italic: ControlCode::CSI { params: vec![vec![23]], action: 'm' },
+            inverse: ControlCode::CSI { params: vec![vec![7]], action: 'm' },
+            undo_inverse: ControlCode::CSI { params: vec![vec![27]], action: 'm' },
+        }
+    })
+}
+
+impl ControlCodes {
+    pub fn fgcolor_idx(i: u8) -> ControlCode {
+        if i < 8 {
+            ControlCode::CSI {
+                params: vec![
+                    vec![(i + 30) as u16],
+                ],
+                action: 'm',
+            }
+        } else if i < 16 {
+            ControlCode::CSI {
+                params: vec![
+                    vec![(i + 82) as u16],
+                ],
+                action: 'm',
+            }
+        } else {
+            ControlCode::CSI {
+                params: vec![
+                    vec![38],
+                    vec![5],
+                    vec![i as u16],
+                ],
+                action: 'm',
             }
         }
+    }
 
-        if let Some(inverse) = self.inverse {
-            if inverse {
-                write_param!(7);
-            } else {
-                write_param!(27);
+    pub fn fgcolor_rgb(r: u8, g: u8, b: u8) -> ControlCode {
+        ControlCode::CSI {
+            params: vec![
+                vec![38],
+                vec![2],
+                vec![r as u16],
+                vec![g as u16],
+                vec![b as u16],
+            ],
+            action: 'm',
+        }
+    }
+
+    pub fn bgcolor_idx(i: u8) -> ControlCode {
+        if i < 8 {
+            ControlCode::CSI {
+                params: vec![
+                    vec![(i + 40) as u16],
+                ],
+                action: 'm',
+            }
+        } else if i < 16 {
+            ControlCode::CSI {
+                params: vec![
+                    vec![(i + 92) as u16],
+                ],
+                action: 'm',
+            }
+        } else {
+            ControlCode::CSI {
+                params: vec![
+                    vec![48],
+                    vec![5],
+                    vec![i as u16],
+                ],
+                action: 'm',
             }
         }
+    }
 
-        buf.push(b'm');
+    pub fn bgcolor_rgb(r: u8, g: u8, b: u8) -> ControlCode {
+        ControlCode::CSI {
+            params: vec![
+                vec![48],
+                vec![2],
+                vec![r as u16],
+                vec![g as u16],
+                vec![b as u16],
+            ],
+            action: 'm',
+        }
+    }
+}
+
+/// Represents a foreground or background color for cells.
+#[derive(Eq, PartialEq, Debug, Copy, Clone)]
+pub enum Color {
+    /// The default terminal color.
+    Default,
+
+    /// An indexed terminal color.
+    Idx(u8),
+
+    /// An RGB terminal color. The parameters are (red, green, blue).
+    Rgb(u8, u8, u8),
+}
+
+impl Default for Color {
+    fn default() -> Self {
+        Self::Default
+    }
+}
+
+impl Color {
+    fn bgcode(&self) -> ControlCode {
+        match self {
+            Color::Default => control_codes().bgcolor_default.clone(),
+            Color::Idx(i) => ControlCodes::bgcolor_idx(*i),
+            Color::Rgb(r, g, b) => ControlCodes::bgcolor_rgb(*r, *g, *b),
+        }
+    }
+
+    fn fgcode(&self) -> ControlCode {
+        match self {
+            Color::Default => control_codes().fgcolor_default.clone(),
+            Color::Idx(i) => ControlCodes::fgcolor_idx(*i),
+            Color::Rgb(r, g, b) => ControlCodes::fgcolor_rgb(*r, *g, *b),
+        }
     }
 }
 

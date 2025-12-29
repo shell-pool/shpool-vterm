@@ -37,13 +37,16 @@ pub struct Grid {
     /// The number of lines of scrollback to store, independent of the
     /// size of the grid that is in view.
     scrollback_lines: usize,
-    // The number of lines at the bottom of the scrollback (front of the deque)
-    // which are logically in view. This is the height of the terminal that the user
-    // has configured or resized to.
+    /// The number of lines at the bottom of the scrollback (front of the deque)
+    /// which are logically in view. This is the height of the terminal that the user
+    /// has configured or resized to.
     size: crate::Size,
-    // The current position of the cursor within the in-view window described
-    // by `size`. (0,0) is the upper left.
+    /// The current position of the cursor within the in-view window described
+    /// by `size`. (0,0) is the upper left.
     cursor: crate::Pos,
+    /// The attributes that the new cells will get created with when
+    /// the cursor writes.
+    current_attrs: term::Attrs,
 }
 
 impl std::fmt::Display for Grid {
@@ -75,6 +78,7 @@ impl Grid {
             scrollback_lines,
             size,
             cursor: crate::Pos { row: 0, col: 0 },
+            current_attrs: term::Attrs::default(),
         }
     }
 
@@ -256,7 +260,9 @@ impl Grid {
 
 impl vte::Perform for Grid {
     fn print(&mut self, c: char) {
-        if let Err(e) = self.write_at_cursor(Cell::new(c)) {
+        eprintln!("perform::print({c})");
+        let attrs = self.current_attrs.clone();
+        if let Err(e) = self.write_at_cursor(Cell::new(c, attrs)) {
             warn!("writing char at cursor: {e:?}");
         }
     }
@@ -273,7 +279,6 @@ impl vte::Perform for Grid {
                 warn!("execute: unhandled byte {}", byte);
             }
         }
-        // TODO: stub
     }
 
     fn hook(&mut self, _params: &vte::Params, _intermediates: &[u8], _ignore: bool, _action: char) {
@@ -292,14 +297,59 @@ impl vte::Perform for Grid {
         // TODO: stub
     }
 
+    // Handle escape codes beginning with the CSI indicator ('\x1b[').
     fn csi_dispatch(
         &mut self,
-        _params: &vte::Params,
+        params: &vte::Params,
         _intermediates: &[u8],
         _ignore: bool,
-        _action: char,
+        action: char,
     ) {
-        // TODO: stub
+        eprintln!("perform::csi(..., {action})");
+        match action {
+            'm' => {
+                let mut param_iter = params.iter();
+                while let Some(param) = param_iter.next() {
+                    eprintln!("perform::csi param = {param:?}");
+                    if param.len() < 1 {
+                        warn!("m action with no params. Not sure what to do.");
+                        continue;
+                    }
+
+                    match param[0] {
+                        4 => {
+                            self.current_attrs.set_underline(true);
+                            // TODO: there are lots of other underline styles. To fix,
+                            // we need to update attrs.
+                            //
+                            // Kitty extensions:
+                            //      CSI 4 : 3 m => curly
+                            //      CSI 4 : 2 m => double
+                            //
+                            // Other:
+                            //      CSI 21 m => double
+                            //      CSI 58 ; 2 ; r ; g ; b m => RGB colored underline
+                        },
+                        21 => {
+                            // TODO: should really be a double underline.
+                            self.current_attrs.set_underline(true);
+                        },
+                        24 => {
+                            self.current_attrs.set_underline(false);
+                        },
+                        0 => {
+                            self.current_attrs = term::Attrs::default();
+                        },
+                        _ => {
+                            warn!("unhandled m action: {:?}", params);
+                        }
+                    }
+                }
+            },
+            _ => {
+                warn!("unhandled action {}", action);
+            },
+        }
     }
 
     fn esc_dispatch(&mut self, _intermediates: &[u8], _ignore: bool, _byte: u8) {
@@ -337,10 +387,41 @@ impl std::fmt::Display for Line {
 }
 
 impl BufWrite for Line {
+    // We start every line with blank attrs, and it is our responsibility
+    // to reset the attrs at the end of each line. We could produce more
+    // optimal output if we fused attr runs across lines, but it is probably
+    // fine to just do it like this and it is better to keep things simple
+    // unless we need to fuse.
     fn write_buf(&self, buf: &mut Vec<u8>) {
+        dbg!(1);
+        let blank_attrs = term::Attrs::default();
+        let mut current_attrs = &blank_attrs;
+
+        dbg!(2);
         for cell in self.cells.iter() {
+            dbg!(3);
+            eprintln!("current_attrs = {current_attrs}");
+            eprintln!("cell = {cell:?}");
+            if cell.attrs() != current_attrs {
+                dbg!(4);
+                for code in current_attrs.transition_to(cell.attrs()) {
+                    dbg!(4.1);
+                    code.write_buf(buf);
+                }
+                current_attrs = cell.attrs();
+            }
             cell.write_buf(buf);
+            dbg!(5);
         }
+        dbg!(6);
+
+        if current_attrs != &blank_attrs {
+            dbg!(7);
+            for code in current_attrs.transition_to(&blank_attrs) {
+                code.write_buf(buf);
+            }
+        }
+        dbg!(8);
     }
 }
 
@@ -408,8 +489,8 @@ mod tests {
     fn test_line_set() -> anyhow::Result<()> {
         let mut line = Line::new();
         let width = 5;
-        let c1 = Cell::new('a');
-        let c2 = Cell::new('b');
+        let c1 = Cell::new('a', term::Attrs::default());
+        let c2 = Cell::new('b', term::Attrs::default());
 
         // Set within current length (needs push first to not be out of bounds of vector if we treated it strictly,
         // but set() handles extension)
@@ -431,7 +512,7 @@ mod tests {
     fn test_line_set_oob() -> anyhow::Result<()> {
         let mut line = Line::new();
         let width = 5;
-        match line.set_cell(width, 5, Cell::new('a')) {
+        match line.set_cell(width, 5, Cell::new('a', term::Attrs::default())) {
             Err(e) => assert!(format!("{e:?}").contains("out of bounds")),
             _ => assert!(false, "expected out of bounds error"),
         }
@@ -457,7 +538,7 @@ mod tests {
             height: 2,
         };
         let mut grid = Grid::new(5, size);
-        let c = Cell::new('x');
+        let c = Cell::new('x', term::Attrs::default());
 
         grid.write_at_cursor(c.clone())?;
 
@@ -476,25 +557,25 @@ mod tests {
         let mut grid = Grid::new(5, size);
 
         // Fill first line
-        grid.write_at_cursor(Cell::new('1'))?;
-        grid.write_at_cursor(Cell::new('2'))?;
+        grid.write_at_cursor(Cell::new('1', term::Attrs::default()))?;
+        grid.write_at_cursor(Cell::new('2', term::Attrs::default()))?;
 
         // This should wrap to next line
-        grid.write_at_cursor(Cell::new('3'))?;
+        grid.write_at_cursor(Cell::new('3', term::Attrs::default()))?;
 
         assert_eq!(
             grid.get(Pos { row: 0, col: 0 }),
-            Some(&Cell::new('1')),
+            Some(&Cell::new('1', term::Attrs::default())),
             "Grid:\n{grid}",
         );
         assert_eq!(
             grid.get(Pos { row: 0, col: 1 }),
-            Some(&Cell::new('2')),
+            Some(&Cell::new('2', term::Attrs::default())),
             "Grid:\n{grid}",
         );
         assert_eq!(
             grid.get(Pos { row: 1, col: 0 }),
-            Some(&Cell::new('3')),
+            Some(&Cell::new('3', term::Attrs::default())),
             "Grid:\n{grid}",
         );
 
@@ -521,9 +602,9 @@ mod tests {
         let middle = Pos { row: 1, col: 0 };
         let bottom = Pos { row: 2, col: 0 };
 
-        let c_top = Cell::new('T');
-        let c_mid = Cell::new('M');
-        let c_bot = Cell::new('B');
+        let c_top = Cell::new('T', term::Attrs::default());
+        let c_mid = Cell::new('M', term::Attrs::default());
+        let c_bot = Cell::new('B', term::Attrs::default());
 
         grid.set(top, c_top.clone())?;
         grid.set(middle, c_mid.clone())?;
@@ -561,7 +642,7 @@ mod tests {
 
         // Create a line: "0123456789"
         for i in 0..10 {
-            grid.write_at_cursor(Cell::new(char::from_digit(i, 10).unwrap()))?;
+            grid.write_at_cursor(Cell::new(char::from_digit(i, 10).unwrap(), term::Attrs::default()))?;
         }
 
         // Resize to width 5. Should split into "01234" and "56789"
@@ -575,13 +656,13 @@ mod tests {
         // "01234" should be above (row 0)
         assert_eq!(
             grid.get(Pos { row: 1, col: 0 }),
-            Some(&Cell::new('5')),
+            Some(&Cell::new('5', term::Attrs::default())),
             "Grid:\n{:?}",
             grid
         );
         assert_eq!(
             grid.get(Pos { row: 0, col: 0 }),
-            Some(&Cell::new('0')),
+            Some(&Cell::new('0', term::Attrs::default())),
             "Grid:\n{:?}",
             grid
         );
@@ -599,13 +680,13 @@ mod tests {
 
         // Create two wrapped lines: "01234" (wrapped) -> "56789"
         for i in 0..10 {
-            grid.write_at_cursor(Cell::new(char::from_digit(i, 10).unwrap()))?;
+            grid.write_at_cursor(Cell::new(char::from_digit(i, 10).unwrap(), term::Attrs::default()))?;
         }
 
         // Verify initial state
         assert_eq!(
             grid.get(Pos { row: 1, col: 0 }),
-            Some(&Cell::new('5')),
+            Some(&Cell::new('5', term::Attrs::default())),
             "Grid:\n{:?}",
             grid
         );
@@ -620,13 +701,13 @@ mod tests {
         // Should all be on top line
         assert_eq!(
             grid.get(Pos { row: 0, col: 0 }),
-            Some(&Cell::new('0')),
+            Some(&Cell::new('0', term::Attrs::default())),
             "Grid:\n{:?}",
             grid
         );
         assert_eq!(
             grid.get(Pos { row: 0, col: 9 }),
-            Some(&Cell::new('9')),
+            Some(&Cell::new('9', term::Attrs::default())),
             "Grid:\n{:?}",
             grid
         );
@@ -653,7 +734,7 @@ mod tests {
             // Fill with deterministic data
             let count = 30;
             for i in 0..count {
-                grid.write_at_cursor(Cell::new(char::from_u32(65 + i % 26).unwrap()))?;
+                grid.write_at_cursor(Cell::new(char::from_u32(65 + i % 26).unwrap(), term::Attrs::default()))?;
             }
 
             // Snapshot state (conceptually) - we can't easily clone the grid state to compare
@@ -671,7 +752,7 @@ mod tests {
             // Verify content is identical to if we just pushed it
             let mut expected_grid = Grid::new(100, start_size);
             for i in 0..count {
-                expected_grid.write_at_cursor(Cell::new(char::from_u32(65 + i % 26).unwrap()))?;
+                expected_grid.write_at_cursor(Cell::new(char::from_u32(65 + i % 26).unwrap(), term::Attrs::default()))?;
             }
 
             assert_eq!(
@@ -683,4 +764,6 @@ mod tests {
 
         Ok(())
     }
+
+    // TODO: write a test for a wide char
 }
