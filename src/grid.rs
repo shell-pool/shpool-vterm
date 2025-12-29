@@ -17,74 +17,63 @@
 //! dump the precise information requested and is also used to display
 //! some commands.
 
+use crate::{
+    cell::{self, Cell},
+    term::{self, BufWrite},
+};
 use std::collections::VecDeque;
-use crate::cell::{self, Cell};
-
-// Plan:
-//    A grid is a ring buffer (VecDequeue) of lines.
-//
-//    Internally, lines are jagged, using a vector that is short if the
-//    right side of the line is all blank.
-//
-//    Logically, lines are always the width of the grid.
-//
-//    Lines have a boolean flag indicating if they ended because of a logical
-//    carrage return. This bit is required for correct reflow because we need
-//    to know if we need to "steal" cells from following lines when resizing
-//    up.
-//
-//    Grid operations always work on an entire cell at a time. To mutate
-//    a cell, you must read it, modify it, then write the entire cell back
-//    to the grid. This allows us to always represent Empty with a reference
-//    to the same cell.
 
 // A grid stores all the termianal state.
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Grid {
     /// The entire scrollback buffer for the terminal.
     ///
     /// The bottom of the terminal is stored at the front of the deque
     /// and the top is stored at the back of the deque.
     scrollback: VecDeque<Line>,
+    /// The number of lines of scrollback to store, independent of the
+    /// size of the grid that is in view.
+    scrollback_lines: usize,
     // The number of lines at the bottom of the scrollback (front of the deque)
     // which are logically in view. This is the height of the terminal that the user
     // has configured or resized to.
     size: crate::Size,
 }
 
-impl std::fmt::Debug for Grid {
+impl std::fmt::Display for Grid {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         for line in self.scrollback.iter().rev() {
-            for cell in &line.cells {
-                write!(f, "{}", cell)?;
-            }
-            if !line.is_wrapped {
-                writeln!(f, "⏎")?;
-            } else {
-                writeln!(f)?;
-            }
+            write!(f, "{}", line)?;
         }
         Ok(())
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
-struct Line {
-    /// The cells stored in this line.
-    cells: Vec<Cell>,
-    /// If true, indicates that this line was automatically wrapped due to
-    /// the terminal width. The following line is part of the same logical
-    /// line and should be reflowed together with this line on terminal resize.
-    is_wrapped: bool,
+impl BufWrite for Grid {
+    fn write_buf(&self, buf: &mut Vec<u8>) {
+        for (i, line) in self.scrollback.iter().enumerate().rev() {
+            line.write_buf(buf);
+            if i != 0 {
+                term::Crlf::default().write_buf(buf);
+            }
+        }
+    }
 }
 
 impl Grid {
-    /// Create a new grid of the given size.
-    fn new(size: crate::Size) -> Self {
+    /// Create a new grid with the given number of lines of scrollback
+    /// storage, and the given size window in view.
+    pub fn new(scrollback_lines: usize, size: crate::Size) -> Self {
         Grid {
             scrollback: VecDeque::new(),
+            scrollback_lines,
             size,
         }
+    }
+
+    /// Get the size of the grid.
+    pub fn size(&self) -> crate::Size {
+        self.size
     }
 
     /// Resize the grid to the new size, reflowing all lines to match the new
@@ -92,6 +81,22 @@ impl Grid {
     pub fn resize(&mut self, size: crate::Size) {
         self.reflow(size.width);
         self.size = size;
+    }
+
+    /// Get the max number of scrollback lines this grid
+    /// can store.
+    pub fn scrollback_lines(&self) -> usize {
+        self.scrollback_lines
+    }
+
+    /// Set a new max number of scrollback lines this grid can
+    /// store. If this is less than the current number, trailing
+    /// data will be dropped.
+    pub fn set_scrollback_lines(&mut self, scrollback_lines: usize) {
+        while self.scrollback.len() > scrollback_lines {
+            self.scrollback.pop_back();
+        }
+        self.scrollback_lines = scrollback_lines;
     }
 
     /// Get the cell at the given grid coordinates.
@@ -119,7 +124,7 @@ impl Grid {
         let mut bottom_line = &mut self.scrollback[0];
         if bottom_line.cells.len() >= self.size.width {
             bottom_line.is_wrapped = true;
-            self.scrollback.push_front(Line::new());
+            self.push_line(Line::new());
             bottom_line = &mut self.scrollback[0];
         }
         bottom_line.push(self.size.width, cell);
@@ -128,7 +133,14 @@ impl Grid {
     /// Enter a carrage return, causing the terminal to begin placing text on
     /// a new line.
     pub fn push_newline(&mut self) {
-        self.scrollback.push_front(Line::new());
+        self.push_line(Line::new());
+    }
+
+    fn push_line(&mut self, line: Line) {
+        self.scrollback.push_front(line);
+        while self.scrollback.len() > self.scrollback_lines {
+            self.scrollback.pop_back();
+        }
     }
 
     fn reflow(&mut self, new_width: usize) {
@@ -203,6 +215,83 @@ impl Grid {
     }
 }
 
+impl vte::Perform for Grid {
+    fn print(&mut self, c: char) {
+        self.push(Cell::new(c));
+    }
+
+    fn execute(&mut self, _byte: u8) {
+        // TODO: stub
+    }
+
+    fn hook(&mut self, _params: &vte::Params, _intermediates: &[u8], _ignore: bool, _action: char) {
+        // TODO: stub
+    }
+
+    fn put(&mut self, _byte: u8) {
+        // TODO: stub
+    }
+
+    fn unhook(&mut self) {
+        // TODO: stub
+    }
+
+    fn osc_dispatch(&mut self, _params: &[&[u8]], _bell_terminated: bool) {
+        // TODO: stub
+    }
+
+    fn csi_dispatch(
+        &mut self,
+        _params: &vte::Params,
+        _intermediates: &[u8],
+        _ignore: bool,
+        _action: char,
+    ) {
+        // TODO: stub
+    }
+
+    fn esc_dispatch(&mut self, _intermediates: &[u8], _ignore: bool, _byte: u8) {
+        // TODO: stub
+    }
+
+    fn terminated(&self) -> bool {
+        // TODO: stub
+        false
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct Line {
+    /// The cells stored in this line.
+    cells: Vec<Cell>,
+    /// If true, indicates that this line was automatically wrapped due to
+    /// the terminal width. The following line is part of the same logical
+    /// line and should be reflowed together with this line on terminal resize.
+    is_wrapped: bool,
+}
+
+impl std::fmt::Display for Line {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for cell in &self.cells {
+            write!(f, "{}", cell)?;
+        }
+        if !self.is_wrapped {
+            writeln!(f, "⏎")?;
+        } else {
+            writeln!(f)?;
+        }
+        Ok(())
+    }
+}
+
+impl BufWrite for Line {
+    fn write_buf(&self, buf: &mut Vec<u8>) {
+        for cell in self.cells.iter() {
+            cell.write_buf(buf);
+        }
+    }
+}
+
 /// A line contains a list of cells.
 ///
 /// Note that a line can't really be used on its own because the grid
@@ -254,8 +343,11 @@ impl Line {
     // Panics: if this push would make line longer than width.
     fn push(&mut self, width: usize, cell: Cell) {
         if self.cells.len() >= width {
-            panic!("pushing cell to line of length {} would go over width {}",
-                self.cells.len(), width);
+            panic!(
+                "pushing cell to line of length {} would go over width {}",
+                self.cells.len(),
+                width
+            );
         }
 
         self.cells.push(cell);
@@ -301,9 +393,9 @@ mod tests {
         let c1 = Cell::new('a');
         let c2 = Cell::new('b');
 
-        // Set within current length (needs push first to not be out of bounds of vector if we treated it strictly, 
+        // Set within current length (needs push first to not be out of bounds of vector if we treated it strictly,
         // but set() handles extension)
-        
+
         // set at 0
         line.set(width, 0, c1.clone());
         assert_eq!(line.get(width, 0), Some(&c1));
@@ -325,54 +417,84 @@ mod tests {
 
     #[test]
     fn test_grid_new() {
-        let size = Size { width: 10, height: 5 };
-        let grid = Grid::new(size);
+        let size = Size {
+            width: 10,
+            height: 5,
+        };
+        let grid = Grid::new(5, size);
         assert_eq!(grid.size, size);
         assert!(grid.scrollback.is_empty());
     }
 
     #[test]
     fn test_grid_push_simple() {
-        let size = Size { width: 5, height: 2 };
-        let mut grid = Grid::new(size);
+        let size = Size {
+            width: 5,
+            height: 2,
+        };
+        let mut grid = Grid::new(5, size);
         let c = Cell::new('x');
 
         grid.push(c.clone());
 
         // Should be at the bottom line
-        let bottom_pos = Pos { row: size.height - 1, col: 0 };
+        let bottom_pos = Pos {
+            row: size.height - 1,
+            col: 0,
+        };
         assert_eq!(grid.get(bottom_pos), Some(&c), "Grid:\n{:?}", grid);
     }
 
     #[test]
     fn test_grid_push_wrapping() {
-        let size = Size { width: 2, height: 5 };
-        let mut grid = Grid::new(size);
-        
+        let size = Size {
+            width: 2,
+            height: 5,
+        };
+        let mut grid = Grid::new(5, size);
+
         // Fill first line
         grid.push(Cell::new('1'));
         grid.push(Cell::new('2'));
-        
+
         // This should wrap to next line
         grid.push(Cell::new('3'));
 
         // Check internal structure for wrapping flag if possible, or just logical position
-        // Row 4 is bottom (height=5, 0-indexed). 
+        // Row 4 is bottom (height=5, 0-indexed).
         // '1','2' should be at row 3 (second from bottom) if we pushed enough to wrap?
         // Wait, push adds to the *end* of the scrollback (bottom).
         // If we push '1', '2', they are on the bottom line.
         // '3' wraps, so '1','2' become the line *above* bottom.
-        
+
         // Bottom is row=4. Line above is row=3.
-        assert_eq!(grid.get(Pos { row: 3, col: 0 }), Some(&Cell::new('1')), "Grid:\n{:?}", grid);
-        assert_eq!(grid.get(Pos { row: 3, col: 1 }), Some(&Cell::new('2')), "Grid:\n{:?}", grid);
-        assert_eq!(grid.get(Pos { row: 4, col: 0 }), Some(&Cell::new('3')), "Grid:\n{:?}", grid);
+        assert_eq!(
+            grid.get(Pos { row: 3, col: 0 }),
+            Some(&Cell::new('1')),
+            "Grid:\n{:?}",
+            grid
+        );
+        assert_eq!(
+            grid.get(Pos { row: 3, col: 1 }),
+            Some(&Cell::new('2')),
+            "Grid:\n{:?}",
+            grid
+        );
+        assert_eq!(
+            grid.get(Pos { row: 4, col: 0 }),
+            Some(&Cell::new('3')),
+            "Grid:\n{:?}",
+            grid
+        );
     }
 
     #[test]
     fn test_grid_indexing() {
-        let size = Size { width: 10, height: 3 };
-        let mut grid = Grid::new(size);
+        let size = Size {
+            width: 10,
+            height: 3,
+        };
+        let mut grid = Grid::new(3, size);
 
         // Populate 3 lines
         // Line 0 (Top)
@@ -382,7 +504,7 @@ mod tests {
 
         // grid.scrollback now has 3 empty lines.
         // Let's set some values explicitly to test indexing.
-        
+
         let top = Pos { row: 0, col: 0 };
         let middle = Pos { row: 1, col: 0 };
         let bottom = Pos { row: 2, col: 0 };
@@ -395,15 +517,33 @@ mod tests {
         grid.set(middle, c_mid.clone());
         grid.set(bottom, c_bot.clone());
 
-        assert_eq!(grid.get(top), Some(&c_top), "Failed to get top row. Grid:\n{:?}", grid);
-        assert_eq!(grid.get(middle), Some(&c_mid), "Failed to get middle row. Grid:\n{:?}", grid);
-        assert_eq!(grid.get(bottom), Some(&c_bot), "Failed to get bottom row. Grid:\n{:?}", grid);
+        assert_eq!(
+            grid.get(top),
+            Some(&c_top),
+            "Failed to get top row. Grid:\n{:?}",
+            grid
+        );
+        assert_eq!(
+            grid.get(middle),
+            Some(&c_mid),
+            "Failed to get middle row. Grid:\n{:?}",
+            grid
+        );
+        assert_eq!(
+            grid.get(bottom),
+            Some(&c_bot),
+            "Failed to get bottom row. Grid:\n{:?}",
+            grid
+        );
     }
 
     #[test]
     fn test_resize_narrower() {
-        let size = Size { width: 10, height: 5 };
-        let mut grid = Grid::new(size);
+        let size = Size {
+            width: 10,
+            height: 5,
+        };
+        let mut grid = Grid::new(20, size);
 
         // Create a line: "0123456789"
         for i in 0..10 {
@@ -411,19 +551,35 @@ mod tests {
         }
 
         // Resize to width 5. Should split into "01234" and "56789"
-        let new_size = Size { width: 5, height: 5 };
+        let new_size = Size {
+            width: 5,
+            height: 5,
+        };
         grid.resize(new_size);
 
         // "56789" should be at bottom (row 4)
         // "01234" should be above (row 3)
-        assert_eq!(grid.get(Pos { row: 4, col: 0 }), Some(&Cell::new('5')), "Grid:\n{:?}", grid);
-        assert_eq!(grid.get(Pos { row: 3, col: 0 }), Some(&Cell::new('0')), "Grid:\n{:?}", grid);
+        assert_eq!(
+            grid.get(Pos { row: 4, col: 0 }),
+            Some(&Cell::new('5')),
+            "Grid:\n{:?}",
+            grid
+        );
+        assert_eq!(
+            grid.get(Pos { row: 3, col: 0 }),
+            Some(&Cell::new('0')),
+            "Grid:\n{:?}",
+            grid
+        );
     }
 
     #[test]
     fn test_resize_wider() {
-        let size = Size { width: 5, height: 5 };
-        let mut grid = Grid::new(size);
+        let size = Size {
+            width: 5,
+            height: 5,
+        };
+        let mut grid = Grid::new(30, size);
 
         // Create two wrapped lines: "01234" (wrapped) -> "56789"
         for i in 0..10 {
@@ -431,15 +587,33 @@ mod tests {
         }
 
         // Verify initial state
-        assert_eq!(grid.get(Pos { row: 4, col: 0 }), Some(&Cell::new('5')), "Grid:\n{:?}", grid);
+        assert_eq!(
+            grid.get(Pos { row: 4, col: 0 }),
+            Some(&Cell::new('5')),
+            "Grid:\n{:?}",
+            grid
+        );
 
         // Resize to width 10. Should merge back to "0123456789"
-        let new_size = Size { width: 10, height: 5 };
+        let new_size = Size {
+            width: 10,
+            height: 5,
+        };
         grid.resize(new_size);
 
         // Should all be on bottom line (row 4)
-        assert_eq!(grid.get(Pos { row: 4, col: 0 }), Some(&Cell::new('0')), "Grid:\n{:?}", grid);
-        assert_eq!(grid.get(Pos { row: 4, col: 9 }), Some(&Cell::new('9')), "Grid:\n{:?}", grid);
+        assert_eq!(
+            grid.get(Pos { row: 4, col: 0 }),
+            Some(&Cell::new('0')),
+            "Grid:\n{:?}",
+            grid
+        );
+        assert_eq!(
+            grid.get(Pos { row: 4, col: 9 }),
+            Some(&Cell::new('9')),
+            "Grid:\n{:?}",
+            grid
+        );
     }
 
     #[test]
@@ -452,8 +626,11 @@ mod tests {
         ];
 
         for (start_w, end_w) in shapes {
-            let start_size = Size { width: start_w, height: 10 };
-            let mut grid = Grid::new(start_size);
+            let start_size = Size {
+                width: start_w,
+                height: 10,
+            };
+            let mut grid = Grid::new(100, start_size);
 
             // Fill with deterministic data
             let count = 30;
@@ -461,23 +638,29 @@ mod tests {
                 grid.push(Cell::new(char::from_u32(65 + i % 26).unwrap()));
             }
 
-            // Snapshot state (conceptually) - we can't easily clone the grid state to compare 
+            // Snapshot state (conceptually) - we can't easily clone the grid state to compare
             // directly if we don't have access to inner fields easily, but we can verify content.
-            
+
             // Resize
-            grid.resize(Size { width: end_w, height: 10 });
-            
+            grid.resize(Size {
+                width: end_w,
+                height: 10,
+            });
+
             // Resize back
             grid.resize(start_size);
 
             // Verify content is identical to if we just pushed it
-            let mut expected_grid = Grid::new(start_size);
+            let mut expected_grid = Grid::new(100, start_size);
             for i in 0..count {
                 expected_grid.push(Cell::new(char::from_u32(65 + i % 26).unwrap()));
             }
 
-            assert_eq!(grid, expected_grid, "Grid state mismatch after roundtrip resize {} -> {} -> {}", start_w, end_w, start_w);
+            assert_eq!(
+                grid, expected_grid,
+                "Grid state mismatch after roundtrip resize {} -> {} -> {}",
+                start_w, end_w, start_w
+            );
         }
     }
 }
-

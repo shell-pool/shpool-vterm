@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use smallvec::{smallvec, SmallVec};
-use unicode_width::UnicodeWidthChar;
 use std::sync::OnceLock;
+use unicode_width::UnicodeWidthChar;
 
 use crate::term::BufWrite;
 
@@ -24,7 +24,7 @@ static EMPTY_CELL: OnceLock<Cell> = OnceLock::new();
 // references when needed to avoid duplicating empty cells to reference
 // everywhere.
 pub fn empty() -> &'static Cell {
-    EMPTY_CELL.get_or_init(|| { Cell::empty() })
+    EMPTY_CELL.get_or_init(|| Cell::empty())
 }
 
 /// A cell in a terminal.

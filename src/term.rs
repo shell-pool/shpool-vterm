@@ -22,7 +22,10 @@
 
 use crate::attrs;
 
-// TODO: read all of this from terminfo
+// TODO: read all of this from terminfo.
+// https://github.com/meh/rust-terminfo/issues/41#issuecomment-3693863276
+// might be a good place to start (look into the terminfo-lean crate for
+// better licencing).
 
 pub trait BufWrite {
     fn write_buf(&self, buf: &mut Vec<u8>);

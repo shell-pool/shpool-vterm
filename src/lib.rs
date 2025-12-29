@@ -14,9 +14,8 @@
 
 mod attrs;
 mod cell;
-mod line;
-mod scrollback;
 mod grid;
+mod line;
 mod term;
 
 use term::BufWrite;
@@ -39,7 +38,7 @@ use term::BufWrite;
 /// line for each grid line.
 pub struct Term {
     parser: vte::Parser,
-    scrollback: scrollback::Buffer,
+    grid: grid::Grid,
 }
 
 impl Term {
@@ -47,51 +46,38 @@ impl Term {
     ///
     /// Note that width will only be used when generated output
     /// to determine where wrapping should be place.
-    pub fn new(size: Size) -> Self {
+    pub fn new(scrollback_lines: usize, size: Size) -> Self {
         Term {
             parser: vte::Parser::new(),
-            scrollback: scrollback::Buffer::new(size),
+            grid: grid::Grid::new(scrollback_lines, size),
         }
     }
 
     /// Get the current terminal size.
     pub fn size(&self) -> Size {
-        self.scrollback.size()
+        self.grid.size()
     }
 
     /// Set the terminal size.
-    pub fn set_size(&mut self, size: Size) {
-        self.scrollback.set_size(size);
+    pub fn resize(&mut self, size: Size) {
+        self.grid.resize(size);
     }
 
     /// Process the given chunk of input. This should be the data read off
     /// a pty running a shell.
     pub fn process(&mut self, buf: &[u8]) {
-        self.parser.advance(&mut self.scrollback, buf);
+        self.parser.advance(&mut self.grid, buf);
     }
 
     /// Get the current contents of the terminal encoded via terminal
     /// escape sequences. The contents buffer will be prefixed with
     /// a reset code, so inputing this to any terminal emulator will
     /// reset the emulator to the contents of this Term instance.
-    ///
-    /// The size parameter asks for the contents to be formated for
-    /// a terminal of the given size. This is mostly useful if the
-    /// virtual terminal has more lines than are desired.
-    pub fn contents(&self, size: Option<Size>) -> Vec<u8> {
+    pub fn contents(&self) -> Vec<u8> {
         let mut buf = vec![];
         term::ClearAttrs::default().write_buf(&mut buf);
         term::ClearScreen::default().write_buf(&mut buf);
-
-        for (i, l) in self.scrollback.lines.iter().enumerate().rev() {
-            l.write_buf(&mut buf);
-
-            // inject \r\n in between lines, but not after the last
-            // line
-            if i != 0 {
-                term::Crlf::default().write_buf(&mut buf);
-            }
-        }
+        self.grid.write_buf(&mut buf);
 
         buf
     }
@@ -127,7 +113,11 @@ mod test {
     macro_rules! frag {
         {
             $test_name:ident
-            { width: $width:expr , height: $height:expr }
+            {
+                scrollback_lines: $scrollback_lines:expr ,
+                width: $width:expr ,
+                height: $height:expr
+            }
             <= $( $input_expr:expr ),*
             => $( $output_expr:expr ),*
         } => {
@@ -142,22 +132,23 @@ mod test {
                     $output_expr.write_buf(&mut output);
                 )*
                 round_trip_frag(input.as_slice(), output.as_slice(),
+                                $scrollback_lines,
                                 crate::Size{width: $width, height: $height});
             }
         }
     }
 
     frag! {
-        simple_str { width: 100, height: 100 }
+        simple_str { scrollback_lines: 100, width: 100, height: 100 }
         <= term::Raw::from("foobar")
         => term::ClearAttrs::default(),
             term::ClearScreen::default(),
             term::Raw::from("foobar")
     }
 
-    fn round_trip_frag(input: &[u8], output: &[u8], size: crate::Size) {
-        let mut term = crate::Term::new(size);
+    fn round_trip_frag(input: &[u8], output: &[u8], scrollback_lines: usize, size: crate::Size) {
+        let mut term = crate::Term::new(scrollback_lines, size);
         term.process(input);
-        assert_eq!(term.contents(None).as_slice(), output);
+        assert_eq!(term.contents().as_slice(), output);
     }
 }
