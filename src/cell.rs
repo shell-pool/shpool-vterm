@@ -28,7 +28,7 @@ pub fn empty() -> &'static Cell {
 }
 
 /// A cell in a terminal.
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct Cell {
     /// The contents of a cell. Usually just a single character,
     /// but in some cases there might be modifier codepoints like
@@ -129,6 +129,29 @@ impl std::fmt::Display for Cell {
         for c in &self.grapheme_cluster {
             write!(f, "{}", c)?;
         }
+
+        if self.wide_padding {
+            write!(f, "-")?;
+        } else if self.empty {
+            write!(f, "*")?;
+        }
+
+        Ok(())
+    }
+}
+
+impl std::fmt::Debug for Cell {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "<")?;
+        for c in &self.grapheme_cluster {
+            write!(f, "{}", c)?;
+        }
+        if self.wide_padding {
+            write!(f, "-")?;
+        } else if self.empty {
+            write!(f, "*")?;
+        }
+        write!(f, ">")?;
         Ok(())
     }
 }

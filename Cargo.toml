@@ -11,3 +11,4 @@ static_assertions = "1"
 unicode-width = "0.2" # detecting zero width modifier codepoints
 log = "0.4" # logging facade (not used directly, but required if we have tracing-log enabled)
 tracing = "0.1" # logging and performance monitoring facade
+anyhow = "1" # errors

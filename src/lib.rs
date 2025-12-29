@@ -63,6 +63,18 @@ impl Term {
         self.grid.resize(size);
     }
 
+    /// Get the current number of lines of stored scrollback.
+    pub fn scrollback_lines(&self) -> usize {
+        self.grid.scrollback_lines()
+    }
+
+    /// Set the number of lines of scrollback to store. This will drop
+    /// data when resizing down. When resizing up, no new memory is allocated,
+    /// capacity is simply expanded.
+    pub fn set_scrollback_lines(&mut self, scrollback_lines: usize) {
+        self.grid.set_scrollback_lines(scrollback_lines);
+    }
+
     /// Process the given chunk of input. This should be the data read off
     /// a pty running a shell.
     pub fn process(&mut self, buf: &[u8]) {
@@ -94,15 +106,12 @@ pub struct Size {
 /// mode view of the terminal, not the underlying logical lines mode
 /// that we actually store the data in.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-struct Pos {
+pub struct Pos {
     pub row: usize,
     pub col: usize,
 }
 
-// Plan: use the vte crate as a parser and fill in its callbacks.
-
 // TODO: get this working end-to-end with basic text on a single line
-// TODO: get newlines / carrage returns working
 // TODO: handle clear
 
 #[cfg(test)]
@@ -144,6 +153,16 @@ mod test {
         => term::ClearAttrs::default(),
             term::ClearScreen::default(),
             term::Raw::from("foobar")
+    }
+
+    frag! {
+        newline2line { scrollback_lines: 100, width: 100, height: 100 }
+        <= term::Raw::from("foo\r\nbar")
+        => term::ClearAttrs::default(),
+            term::ClearScreen::default(),
+            term::Raw::from("foo"),
+            term::Crlf::default(),
+            term::Raw::from("bar")
     }
 
     fn round_trip_frag(input: &[u8], output: &[u8], scrollback_lines: usize, size: crate::Size) {
