@@ -338,6 +338,10 @@ impl vte::Perform for Grid {
                         1 => self.current_attrs.bold = true,
                         22 => self.current_attrs.bold = false,
 
+                        // Italic Handling.
+                        3 => self.current_attrs.italic = true,
+                        23 => self.current_attrs.italic = false,
+
                         _ => {
                             warn!("unhandled m action: {:?}", params);
                         }

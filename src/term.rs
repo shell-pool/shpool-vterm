@@ -258,48 +258,35 @@ impl ControlCode {
     where
         I: IntoIterator<Item = Self>,
     {
-        eprintln!("fuse_csi: 1");
         let mut fused_codes = vec![];
         let mut current_params = vec![];
         let mut current_action = None;
-        eprintln!("fuse_csi: 2");
         for code in control_codes.into_iter() {
-            eprintln!("fuse_csi: 3");
             if let ControlCode::CSI { params, action } = code {
-                eprintln!("fuse_csi: 4");
                 if let Some(cur_action) = current_action {
-                    eprintln!("fuse_csi: 5");
                     if cur_action == action {
-                        eprintln!("fuse_csi: 6");
                         current_params.extend(params);
                     } else {
-                        eprintln!("fuse_csi: 7");
                         fused_codes.push(ControlCode::CSI {
                             params: std::mem::take(&mut current_params),
                             action,
                         });
                         current_action = Some(action);
                     }
-                    eprintln!("fuse_csi: 8");
                 } else {
-                    eprintln!("fuse_csi: 9");
                     current_action = Some(action);
                     current_params.extend(params);
                 }
             } else {
-                eprintln!("fuse_csi: 10");
                 if let Some(action) = current_action {
-                    eprintln!("fuse_csi: 11");
                     fused_codes.push(ControlCode::CSI {
                         params: std::mem::take(&mut current_params),
                         action,
                     });
                     current_action = None;
                 }
-                eprintln!("fuse_csi: 12");
                 fused_codes.push(code);
             }
-            eprintln!("fuse_csi: 13");
         }
 
         if let Some(action) = current_action {
