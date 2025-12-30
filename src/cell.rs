@@ -129,6 +129,11 @@ impl BufWrite for Cell {
             let utf8_slice = c.encode_utf8(&mut utf8_buf);
             buf.extend(utf8_slice.as_bytes());
         }
+
+        if self.empty && !self.wide_padding {
+            assert!(self.grapheme_cluster.is_empty());
+            buf.push(b' ');
+        }
     }
 }
 

@@ -428,6 +428,14 @@ impl ControlCodes {
         Self::move_cursor(n, 'D')
     }
 
+    pub fn cursor_next_line(n: u16) -> ControlCode {
+        Self::move_cursor(n, 'E')
+    }
+
+    pub fn cursor_prev_line(n: u16) -> ControlCode {
+        Self::move_cursor(n, 'F')
+    }
+
     fn move_cursor(n: u16, action: char) -> ControlCode {
         if n == 1 {
             ControlCode::CSI {

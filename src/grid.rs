@@ -335,6 +335,23 @@ impl vte::Perform for Grid {
                     self.cursor.col -= n;
                 }
             }
+            // CNL (Cursor Next Line)
+            'E' => {
+                let n = p1(params, 1) as usize;
+                self.cursor.row = std::cmp::min(
+                    self.size.height - 1, self.cursor.row + n);
+                self.cursor.col = 0;
+            }
+            // CPL (Cursor Prev Line)
+            'F' => {
+                let n = p1(params, 1) as usize;
+                if n > self.cursor.row {
+                    self.cursor.row = 0;
+                } else {
+                    self.cursor.row -= n;
+                }
+                self.cursor.col = 0;
+            }
 
             // cell attribute manipulation
             'm' => {
