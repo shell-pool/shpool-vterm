@@ -17,7 +17,7 @@ mod cell;
 mod grid;
 mod term;
 
-use term::BufWrite;
+use term::AsTermInput;
 
 /// A representation of a terminal.
 ///
@@ -86,9 +86,9 @@ impl Term {
     /// reset the emulator to the contents of this Term instance.
     pub fn contents(&self) -> Vec<u8> {
         let mut buf = vec![];
-        term::ClearAttrs::default().write_buf(&mut buf);
-        term::ClearScreen::default().write_buf(&mut buf);
-        self.grid.write_buf(&mut buf);
+        term::ClearAttrs::default().term_input_into(&mut buf);
+        term::ClearScreen::default().term_input_into(&mut buf);
+        self.grid.term_input_into(&mut buf);
 
         buf
     }
@@ -115,7 +115,7 @@ pub struct Pos {
 #[cfg(test)]
 mod test {
     use crate::term;
-    use crate::term::BufWrite;
+    use crate::term::AsTermInput;
 
     macro_rules! frag {
         {
@@ -132,11 +132,11 @@ mod test {
             fn $test_name() {
                 let mut input: Vec<u8> = vec![];
                 $(
-                    $input_expr.write_buf(&mut input);
+                    $input_expr.term_input_into(&mut input);
                 )*
                 let mut output: Vec<u8> = vec![];
                 $(
-                    $output_expr.write_buf(&mut output);
+                    $output_expr.term_input_into(&mut output);
                 )*
                 round_trip_frag(input.as_slice(), output.as_slice(),
                                 $scrollback_lines,

@@ -19,7 +19,7 @@
 
 use crate::{
     cell::{self, Cell},
-    term::{self, BufWrite},
+    term::{self, AsTermInput},
 };
 use std::collections::VecDeque;
 
@@ -64,12 +64,12 @@ impl std::fmt::Display for Grid {
     }
 }
 
-impl BufWrite for Grid {
-    fn write_buf(&self, buf: &mut Vec<u8>) {
+impl AsTermInput for Grid {
+    fn term_input_into(&self, buf: &mut Vec<u8>) {
         for (i, line) in self.scrollback.iter().enumerate().rev() {
-            line.write_buf(buf);
+            line.term_input_into(buf);
             if i != 0 {
-                term::Crlf::default().write_buf(buf);
+                term::Crlf::default().term_input_into(buf);
             }
         }
     }
@@ -502,29 +502,29 @@ impl std::fmt::Display for Line {
     }
 }
 
-impl BufWrite for Line {
+impl AsTermInput for Line {
     // We start every line with blank attrs, and it is our responsibility
     // to reset the attrs at the end of each line. We could produce more
     // optimal output if we fused attr runs across lines, but it is probably
     // fine to just do it like this and it is better to keep things simple
     // unless we need to fuse.
-    fn write_buf(&self, buf: &mut Vec<u8>) {
+    fn term_input_into(&self, buf: &mut Vec<u8>) {
         let blank_attrs = term::Attrs::default();
         let mut current_attrs = &blank_attrs;
 
         for cell in self.cells.iter() {
             if cell.attrs() != current_attrs {
                 for code in current_attrs.transition_to(cell.attrs()) {
-                    code.write_buf(buf);
+                    code.term_input_into(buf);
                 }
                 current_attrs = cell.attrs();
             }
-            cell.write_buf(buf);
+            cell.term_input_into(buf);
         }
 
         if current_attrs != &blank_attrs {
             for code in current_attrs.transition_to(&blank_attrs) {
-                code.write_buf(buf);
+                code.term_input_into(buf);
             }
         }
     }

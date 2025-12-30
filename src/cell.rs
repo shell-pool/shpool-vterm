@@ -16,7 +16,7 @@ use smallvec::{smallvec, SmallVec};
 use std::sync::OnceLock;
 use unicode_width::UnicodeWidthChar;
 
-use crate::term::{self, BufWrite};
+use crate::term::{self, AsTermInput};
 
 static EMPTY_CELL: OnceLock<Cell> = OnceLock::new();
 
@@ -119,8 +119,8 @@ impl Cell {
     }
 }
 
-impl BufWrite for Cell {
-    fn write_buf(&self, buf: &mut Vec<u8>) {
+impl AsTermInput for Cell {
+    fn term_input_into(&self, buf: &mut Vec<u8>) {
         // N.B. while cells store attributes, they are not responsible
         // for generating control codes to display them. Instead, lines
         // produce attribute control codes at cell boundaries.
