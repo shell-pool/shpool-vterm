@@ -154,7 +154,17 @@ mod test {
     }
 
     frag! {
-        underline_text { scrollback_lines: 100, width: 100, height: 100 }
+        newline2line { scrollback_lines: 100, width: 100, height: 100 }
+        <= term::Raw::from("foo\r\nbar")
+        => term::ClearAttrs::default(),
+            term::ClearScreen::default(),
+            term::Raw::from("foo"),
+            term::Crlf::default(),
+            term::Raw::from("bar")
+    }
+
+    frag! {
+        underline_rt { scrollback_lines: 100, width: 100, height: 100 }
         <= term::Raw::from("a"),
            term::control_codes().underline,
            term::Raw::from("b"),
@@ -170,16 +180,27 @@ mod test {
     }
 
     frag! {
-        newline2line { scrollback_lines: 100, width: 100, height: 100 }
-        <= term::Raw::from("foo\r\nbar")
+        bold_rt { scrollback_lines: 100, width: 100, height: 100 }
+        <= term::Raw::from("a"),
+           term::control_codes().bold,
+           term::Raw::from("b"),
+           term::control_codes().undo_bold,
+           term::Raw::from("a")
         => term::ClearAttrs::default(),
-            term::ClearScreen::default(),
-            term::Raw::from("foo"),
-            term::Crlf::default(),
-            term::Raw::from("bar")
+           term::ClearScreen::default(),
+           term::Raw::from("a"),
+           term::control_codes().bold,
+           term::Raw::from("b"),
+           term::control_codes().undo_bold,
+           term::Raw::from("a")
     }
 
-    fn round_trip_frag(input: &[u8], want_output: &[u8], scrollback_lines: usize, size: crate::Size) {
+    fn round_trip_frag(
+        input: &[u8],
+        want_output: &[u8],
+        scrollback_lines: usize,
+        size: crate::Size,
+    ) {
         let mut term = crate::Term::new(scrollback_lines, size);
         term.process(input);
         assert_eq!(term.contents().as_slice(), want_output);

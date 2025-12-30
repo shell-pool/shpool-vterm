@@ -80,12 +80,12 @@ impl BufWrite for Raw {
 #[derive(Default, Debug, Eq, PartialEq, Clone)]
 #[must_use = "this struct does nothing unless you call write_buf"]
 pub struct Attrs {
-    fgcolor: Option<Color>,
-    bgcolor: Option<Color>,
-    bold: bool,
-    italic: bool,
-    underline: bool,
-    inverse: bool,
+    pub fgcolor: Option<Color>,
+    pub bgcolor: Option<Color>,
+    pub bold: bool,
+    pub italic: bool,
+    pub underline: bool,
+    pub inverse: bool,
 }
 
 impl std::fmt::Display for Attrs {
@@ -117,16 +117,12 @@ impl std::fmt::Display for Attrs {
 
 impl Attrs {
     pub fn has_attrs(&self) -> bool {
-        self.fgcolor.is_some() ||
-            self.bgcolor.is_some() ||
-            self.bold ||
-            self.italic ||
-            self.underline ||
-            self.inverse
-    }
-
-    pub fn set_underline(&mut self, value: bool) {
-        self.underline = value;
+        self.fgcolor.is_some()
+            || self.bgcolor.is_some()
+            || self.bold
+            || self.italic
+            || self.underline
+            || self.inverse
     }
 
     /// Given another set of attributes, generate the minimal control codes
@@ -200,10 +196,7 @@ pub struct ControlCodes {
 #[derive(Clone, Debug)]
 #[non_exhaustive]
 pub enum ControlCode {
-    CSI {
-        params: Vec<Vec<u16>>,
-        action: char,
-    },
+    CSI { params: Vec<Vec<u16>>, action: char },
     __NonExhaustive,
 }
 
@@ -211,8 +204,8 @@ impl BufWrite for ControlCode {
     fn write_buf(&self, buf: &mut Vec<u8>) {
         match self {
             ControlCode::CSI { params, action } => {
-                buf.extend_from_slice(b"\x1b[");  // CSI
-                
+                buf.extend_from_slice(b"\x1b["); // CSI
+
                 for (i, param) in params.iter().enumerate() {
                     if i != 0 {
                         buf.push(b';');
@@ -252,7 +245,7 @@ impl std::fmt::Display for ControlCode {
                     }
                 }
                 write!(f, "{}", action)?;
-            },
+            }
             _ => write!(f, "<display unimpl>")?,
         }
 
@@ -262,7 +255,8 @@ impl std::fmt::Display for ControlCode {
 
 impl ControlCode {
     fn fuse_csi<I>(control_codes: I) -> Vec<Self>
-        where I: IntoIterator<Item=Self>
+    where
+        I: IntoIterator<Item = Self>,
     {
         eprintln!("fuse_csi: 1");
         let mut fused_codes = vec![];
@@ -322,19 +316,47 @@ impl ControlCode {
 static CONTROL_CODES: OnceLock<ControlCodes> = OnceLock::new();
 
 pub fn control_codes() -> &'static ControlCodes {
-    CONTROL_CODES.get_or_init(|| {
-        ControlCodes {
-            fgcolor_default: ControlCode::CSI { params: vec![vec![39]], action: 'm' },
-            bgcolor_default: ControlCode::CSI { params: vec![vec![49]], action: 'm' },
-            underline: ControlCode::CSI { params: vec![vec![4]], action: 'm' },
-            undo_underline: ControlCode::CSI { params: vec![vec![24]], action: 'm' },
-            bold: ControlCode::CSI { params: vec![vec![1]], action: 'm' },
-            undo_bold: ControlCode::CSI { params: vec![vec![22]], action: 'm' },
-            italic: ControlCode::CSI { params: vec![vec![3]], action: 'm' },
-            undo_italic: ControlCode::CSI { params: vec![vec![23]], action: 'm' },
-            inverse: ControlCode::CSI { params: vec![vec![7]], action: 'm' },
-            undo_inverse: ControlCode::CSI { params: vec![vec![27]], action: 'm' },
-        }
+    CONTROL_CODES.get_or_init(|| ControlCodes {
+        fgcolor_default: ControlCode::CSI {
+            params: vec![vec![39]],
+            action: 'm',
+        },
+        bgcolor_default: ControlCode::CSI {
+            params: vec![vec![49]],
+            action: 'm',
+        },
+        underline: ControlCode::CSI {
+            params: vec![vec![4]],
+            action: 'm',
+        },
+        undo_underline: ControlCode::CSI {
+            params: vec![vec![24]],
+            action: 'm',
+        },
+        bold: ControlCode::CSI {
+            params: vec![vec![1]],
+            action: 'm',
+        },
+        undo_bold: ControlCode::CSI {
+            params: vec![vec![22]],
+            action: 'm',
+        },
+        italic: ControlCode::CSI {
+            params: vec![vec![3]],
+            action: 'm',
+        },
+        undo_italic: ControlCode::CSI {
+            params: vec![vec![23]],
+            action: 'm',
+        },
+        inverse: ControlCode::CSI {
+            params: vec![vec![7]],
+            action: 'm',
+        },
+        undo_inverse: ControlCode::CSI {
+            params: vec![vec![27]],
+            action: 'm',
+        },
     })
 }
 
@@ -342,25 +364,17 @@ impl ControlCodes {
     pub fn fgcolor_idx(i: u8) -> ControlCode {
         if i < 8 {
             ControlCode::CSI {
-                params: vec![
-                    vec![(i + 30) as u16],
-                ],
+                params: vec![vec![(i + 30) as u16]],
                 action: 'm',
             }
         } else if i < 16 {
             ControlCode::CSI {
-                params: vec![
-                    vec![(i + 82) as u16],
-                ],
+                params: vec![vec![(i + 82) as u16]],
                 action: 'm',
             }
         } else {
             ControlCode::CSI {
-                params: vec![
-                    vec![38],
-                    vec![5],
-                    vec![i as u16],
-                ],
+                params: vec![vec![38], vec![5], vec![i as u16]],
                 action: 'm',
             }
         }
@@ -382,25 +396,17 @@ impl ControlCodes {
     pub fn bgcolor_idx(i: u8) -> ControlCode {
         if i < 8 {
             ControlCode::CSI {
-                params: vec![
-                    vec![(i + 40) as u16],
-                ],
+                params: vec![vec![(i + 40) as u16]],
                 action: 'm',
             }
         } else if i < 16 {
             ControlCode::CSI {
-                params: vec![
-                    vec![(i + 92) as u16],
-                ],
+                params: vec![vec![(i + 92) as u16]],
                 action: 'm',
             }
         } else {
             ControlCode::CSI {
-                params: vec![
-                    vec![48],
-                    vec![5],
-                    vec![i as u16],
-                ],
+                params: vec![vec![48], vec![5], vec![i as u16]],
                 action: 'm',
             }
         }

@@ -260,7 +260,6 @@ impl Grid {
 
 impl vte::Perform for Grid {
     fn print(&mut self, c: char) {
-        eprintln!("perform::print({c})");
         let attrs = self.current_attrs.clone();
         if let Err(e) = self.write_at_cursor(Cell::new(c, attrs)) {
             warn!("writing char at cursor: {e:?}");
@@ -305,50 +304,49 @@ impl vte::Perform for Grid {
         _ignore: bool,
         action: char,
     ) {
-        eprintln!("perform::csi(..., {action})");
         match action {
             'm' => {
                 let mut param_iter = params.iter();
                 while let Some(param) = param_iter.next() {
-                    eprintln!("perform::csi param = {param:?}");
                     if param.len() < 1 {
                         warn!("m action with no params. Not sure what to do.");
                         continue;
                     }
 
                     match param[0] {
-                        4 => {
-                            self.current_attrs.set_underline(true);
-                            // TODO: there are lots of other underline styles. To fix,
-                            // we need to update attrs.
-                            //
-                            // Kitty extensions:
-                            //      CSI 4 : 3 m => curly
-                            //      CSI 4 : 2 m => double
-                            //
-                            // Other:
-                            //      CSI 21 m => double
-                            //      CSI 58 ; 2 ; r ; g ; b m => RGB colored underline
-                        },
-                        21 => {
-                            // TODO: should really be a double underline.
-                            self.current_attrs.set_underline(true);
-                        },
-                        24 => {
-                            self.current_attrs.set_underline(false);
-                        },
                         0 => {
                             self.current_attrs = term::Attrs::default();
-                        },
+                        }
+
+                        // Underline Handling
+                        // TODO: there are lots of other underline styles. To fix,
+                        // we need to update attrs.
+                        //
+                        // Kitty extensions:
+                        //      CSI 4 : 3 m => curly
+                        //      CSI 4 : 2 m => double
+                        //
+                        // Other:
+                        //      CSI 21 m => double
+                        //      CSI 58 ; 2 ; r ; g ; b m => RGB colored underline
+                        4 => self.current_attrs.underline = true,
+                        // TODO: should really be a double underline.
+                        21 => self.current_attrs.underline = true,
+                        24 => self.current_attrs.underline = false,
+
+                        // Bold Handling.
+                        1 => self.current_attrs.bold = true,
+                        22 => self.current_attrs.bold = false,
+
                         _ => {
                             warn!("unhandled m action: {:?}", params);
                         }
                     }
                 }
-            },
+            }
             _ => {
                 warn!("unhandled action {}", action);
-            },
+            }
         }
     }
 
@@ -393,35 +391,24 @@ impl BufWrite for Line {
     // fine to just do it like this and it is better to keep things simple
     // unless we need to fuse.
     fn write_buf(&self, buf: &mut Vec<u8>) {
-        dbg!(1);
         let blank_attrs = term::Attrs::default();
         let mut current_attrs = &blank_attrs;
 
-        dbg!(2);
         for cell in self.cells.iter() {
-            dbg!(3);
-            eprintln!("current_attrs = {current_attrs}");
-            eprintln!("cell = {cell:?}");
             if cell.attrs() != current_attrs {
-                dbg!(4);
                 for code in current_attrs.transition_to(cell.attrs()) {
-                    dbg!(4.1);
                     code.write_buf(buf);
                 }
                 current_attrs = cell.attrs();
             }
             cell.write_buf(buf);
-            dbg!(5);
         }
-        dbg!(6);
 
         if current_attrs != &blank_attrs {
-            dbg!(7);
             for code in current_attrs.transition_to(&blank_attrs) {
                 code.write_buf(buf);
             }
         }
-        dbg!(8);
     }
 }
 
@@ -642,7 +629,10 @@ mod tests {
 
         // Create a line: "0123456789"
         for i in 0..10 {
-            grid.write_at_cursor(Cell::new(char::from_digit(i, 10).unwrap(), term::Attrs::default()))?;
+            grid.write_at_cursor(Cell::new(
+                char::from_digit(i, 10).unwrap(),
+                term::Attrs::default(),
+            ))?;
         }
 
         // Resize to width 5. Should split into "01234" and "56789"
@@ -680,7 +670,10 @@ mod tests {
 
         // Create two wrapped lines: "01234" (wrapped) -> "56789"
         for i in 0..10 {
-            grid.write_at_cursor(Cell::new(char::from_digit(i, 10).unwrap(), term::Attrs::default()))?;
+            grid.write_at_cursor(Cell::new(
+                char::from_digit(i, 10).unwrap(),
+                term::Attrs::default(),
+            ))?;
         }
 
         // Verify initial state
@@ -734,7 +727,10 @@ mod tests {
             // Fill with deterministic data
             let count = 30;
             for i in 0..count {
-                grid.write_at_cursor(Cell::new(char::from_u32(65 + i % 26).unwrap(), term::Attrs::default()))?;
+                grid.write_at_cursor(Cell::new(
+                    char::from_u32(65 + i % 26).unwrap(),
+                    term::Attrs::default(),
+                ))?;
             }
 
             // Snapshot state (conceptually) - we can't easily clone the grid state to compare
@@ -752,7 +748,10 @@ mod tests {
             // Verify content is identical to if we just pushed it
             let mut expected_grid = Grid::new(100, start_size);
             for i in 0..count {
-                expected_grid.write_at_cursor(Cell::new(char::from_u32(65 + i % 26).unwrap(), term::Attrs::default()))?;
+                expected_grid.write_at_cursor(Cell::new(
+                    char::from_u32(65 + i % 26).unwrap(),
+                    term::Attrs::default(),
+                ))?;
             }
 
             assert_eq!(
