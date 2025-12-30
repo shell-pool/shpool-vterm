@@ -172,7 +172,11 @@ impl Grid {
             }
         }
 
-        let mut npad = if cell.width() > 1 { cell.width() - 1 } else { 0 };
+        let mut npad = if cell.width() > 1 {
+            cell.width() - 1
+        } else {
+            0
+        };
         self.set(self.cursor.pos, cell)
             .context("setting main cell")?;
         self.cursor.pos.col += 1;
@@ -453,8 +457,20 @@ impl vte::Perform for Grid {
         }
     }
 
-    fn esc_dispatch(&mut self, _intermediates: &[u8], _ignore: bool, _byte: u8) {
-        // TODO: stub
+    fn esc_dispatch(&mut self, intermediates: &[u8], ignore: bool, byte: u8) {
+        if ignore {
+            warn!("malformed ESC seq");
+            return;
+        }
+
+        match (intermediates, byte) {
+            // save cursor (ESC 7)
+            ([], b'7') => self.saved_cursor = self.cursor.clone(),
+            // restore cursor (ESC 8)
+            ([], b'8') => self.cursor = self.saved_cursor.clone(),
+
+            _ => warn!("unhandled ESC seq ({intermediates:?}, {byte})"),
+        }
     }
 
     fn terminated(&self) -> bool {

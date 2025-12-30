@@ -466,6 +466,24 @@ mod test {
            term::Raw::from("b")
     }
 
+    frag! {
+        save_restore_cursor_attrs { scrollback_lines: 100, width: 10, height: 10 }
+        <= term::control_codes().bold,
+           term::Raw::from("A"),
+           term::control_codes().save_cursor,
+           term::control_codes().undo_bold,
+           term::ControlCodes::cursor_forward(1),
+           term::Raw::from("B"),
+           term::control_codes().restore_cursor,
+           term::Raw::from("C")
+        => term::ClearAttrs::default(),
+           term::ClearScreen::default(),
+           term::control_codes().bold,
+           term::Raw::from("AC"),
+           term::control_codes().undo_bold,
+           term::Raw::from("B")
+    }
+
     fn round_trip_frag(
         input: &[u8],
         want_output: &[u8],

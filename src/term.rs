@@ -195,12 +195,15 @@ pub struct ControlCodes {
     pub undo_inverse: ControlCode,
     pub save_cursor_position: ControlCode,
     pub restore_cursor_position: ControlCode,
+    pub save_cursor: ControlCode,
+    pub restore_cursor: ControlCode,
 }
 
 #[derive(Clone, Debug)]
 #[non_exhaustive]
 pub enum ControlCode {
     CSI { params: Vec<Vec<u16>>, action: char },
+    ESC { intermediates: Vec<u8>, byte: u8 },
     __NonExhaustive,
 }
 
@@ -226,6 +229,14 @@ impl AsTermInput for ControlCode {
                 let mut action_buf = [0; 4];
                 action.encode_utf8(&mut action_buf);
                 buf.extend_from_slice(&action_buf);
+            }
+            ControlCode::ESC {
+                intermediates,
+                byte,
+            } => {
+                buf.extend_from_slice(b"\x1b"); // ESC
+                buf.extend_from_slice(intermediates);
+                buf.push(*byte);
             }
             _ => {}
         }
@@ -355,6 +366,14 @@ pub fn control_codes() -> &'static ControlCodes {
         restore_cursor_position: ControlCode::CSI {
             params: vec![],
             action: 'u',
+        },
+        save_cursor: ControlCode::ESC {
+            intermediates: vec![],
+            byte: b'7',
+        },
+        restore_cursor: ControlCode::ESC {
+            intermediates: vec![],
+            byte: b'8',
         },
     })
 }
