@@ -123,6 +123,7 @@ impl Grid {
     }
 
     /// Get the cell at the given grid coordinates.
+    #[allow(dead_code)]
     pub fn get(&self, pos: crate::Pos) -> Option<&Cell> {
         if let Some(line) = self.get_line(pos.row) {
             return line.get_cell(self.size.width, pos.col);
@@ -545,6 +546,7 @@ impl Line {
     }
 
     /// Get the cell at the given grid position.
+    #[allow(dead_code)]
     fn get_cell(&self, width: usize, col: usize) -> Option<&Cell> {
         if col >= width {
             return None;

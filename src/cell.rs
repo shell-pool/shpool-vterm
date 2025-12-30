@@ -58,6 +58,7 @@ static_assertions::const_assert!(
         || std::mem::size_of::<usize>() != 8
 );
 
+#[allow(dead_code)]
 impl Cell {
     /// Create a new cell wrapping the given char.
     pub fn new(c: char, attrs: term::Attrs) -> Self {

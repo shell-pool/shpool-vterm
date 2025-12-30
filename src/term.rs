@@ -57,6 +57,7 @@ pub struct Raw {
     inner: Vec<u8>,
 }
 
+#[allow(dead_code)]
 impl Raw {
     pub fn new(inner: Vec<u8>) -> Self {
         Raw { inner }
@@ -180,6 +181,7 @@ impl Attrs {
 // A dictionary of standard control codes. Access codes via the
 // control_codes() function. Most are constant struct members.
 // Codes with dynamic params are generated on the fly via methods.
+#[allow(dead_code)]
 pub struct ControlCodes {
     pub fgcolor_default: ControlCode,
     pub bgcolor_default: ControlCode,
@@ -357,6 +359,7 @@ pub fn control_codes() -> &'static ControlCodes {
     })
 }
 
+#[allow(dead_code)]
 impl ControlCodes {
     pub fn fgcolor_idx(i: u8) -> ControlCode {
         if i < 8 {
@@ -477,6 +480,7 @@ impl ControlCodes {
 
 /// Represents a foreground or background color for cells.
 #[derive(Eq, PartialEq, Debug, Copy, Clone)]
+#[allow(dead_code)]
 pub enum Color {
     /// The default terminal color.
     Default,
