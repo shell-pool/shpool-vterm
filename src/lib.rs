@@ -435,6 +435,37 @@ mod test {
            term::Raw::from("B")
     }
 
+    frag! {
+        wide_char { scrollback_lines: 100, width: 10, height: 10 }
+        <= term::Raw::from("A"),
+           term::Raw::from("😊"),
+           term::Raw::from("B")
+        => term::ClearAttrs::default(),
+           term::ClearScreen::default(),
+           term::Raw::from("A😊B")
+    }
+
+    frag! {
+        wide_char_wrap { scrollback_lines: 100, width: 2, height: 10 }
+        <= term::Raw::from("A"),
+           term::Raw::from("😊")
+        => term::ClearAttrs::default(),
+           term::ClearScreen::default(),
+           term::Raw::from("A"),
+           term::Crlf::default(),
+           term::Raw::from("😊")
+    }
+
+    frag! {
+        wide_char_wrap_mid { scrollback_lines: 100, width: 3, height: 10 }
+        <= term::Raw::from("a😊b")
+        => term::ClearAttrs::default(),
+           term::ClearScreen::default(),
+           term::Raw::from("a😊"),
+           term::Crlf::default(),
+           term::Raw::from("b")
+    }
+
     fn round_trip_frag(
         input: &[u8],
         want_output: &[u8],

@@ -23,7 +23,7 @@ use crate::{
 };
 use std::collections::VecDeque;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use tracing::warn;
 
 // A grid stores all the termianal state.
@@ -155,7 +155,7 @@ impl Grid {
             self.add_line(Line::new());
         }
 
-        if self.cursor.pos.col >= self.size.width {
+        if self.cursor.pos.col + cell.width() as usize >= self.size.width + 1 {
             if let Some(line) = self.get_line_mut(self.cursor.pos.row) {
                 line.is_wrapped = true;
             } else {
@@ -172,8 +172,18 @@ impl Grid {
             }
         }
 
-        self.set(self.cursor.pos, cell)?;
+        let mut npad = if cell.width() > 1 { cell.width() - 1 } else { 0 };
+        self.set(self.cursor.pos, cell)
+            .context("setting main cell")?;
         self.cursor.pos.col += 1;
+        while npad > 0 {
+            assert!(self.cursor.pos.col < self.size.width);
+
+            self.set(self.cursor.pos, Cell::wide_pad())
+                .context("padding after wide char")?;
+            self.cursor.pos.col += 1;
+            npad -= 1;
+        }
 
         Ok(())
     }
