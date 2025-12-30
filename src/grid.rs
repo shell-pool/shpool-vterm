@@ -361,6 +361,12 @@ impl vte::Perform for Grid {
                 }
                 self.cursor.pos.col = 0;
             }
+            // CHA (Cursor Horizontal Absolute)
+            'G' => {
+                let n = p1_or(params, 1) as usize;
+                let n = n - 1; // translate to 0 indexing
+                self.cursor.pos.col = std::cmp::min(self.size.width - 1, n);
+            }
             // CUP (Cursor Set Position)
             'H' => {
                 if let Some((row, col)) = p2(params) {

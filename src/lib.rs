@@ -424,6 +424,18 @@ mod test {
            term::Raw::from("B")
     }
 
+    frag! {
+        cursor_horizontal_absolute { scrollback_lines: 100, width: 10, height: 10 }
+        <= term::Raw::from("A"),
+           term::ControlCodes::cursor_horizontal_absolute(3),
+           term::Raw::from("B")
+        => term::ClearAttrs::default(),
+           term::ClearScreen::default(),
+           term::Raw::from("A"),
+           term::Raw::from(" "),
+           term::Raw::from("B")
+    }
+
     fn round_trip_frag(
         input: &[u8],
         want_output: &[u8],

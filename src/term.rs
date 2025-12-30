@@ -453,6 +453,13 @@ impl ControlCodes {
         }
     }
 
+    pub fn cursor_horizontal_absolute(col: u16) -> ControlCode {
+        ControlCode::CSI {
+            params: vec![vec![col]],
+            action: 'G',
+        }
+    }
+
     fn move_cursor(n: u16, action: char) -> ControlCode {
         if n == 1 {
             ControlCode::CSI {
