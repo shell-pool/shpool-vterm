@@ -342,6 +342,10 @@ impl vte::Perform for Grid {
                         3 => self.current_attrs.italic = true,
                         23 => self.current_attrs.italic = false,
 
+                        // Inverse Handling.
+                        7 => self.current_attrs.inverse = true,
+                        27 => self.current_attrs.inverse = false,
+
                         _ => {
                             warn!("unhandled m action: {:?}", params);
                         }

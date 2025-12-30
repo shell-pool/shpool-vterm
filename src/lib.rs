@@ -211,6 +211,22 @@ mod test {
            term::Raw::from("a")
     }
 
+    frag! {
+        inverse_rt { scrollback_lines: 100, width: 100, height: 100 }
+        <= term::Raw::from("a"),
+           term::control_codes().inverse,
+           term::Raw::from("b"),
+           term::control_codes().undo_inverse,
+           term::Raw::from("a")
+        => term::ClearAttrs::default(),
+           term::ClearScreen::default(),
+           term::Raw::from("a"),
+           term::control_codes().inverse,
+           term::Raw::from("b"),
+           term::control_codes().undo_inverse,
+           term::Raw::from("a")
+    }
+
     fn round_trip_frag(
         input: &[u8],
         want_output: &[u8],
