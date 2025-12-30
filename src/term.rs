@@ -191,6 +191,8 @@ pub struct ControlCodes {
     pub undo_italic: ControlCode,
     pub inverse: ControlCode,
     pub undo_inverse: ControlCode,
+    pub save_cursor_position: ControlCode,
+    pub restore_cursor_position: ControlCode,
 }
 
 #[derive(Clone, Debug)]
@@ -344,6 +346,14 @@ pub fn control_codes() -> &'static ControlCodes {
             params: vec![vec![27]],
             action: 'm',
         },
+        save_cursor_position: ControlCode::CSI {
+            params: vec![],
+            action: 's',
+        },
+        restore_cursor_position: ControlCode::CSI {
+            params: vec![],
+            action: 'u',
+        },
     })
 }
 
@@ -438,10 +448,7 @@ impl ControlCodes {
 
     pub fn cursor_position(row: u16, col: u16) -> ControlCode {
         ControlCode::CSI {
-            params: vec![
-                vec![row],
-                vec![col],
-            ],
+            params: vec![vec![row], vec![col]],
             action: 'H',
         }
     }
@@ -454,9 +461,7 @@ impl ControlCodes {
             }
         } else {
             ControlCode::CSI {
-                params: vec![
-                    vec![n],
-                ],
+                params: vec![vec![n]],
                 action,
             }
         }

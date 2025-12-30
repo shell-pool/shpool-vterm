@@ -44,6 +44,9 @@ pub struct Grid {
     /// The current position of the cursor within the in-view window described
     /// by `size`. (0,0) is the upper left.
     cursor: Cursor,
+    // The slot where cursor position info is saved by the SCP/RCP
+    // and ESC 7 / ESC 8 commands.
+    saved_cursor: Cursor,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -81,6 +84,10 @@ impl Grid {
             scrollback_lines,
             size,
             cursor: Cursor {
+                pos: crate::Pos { row: 0, col: 0 },
+                attrs: term::Attrs::default(),
+            },
+            saved_cursor: Cursor {
                 pos: crate::Pos { row: 0, col: 0 },
                 attrs: term::Attrs::default(),
             },
@@ -322,14 +329,12 @@ impl vte::Perform for Grid {
             // CUD (Cursor Down)
             'B' => {
                 let n = p1_or(params, 1) as usize;
-                self.cursor.pos.row = std::cmp::min(
-                    self.size.height - 1, self.cursor.pos.row + n);
+                self.cursor.pos.row = std::cmp::min(self.size.height - 1, self.cursor.pos.row + n);
             }
             // CUF (Cursor Forward)
             'C' => {
                 let n = p1_or(params, 1) as usize;
-                self.cursor.pos.col = std::cmp::min(
-                    self.size.width - 1, self.cursor.pos.col + n);
+                self.cursor.pos.col = std::cmp::min(self.size.width - 1, self.cursor.pos.col + n);
             }
             // CUF (Cursor Backwards)
             'D' => {
@@ -343,8 +348,7 @@ impl vte::Perform for Grid {
             // CNL (Cursor Next Line)
             'E' => {
                 let n = p1_or(params, 1) as usize;
-                self.cursor.pos.row = std::cmp::min(
-                    self.size.height - 1, self.cursor.pos.row + n);
+                self.cursor.pos.row = std::cmp::min(self.size.height - 1, self.cursor.pos.row + n);
                 self.cursor.pos.col = 0;
             }
             // CPL (Cursor Prev Line)
@@ -361,8 +365,7 @@ impl vte::Perform for Grid {
             'H' => {
                 if let Some((row, col)) = p2(params) {
                     // adjust 1 indexing to 0 indexing
-                    let (mut row, mut col) =
-                        ((row - 1) as usize, (col - 1) as usize);
+                    let (mut row, mut col) = ((row - 1) as usize, (col - 1) as usize);
                     if row >= self.size.height {
                         row = self.size.height - 1;
                     }
@@ -373,6 +376,11 @@ impl vte::Perform for Grid {
                     self.cursor.pos.col = col;
                 }
             }
+
+            // SCP (Save Cursor Position)
+            's' => self.saved_cursor.pos = self.cursor.pos,
+            // RCP (Restore Cursor Position)
+            'u' => self.cursor.pos = self.saved_cursor.pos,
 
             // cell attribute manipulation
             'm' => {

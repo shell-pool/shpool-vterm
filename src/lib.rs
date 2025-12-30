@@ -409,6 +409,21 @@ mod test {
            term::Raw::from("  B")
     }
 
+    frag! {
+        scp_rcp { scrollback_lines: 100, width: 10, height: 10 }
+        <= term::Raw::from("A"),
+           term::control_codes().save_cursor_position,
+           term::Crlf::default(),
+           term::Raw::from("B"),
+           term::control_codes().restore_cursor_position,
+           term::Raw::from("C")
+        => term::ClearAttrs::default(),
+           term::ClearScreen::default(),
+           term::Raw::from("AC"),
+           term::Crlf::default(),
+           term::Raw::from("B")
+    }
+
     fn round_trip_frag(
         input: &[u8],
         want_output: &[u8],
