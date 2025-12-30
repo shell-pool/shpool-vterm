@@ -411,6 +411,38 @@ impl ControlCodes {
             action: 'm',
         }
     }
+
+    pub fn cursor_up(n: u16) -> ControlCode {
+        Self::move_cursor(n, 'A')
+    }
+
+    pub fn cursor_down(n: u16) -> ControlCode {
+        Self::move_cursor(n, 'B')
+    }
+
+    pub fn cursor_forward(n: u16) -> ControlCode {
+        Self::move_cursor(n, 'C')
+    }
+
+    pub fn cursor_backwards(n: u16) -> ControlCode {
+        Self::move_cursor(n, 'D')
+    }
+
+    fn move_cursor(n: u16, action: char) -> ControlCode {
+        if n == 1 {
+            ControlCode::CSI {
+                params: vec![],
+                action,
+            }
+        } else {
+            ControlCode::CSI {
+                params: vec![
+                    vec![n],
+                ],
+                action,
+            }
+        }
+    }
 }
 
 /// Represents a foreground or background color for cells.

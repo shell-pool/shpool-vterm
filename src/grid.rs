@@ -305,6 +305,38 @@ impl vte::Perform for Grid {
         action: char,
     ) {
         match action {
+            // CUU (Cursor Up)
+            'A' => {
+                let n = p1(params, 1) as usize;
+                if n > self.cursor.row {
+                    self.cursor.row = 0;
+                } else {
+                    self.cursor.row -= n;
+                }
+            }
+            // CUD (Cursor Down)
+            'B' => {
+                let n = p1(params, 1) as usize;
+                self.cursor.row = std::cmp::min(
+                    self.size.height - 1, self.cursor.row + n);
+            }
+            // CUF (Cursor Forward)
+            'C' => {
+                let n = p1(params, 1) as usize;
+                self.cursor.col = std::cmp::min(
+                    self.size.width - 1, self.cursor.col + n);
+            }
+            // CUF (Cursor Backwards)
+            'D' => {
+                let n = p1(params, 1) as usize;
+                if n > self.cursor.col {
+                    self.cursor.col = 0;
+                } else {
+                    self.cursor.col -= n;
+                }
+            }
+
+            // cell attribute manipulation
             'm' => {
                 let mut param_iter = params.iter();
                 while let Some(param) = param_iter.next() {
@@ -365,6 +397,15 @@ impl vte::Perform for Grid {
     fn terminated(&self) -> bool {
         // TODO: stub
         false
+    }
+}
+
+fn p1(params: &vte::Params, default: u16) -> u16 {
+    let n = params.iter().flatten().next().map(|x| *x).unwrap_or(0);
+    if n == 0 {
+        default
+    } else {
+        n
     }
 }
 

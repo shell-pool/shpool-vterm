@@ -227,6 +227,63 @@ mod test {
            term::Raw::from("a")
     }
 
+    frag! {
+        cursor_left { scrollback_lines: 100, width: 10, height: 10 }
+        <= term::Raw::from("A"),
+           term::ControlCodes::cursor_backwards(1),
+           term::Raw::from("B")
+        => term::ClearAttrs::default(),
+           term::ClearScreen::default(),
+           term::Raw::from("B")
+    }
+
+    frag! {
+        cursor_right_gap { scrollback_lines: 100, width: 10, height: 10 }
+        <= term::control_codes().inverse,
+           term::Raw::from("A"),
+           term::ControlCodes::cursor_backwards(1),
+           term::Raw::from("B"),
+           term::ControlCodes::cursor_forward(1),
+           term::Raw::from("C"),
+           term::control_codes().undo_inverse
+        => term::ClearAttrs::default(),
+           term::ClearScreen::default(),
+           term::control_codes().inverse,
+           term::Raw::from("B"),
+           term::control_codes().undo_inverse,
+           term::control_codes().inverse,
+           term::Raw::from("C"),
+           term::control_codes().undo_inverse
+    }
+
+    frag! {
+        cursor_down { scrollback_lines: 100, width: 10, height: 10 }
+        <= term::Raw::from("A"),
+           term::ControlCodes::cursor_down(1),
+           term::ControlCodes::cursor_backwards(1),
+           term::Raw::from("B")
+        => term::ClearAttrs::default(),
+           term::ClearScreen::default(),
+           term::Raw::from("A"),
+           term::Crlf::default(),
+           term::Raw::from("B")
+    }
+
+    frag! {
+        cursor_up { scrollback_lines: 100, width: 10, height: 10 }
+        <= term::Raw::from("A"),
+           term::Crlf::default(),
+           term::Raw::from("B"),
+           term::ControlCodes::cursor_up(1),
+           term::Raw::from("C")
+        => term::ClearAttrs::default(),
+           term::ClearScreen::default(),
+           term::Raw::from("A"),
+           term::Raw::from("C"),
+           term::Crlf::default(),
+           term::Raw::from("B")
+    }
+
     fn round_trip_frag(
         input: &[u8],
         want_output: &[u8],
