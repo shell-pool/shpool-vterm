@@ -43,10 +43,13 @@ pub struct Grid {
     size: crate::Size,
     /// The current position of the cursor within the in-view window described
     /// by `size`. (0,0) is the upper left.
-    cursor: crate::Pos,
-    /// The attributes that the new cells will get created with when
-    /// the cursor writes.
-    current_attrs: term::Attrs,
+    cursor: Cursor,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct Cursor {
+    pos: crate::Pos,
+    attrs: term::Attrs,
 }
 
 impl std::fmt::Display for Grid {
@@ -77,8 +80,10 @@ impl Grid {
             scrollback: VecDeque::new(),
             scrollback_lines,
             size,
-            cursor: crate::Pos { row: 0, col: 0 },
-            current_attrs: term::Attrs::default(),
+            cursor: Cursor {
+                pos: crate::Pos { row: 0, col: 0 },
+                attrs: term::Attrs::default(),
+            },
         }
     }
 
@@ -135,15 +140,15 @@ impl Grid {
             return Err(anyhow!("cannot write to zero width terminal grid"));
         }
 
-        while self.scrollback.len() < self.cursor.row + 1 {
+        while self.scrollback.len() < self.cursor.pos.row + 1 {
             // TODO: these lines will all count as having
             // not been wrapped and will be retained on reflow.
             // Is that actually what we want?
             self.add_line(Line::new());
         }
 
-        if self.cursor.col >= self.size.width {
-            if let Some(line) = self.get_line_mut(self.cursor.row) {
+        if self.cursor.pos.col >= self.size.width {
+            if let Some(line) = self.get_line_mut(self.cursor.pos.row) {
                 line.is_wrapped = true;
             } else {
                 return Err(anyhow!(
@@ -151,16 +156,16 @@ impl Grid {
                 ));
             }
 
-            self.cursor.col = 0;
-            self.cursor.row += 1;
+            self.cursor.pos.col = 0;
+            self.cursor.pos.row += 1;
 
-            if self.scrollback.len() < self.cursor.row + 1 {
+            if self.scrollback.len() < self.cursor.pos.row + 1 {
                 self.add_line(Line::new())
             }
         }
 
-        self.set(self.cursor, cell)?;
-        self.cursor.col += 1;
+        self.set(self.cursor.pos, cell)?;
+        self.cursor.pos.col += 1;
 
         Ok(())
     }
@@ -260,7 +265,7 @@ impl Grid {
 
 impl vte::Perform for Grid {
     fn print(&mut self, c: char) {
-        let attrs = self.current_attrs.clone();
+        let attrs = self.cursor.attrs.clone();
         if let Err(e) = self.write_at_cursor(Cell::new(c, attrs)) {
             warn!("writing char at cursor: {e:?}");
         }
@@ -269,10 +274,10 @@ impl vte::Perform for Grid {
     fn execute(&mut self, byte: u8) {
         match byte {
             b'\n' => {
-                self.cursor.row += 1;
+                self.cursor.pos.row += 1;
             }
             b'\r' => {
-                self.cursor.col = 0;
+                self.cursor.pos.col = 0;
             }
             _ => {
                 warn!("execute: unhandled byte {}", byte);
@@ -308,49 +313,49 @@ impl vte::Perform for Grid {
             // CUU (Cursor Up)
             'A' => {
                 let n = p1_or(params, 1) as usize;
-                if n > self.cursor.row {
-                    self.cursor.row = 0;
+                if n > self.cursor.pos.row {
+                    self.cursor.pos.row = 0;
                 } else {
-                    self.cursor.row -= n;
+                    self.cursor.pos.row -= n;
                 }
             }
             // CUD (Cursor Down)
             'B' => {
                 let n = p1_or(params, 1) as usize;
-                self.cursor.row = std::cmp::min(
-                    self.size.height - 1, self.cursor.row + n);
+                self.cursor.pos.row = std::cmp::min(
+                    self.size.height - 1, self.cursor.pos.row + n);
             }
             // CUF (Cursor Forward)
             'C' => {
                 let n = p1_or(params, 1) as usize;
-                self.cursor.col = std::cmp::min(
-                    self.size.width - 1, self.cursor.col + n);
+                self.cursor.pos.col = std::cmp::min(
+                    self.size.width - 1, self.cursor.pos.col + n);
             }
             // CUF (Cursor Backwards)
             'D' => {
                 let n = p1_or(params, 1) as usize;
-                if n > self.cursor.col {
-                    self.cursor.col = 0;
+                if n > self.cursor.pos.col {
+                    self.cursor.pos.col = 0;
                 } else {
-                    self.cursor.col -= n;
+                    self.cursor.pos.col -= n;
                 }
             }
             // CNL (Cursor Next Line)
             'E' => {
                 let n = p1_or(params, 1) as usize;
-                self.cursor.row = std::cmp::min(
-                    self.size.height - 1, self.cursor.row + n);
-                self.cursor.col = 0;
+                self.cursor.pos.row = std::cmp::min(
+                    self.size.height - 1, self.cursor.pos.row + n);
+                self.cursor.pos.col = 0;
             }
             // CPL (Cursor Prev Line)
             'F' => {
                 let n = p1_or(params, 1) as usize;
-                if n > self.cursor.row {
-                    self.cursor.row = 0;
+                if n > self.cursor.pos.row {
+                    self.cursor.pos.row = 0;
                 } else {
-                    self.cursor.row -= n;
+                    self.cursor.pos.row -= n;
                 }
-                self.cursor.col = 0;
+                self.cursor.pos.col = 0;
             }
             // CUP (Cursor Set Position)
             'H' => {
@@ -364,8 +369,8 @@ impl vte::Perform for Grid {
                     if col >= self.size.width {
                         col = self.size.width - 1;
                     }
-                    self.cursor.row = row;
-                    self.cursor.col = col;
+                    self.cursor.pos.row = row;
+                    self.cursor.pos.col = col;
                 }
             }
 
@@ -380,7 +385,7 @@ impl vte::Perform for Grid {
 
                     match param[0] {
                         0 => {
-                            self.current_attrs = term::Attrs::default();
+                            self.cursor.attrs = term::Attrs::default();
                         }
 
                         // Underline Handling
@@ -394,22 +399,22 @@ impl vte::Perform for Grid {
                         // Other:
                         //      CSI 21 m => double
                         //      CSI 58 ; 2 ; r ; g ; b m => RGB colored underline
-                        4 => self.current_attrs.underline = true,
+                        4 => self.cursor.attrs.underline = true,
                         // TODO: should really be a double underline.
-                        21 => self.current_attrs.underline = true,
-                        24 => self.current_attrs.underline = false,
+                        21 => self.cursor.attrs.underline = true,
+                        24 => self.cursor.attrs.underline = false,
 
                         // Bold Handling.
-                        1 => self.current_attrs.bold = true,
-                        22 => self.current_attrs.bold = false,
+                        1 => self.cursor.attrs.bold = true,
+                        22 => self.cursor.attrs.bold = false,
 
                         // Italic Handling.
-                        3 => self.current_attrs.italic = true,
-                        23 => self.current_attrs.italic = false,
+                        3 => self.cursor.attrs.italic = true,
+                        23 => self.cursor.attrs.italic = false,
 
                         // Inverse Handling.
-                        7 => self.current_attrs.inverse = true,
-                        27 => self.current_attrs.inverse = false,
+                        7 => self.cursor.attrs.inverse = true,
+                        27 => self.cursor.attrs.inverse = false,
 
                         _ => {
                             warn!("unhandled m action: {:?}", params);
