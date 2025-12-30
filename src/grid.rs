@@ -307,7 +307,7 @@ impl vte::Perform for Grid {
         match action {
             // CUU (Cursor Up)
             'A' => {
-                let n = p1(params, 1) as usize;
+                let n = p1_or(params, 1) as usize;
                 if n > self.cursor.row {
                     self.cursor.row = 0;
                 } else {
@@ -316,19 +316,19 @@ impl vte::Perform for Grid {
             }
             // CUD (Cursor Down)
             'B' => {
-                let n = p1(params, 1) as usize;
+                let n = p1_or(params, 1) as usize;
                 self.cursor.row = std::cmp::min(
                     self.size.height - 1, self.cursor.row + n);
             }
             // CUF (Cursor Forward)
             'C' => {
-                let n = p1(params, 1) as usize;
+                let n = p1_or(params, 1) as usize;
                 self.cursor.col = std::cmp::min(
                     self.size.width - 1, self.cursor.col + n);
             }
             // CUF (Cursor Backwards)
             'D' => {
-                let n = p1(params, 1) as usize;
+                let n = p1_or(params, 1) as usize;
                 if n > self.cursor.col {
                     self.cursor.col = 0;
                 } else {
@@ -337,20 +337,36 @@ impl vte::Perform for Grid {
             }
             // CNL (Cursor Next Line)
             'E' => {
-                let n = p1(params, 1) as usize;
+                let n = p1_or(params, 1) as usize;
                 self.cursor.row = std::cmp::min(
                     self.size.height - 1, self.cursor.row + n);
                 self.cursor.col = 0;
             }
             // CPL (Cursor Prev Line)
             'F' => {
-                let n = p1(params, 1) as usize;
+                let n = p1_or(params, 1) as usize;
                 if n > self.cursor.row {
                     self.cursor.row = 0;
                 } else {
                     self.cursor.row -= n;
                 }
                 self.cursor.col = 0;
+            }
+            // CUP (Cursor Set Position)
+            'H' => {
+                if let Some((row, col)) = p2(params) {
+                    // adjust 1 indexing to 0 indexing
+                    let (mut row, mut col) =
+                        ((row - 1) as usize, (col - 1) as usize);
+                    if row >= self.size.height {
+                        row = self.size.height - 1;
+                    }
+                    if col >= self.size.width {
+                        col = self.size.width - 1;
+                    }
+                    self.cursor.row = row;
+                    self.cursor.col = col;
+                }
             }
 
             // cell attribute manipulation
@@ -417,13 +433,30 @@ impl vte::Perform for Grid {
     }
 }
 
-fn p1(params: &vte::Params, default: u16) -> u16 {
+fn p1_or(params: &vte::Params, default: u16) -> u16 {
     let n = params.iter().flatten().next().map(|x| *x).unwrap_or(0);
     if n == 0 {
         default
     } else {
         n
     }
+}
+
+fn p2(params: &vte::Params) -> Option<(u16, u16)> {
+    let mut i = params.iter();
+    if let Some(arg) = i.next() {
+        let a1 = if arg.len() == 1 {
+            arg[0]
+        } else {
+            return None;
+        };
+        if let Some(arg) = i.next() {
+            if arg.len() == 1 {
+                return Some((a1, arg[0]));
+            }
+        }
+    }
+    None
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]

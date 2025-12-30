@@ -436,6 +436,16 @@ impl ControlCodes {
         Self::move_cursor(n, 'F')
     }
 
+    pub fn cursor_position(row: u16, col: u16) -> ControlCode {
+        ControlCode::CSI {
+            params: vec![
+                vec![row],
+                vec![col],
+            ],
+            action: 'H',
+        }
+    }
+
     fn move_cursor(n: u16, action: char) -> ControlCode {
         if n == 1 {
             ControlCode::CSI {
