@@ -27,46 +27,6 @@ use std::sync::OnceLock;
 // might be a good place to start (look into the terminfo-lean crate for
 // better licencing).
 
-/// A position that the terminal is writing at. Includes attributes that
-/// have been previously set via control codes.
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct Cursor {
-    pub pos: Pos,
-    pub attrs: Attrs,
-}
-
-impl Cursor {
-    pub fn new(pos: Pos) -> Self {
-        Cursor {
-            pos,
-            attrs: Attrs::default(),
-        }
-    }
-
-    /// Ensure that the cursor is within the given region
-    /// by moving to the closest edge if it is out of bounds.
-    pub fn clamp_to<R>(&mut self, region: R)
-    where
-        R: Region,
-    {
-        let (low_row, high_row) = region.row_bounds();
-        if self.pos.row < low_row {
-            self.pos.row = low_row;
-        }
-        if self.pos.row >= high_row {
-            self.pos.row = high_row - 1;
-        }
-
-        let (low_col, high_col) = region.col_bounds();
-        if self.pos.col < low_col {
-            self.pos.col = low_col;
-        }
-        if self.pos.col >= high_col {
-            self.pos.col = high_col - 1;
-        }
-    }
-}
-
 /// A position within the terminal. Generally, this refers to a grid
 /// mode view of the terminal, not the underlying logical lines mode
 /// that we actually store the data in.
@@ -74,6 +34,31 @@ impl Cursor {
 pub struct Pos {
     pub row: usize,
     pub col: usize,
+}
+
+impl Pos {
+    /// Ensure that the cursor is within the given region
+    /// by moving to the closest edge if it is out of bounds.
+    pub fn clamp_to<R>(&mut self, region: R)
+    where
+        R: Region,
+    {
+        let (low_row, high_row) = region.row_bounds();
+        if self.row < low_row {
+            self.row = low_row;
+        }
+        if self.row >= high_row {
+            self.row = high_row - 1;
+        }
+
+        let (low_col, high_col) = region.col_bounds();
+        if self.col < low_col {
+            self.col = low_col;
+        }
+        if self.col >= high_col {
+            self.col = high_col - 1;
+        }
+    }
 }
 
 pub trait Region {

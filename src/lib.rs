@@ -15,16 +15,22 @@
 mod altscreen;
 mod cell;
 mod line;
+mod screen;
 mod scrollback;
 mod term;
 
-use scrollback::Scrollback;
+use cell::Cell;
+use screen::Screen;
 use term::AsTermInput;
+
+use tracing::warn;
+
+use crate::screen::SavedCursor;
 
 /// A representation of a terminal.
 pub struct Term {
     parser: vte::Parser,
-    grid: Scrollback,
+    state: State,
 }
 
 impl Term {
@@ -32,39 +38,58 @@ impl Term {
     ///
     /// Note that width will only be used when generated output
     /// to determine where wrapping should be place.
+    ///
+    /// scrollback_lines must be at least size.height. If it is
+    /// less than size.height, it will be automatically adjusted
+    /// to be equal to size.height.
     pub fn new(scrollback_lines: usize, size: Size) -> Self {
         Term {
             parser: vte::Parser::new(),
-            grid: Scrollback::new(scrollback_lines, size),
+            state: State::new(scrollback_lines, size),
         }
     }
 
     /// Get the current terminal size.
     pub fn size(&self) -> Size {
-        self.grid.size()
+        self.state.screen().size
     }
 
     /// Set the terminal size.
+    ///
+    /// This will implicitly size up the scrollback_lines if
+    /// it is currently less than size.height.
     pub fn resize(&mut self, size: Size) {
-        self.grid.resize(size);
+        if size.height > self.scrollback_lines() {
+            self.set_scrollback_lines(size.height);
+        }
+
+        self.state.scrollback.resize(size);
+        self.state.altscreen.resize(size);
     }
 
     /// Get the current number of lines of stored scrollback.
     pub fn scrollback_lines(&self) -> usize {
-        self.grid.scrollback_lines()
+        self.state
+            .scrollback
+            .scrollback_lines()
+            .expect("scrollback screen to have lines")
     }
 
     /// Set the number of lines of scrollback to store. This will drop
     /// data when resizing down. When resizing up, no new memory is allocated,
     /// capacity is simply expanded.
+    ///
+    /// If the given value is less than size().height, it will be overridden
+    /// to match the current height. You cannot store less scrollback than
+    /// there are lines in the visible screen region.
     pub fn set_scrollback_lines(&mut self, scrollback_lines: usize) {
-        self.grid.set_scrollback_lines(scrollback_lines);
+        self.state.scrollback.set_scrollback_lines(scrollback_lines);
     }
 
     /// Process the given chunk of input. This should be the data read off
     /// a pty running a shell.
     pub fn process(&mut self, buf: &[u8]) {
-        self.parser.advance(&mut self.grid, buf);
+        self.parser.advance(&mut self.state, buf);
     }
 
     /// Get the current contents of the terminal encoded via terminal
@@ -75,7 +100,7 @@ impl Term {
         let mut buf = vec![];
         term::ClearAttrs::default().term_input_into(&mut buf);
         term::ClearScreen::default().term_input_into(&mut buf);
-        self.grid.term_input_into(&mut buf);
+        self.state.term_input_into(&mut buf);
 
         buf
     }
@@ -86,6 +111,299 @@ impl Term {
 pub struct Size {
     pub width: usize,
     pub height: usize,
+}
+
+/// The complete terminal state. An internal implementation detail.
+struct State {
+    /// The state for the normal terminal screen.
+    scrollback: Screen,
+    /// The state for the alternate screen.
+    altscreen: Screen,
+    /// The currently active screen mode.
+    screen_mode: ScreenMode,
+    /// The current cursor attrs. These are shared between the scrollback
+    /// and alt screens, which is why they are stored here rather than
+    /// with the curors themsevles.
+    cursor_attrs: term::Attrs,
+}
+
+impl State {
+    fn new(scrollback_lines: usize, size: Size) -> Self {
+        State {
+            scrollback: Screen::scrollback(scrollback_lines, size),
+            altscreen: Screen::alt(size),
+            screen_mode: ScreenMode::Scrollback,
+            cursor_attrs: term::Attrs::default(),
+        }
+    }
+
+    fn screen_mut(&mut self) -> &mut Screen {
+        match self.screen_mode {
+            ScreenMode::Scrollback => &mut self.scrollback,
+            ScreenMode::Alt => &mut self.altscreen,
+        }
+    }
+
+    fn screen(&self) -> &Screen {
+        match self.screen_mode {
+            ScreenMode::Scrollback => &self.scrollback,
+            ScreenMode::Alt => &self.altscreen,
+        }
+    }
+}
+
+impl AsTermInput for State {
+    fn term_input_into(&self, buf: &mut Vec<u8>) {
+        match self.screen_mode {
+            ScreenMode::Scrollback => self.scrollback.term_input_into(buf),
+            ScreenMode::Alt => self.altscreen.term_input_into(buf),
+        }
+    }
+}
+
+/// Indicates which screen mode is active.
+enum ScreenMode {
+    Scrollback,
+    Alt,
+}
+
+impl vte::Perform for State {
+    fn print(&mut self, c: char) {
+        let attrs = self.cursor_attrs.clone();
+        let screen = self.screen_mut();
+        if let Err(e) = screen.write_at_cursor(Cell::new(c, attrs)) {
+            warn!("writing char at cursor: {e:?}");
+        }
+    }
+
+    fn execute(&mut self, byte: u8) {
+        match byte {
+            b'\n' => self.screen_mut().cursor.row += 1,
+            b'\r' => self.screen_mut().cursor.col = 0,
+            _ => {
+                warn!("execute: unhandled byte {}", byte);
+            }
+        }
+    }
+
+    fn hook(&mut self, _params: &vte::Params, _intermediates: &[u8], _ignore: bool, _action: char) {
+        // TODO: stub
+    }
+
+    fn put(&mut self, _byte: u8) {
+        // TODO: stub
+    }
+
+    fn unhook(&mut self) {
+        // TODO: stub
+    }
+
+    fn osc_dispatch(&mut self, _params: &[&[u8]], _bell_terminated: bool) {
+        // TODO: stub
+    }
+
+    // Handle escape codes beginning with the CSI indicator ('\x1b[').
+    fn csi_dispatch(
+        &mut self,
+        params: &vte::Params,
+        _intermediates: &[u8],
+        _ignore: bool,
+        action: char,
+    ) {
+        match action {
+            // CUU (Cursor Up)
+            'A' => {
+                let n = p1_or(params, 1) as usize;
+                let screen = self.screen_mut();
+                screen.cursor.row = screen.cursor.row.saturating_sub(n);
+            }
+            // CUD (Cursor Down)
+            'B' => {
+                let n = p1_or(params, 1) as usize;
+                let screen = self.screen_mut();
+                screen.cursor.row += n;
+                screen.clamp();
+            }
+            // CUF (Cursor Forward)
+            'C' => {
+                let n = p1_or(params, 1) as usize;
+                let screen = self.screen_mut();
+                screen.cursor.col += n;
+                screen.clamp();
+            }
+            // CUF (Cursor Backwards)
+            'D' => {
+                let n = p1_or(params, 1) as usize;
+                let screen = self.screen_mut();
+                screen.cursor.col = screen.cursor.col.saturating_sub(n);
+            }
+            // CNL (Cursor Next Line)
+            'E' => {
+                let n = p1_or(params, 1) as usize;
+                let screen = self.screen_mut();
+                screen.cursor.row += n;
+                screen.cursor.col = 0;
+                screen.clamp();
+            }
+            // CPL (Cursor Prev Line)
+            'F' => {
+                let n = p1_or(params, 1) as usize;
+                let screen = self.screen_mut();
+                screen.cursor.row = screen.cursor.row.saturating_sub(n);
+                screen.cursor.col = 0;
+            }
+            // CHA (Cursor Horizontal Absolute)
+            'G' => {
+                let n = p1_or(params, 1) as usize;
+                let n = n - 1; // translate to 0 indexing
+
+                let screen = self.screen_mut();
+                screen.cursor.col = n;
+                screen.clamp();
+            }
+            // CUP (Cursor Set Position)
+            'H' => {
+                if let Some((row, col)) = p2(params) {
+                    // adjust 1 indexing to 0 indexing
+                    let (row, col) = ((row - 1) as usize, (col - 1) as usize);
+
+                    let screen = self.screen_mut();
+                    screen.cursor.row = row;
+                    screen.cursor.col = col;
+                    screen.clamp();
+                }
+            }
+
+            // SCP (Save Cursor Position)
+            's' => {
+                let screen = self.screen_mut();
+                let cursor = screen.cursor.clone();
+                screen.saved_cursor.pos = cursor;
+            }
+            // RCP (Restore Cursor Position)
+            'u' => {
+                let screen = self.screen_mut();
+                screen.cursor = screen.saved_cursor.pos;
+            }
+
+            // cell attribute manipulation
+            'm' => {
+                let mut param_iter = params.iter();
+
+                while let Some(param) = param_iter.next() {
+                    if param.len() < 1 {
+                        warn!("m action with no params. Not sure what to do.");
+                        continue;
+                    }
+
+                    match param[0] {
+                        0 => self.cursor_attrs = term::Attrs::default(),
+
+                        // TODO: apparently while the altscreen and scrollback
+                        // are supposed to have seperate cursor positions,
+                        // their attributes (SGR state) are shared. However,
+                        // when saving a cursor with ESC 7, the whole state
+                        // including the attributes needs to be saved. I need
+                        // to rename the cursor type into a "SavedCursor" which
+                        // has attributes and then just use Pos as for the actual
+                        // cursor type, and then move attrs for the normal cursor
+                        // up into the top level State struct.
+
+                        // Underline Handling
+                        // TODO: there are lots of other underline styles. To fix,
+                        // we need to update attrs.
+                        //
+                        // Kitty extensions:
+                        //      CSI 4 : 3 m => curly
+                        //      CSI 4 : 2 m => double
+                        //
+                        // Other:
+                        //      CSI 21 m => double
+                        //      CSI 58 ; 2 ; r ; g ; b m => RGB colored underline
+                        4 => self.cursor_attrs.underline = true,
+                        // TODO: should really be a double underline.
+                        21 => self.cursor_attrs.underline = true,
+                        24 => self.cursor_attrs.underline = false,
+
+                        // Bold Handling.
+                        1 => self.cursor_attrs.bold = true,
+                        22 => self.cursor_attrs.bold = false,
+
+                        // Italic Handling.
+                        3 => self.cursor_attrs.italic = true,
+                        23 => self.cursor_attrs.italic = false,
+
+                        // Inverse Handling.
+                        7 => self.cursor_attrs.inverse = true,
+                        27 => self.cursor_attrs.inverse = false,
+
+                        _ => {
+                            warn!("unhandled m action: {:?}", params);
+                        }
+                    }
+                }
+            }
+            _ => {
+                warn!("unhandled action {}", action);
+            }
+        }
+    }
+
+    fn esc_dispatch(&mut self, intermediates: &[u8], ignore: bool, byte: u8) {
+        if ignore {
+            warn!("malformed ESC seq");
+            return;
+        }
+
+        match (intermediates, byte) {
+            // save cursor (ESC 7)
+            ([], b'7') => {
+                let attrs = self.cursor_attrs.clone();
+                let screen = self.screen_mut();
+                let pos = screen.cursor.clone();
+                screen.saved_cursor = SavedCursor { pos, attrs };
+            }
+            // restore cursor (ESC 8)
+            ([], b'8') => {
+                let screen = self.screen_mut();
+                screen.cursor = screen.saved_cursor.pos;
+                self.cursor_attrs = screen.saved_cursor.attrs.clone();
+            }
+
+            _ => warn!("unhandled ESC seq ({intermediates:?}, {byte})"),
+        }
+    }
+
+    fn terminated(&self) -> bool {
+        // TODO: stub
+        false
+    }
+}
+
+fn p1_or(params: &vte::Params, default: u16) -> u16 {
+    let n = params.iter().flatten().next().map(|x| *x).unwrap_or(0);
+    if n == 0 {
+        default
+    } else {
+        n
+    }
+}
+
+fn p2(params: &vte::Params) -> Option<(u16, u16)> {
+    let mut i = params.iter();
+    if let Some(arg) = i.next() {
+        let a1 = if arg.len() == 1 {
+            arg[0]
+        } else {
+            return None;
+        };
+        if let Some(arg) = i.next() {
+            if arg.len() == 1 {
+                return Some((a1, arg[0]));
+            }
+        }
+    }
+    None
 }
 
 // TODO: handle clear

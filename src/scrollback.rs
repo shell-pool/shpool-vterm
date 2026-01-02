@@ -19,12 +19,11 @@
 use crate::{
     cell::Cell,
     line::Line,
-    term::{self, AsTermInput, Cursor, Pos},
+    term::{self, AsTermInput, Pos},
 };
 use std::collections::VecDeque;
 
 use anyhow::{anyhow, Context};
-use tracing::warn;
 
 // A scrollback stores the termianal state for the main screen.
 // Alt screen state is stored seperately.
@@ -34,20 +33,10 @@ pub struct Scrollback {
     ///
     /// The bottom of the terminal is stored at the front of the deque
     /// and the top is stored at the back of the deque.
-    buf: VecDeque<Line>,
+    pub buf: VecDeque<Line>,
     /// The number of lines of scrollback to store, independent of the
     /// size of the grid that is in view.
     lines: usize,
-    /// The number of lines at the bottom of the scrollback (front of the deque)
-    /// which are logically in view. This is the height of the terminal that the user
-    /// has configured or resized to.
-    size: crate::Size,
-    /// The current position of the cursor within the in-view window described
-    /// by `size`. (0,0) is the upper left.
-    cursor: Cursor,
-    // The slot where cursor position info is saved by the SCP/RCP
-    // and ESC 7 / ESC 8 commands.
-    saved_cursor: Cursor,
 }
 
 // TODO: to support the alt screen, I need to refactor the grid structures
@@ -77,32 +66,11 @@ impl AsTermInput for Scrollback {
 impl Scrollback {
     /// Create a new grid with the given number of lines of scrollback
     /// storage, and the given size window in view.
-    pub fn new(scrollback_lines: usize, size: crate::Size) -> Self {
+    pub fn new(scrollback_lines: usize) -> Self {
         Scrollback {
             buf: VecDeque::new(),
             lines: scrollback_lines,
-            size,
-            cursor: Cursor {
-                pos: Pos { row: 0, col: 0 },
-                attrs: term::Attrs::default(),
-            },
-            saved_cursor: Cursor {
-                pos: Pos { row: 0, col: 0 },
-                attrs: term::Attrs::default(),
-            },
         }
-    }
-
-    /// Get the size of the grid.
-    pub fn size(&self) -> crate::Size {
-        self.size
-    }
-
-    /// Resize the grid to the new size, reflowing all lines to match the new
-    /// width.
-    pub fn resize(&mut self, size: crate::Size) {
-        self.reflow(size.width);
-        self.size = size;
     }
 
     /// Get the max number of scrollback lines this grid
@@ -114,78 +82,21 @@ impl Scrollback {
     /// Set a new max number of scrollback lines this grid can
     /// store. If this is less than the current number, trailing
     /// data will be dropped.
-    pub fn set_scrollback_lines(&mut self, scrollback_lines: usize) {
+    pub fn set_scrollback_lines(&mut self, size: crate::Size, mut scrollback_lines: usize) {
+        if scrollback_lines < size.height {
+            scrollback_lines = size.height;
+        }
+
         while self.buf.len() > scrollback_lines {
             self.buf.pop_back();
         }
         self.lines = scrollback_lines;
     }
 
-    /// Get the cell at the given grid coordinates.
-    #[allow(dead_code)]
-    pub fn get(&self, pos: Pos) -> Option<&Cell> {
-        if let Some(line) = self.get_line(pos.row) {
-            return line.get_cell(self.size.width, pos.col);
-        }
-        None
-    }
-
     /// Set the cell at the given grid coordinates.
-    pub fn set(&mut self, pos: Pos, cell: Cell) -> anyhow::Result<()> {
-        let width = self.size.width;
-        if let Some(line) = self.get_line_mut(pos.row) {
-            return line.set_cell(width, pos.col, cell);
-        }
-
-        Ok(())
-    }
-
-    /// Write the given cell at the current cursor, advancing
-    /// the cursor.
-    pub fn write_at_cursor(&mut self, cell: Cell) -> anyhow::Result<()> {
-        if self.size.width < 1 {
-            return Err(anyhow!("cannot write to zero width terminal grid"));
-        }
-
-        while self.buf.len() < self.cursor.pos.row + 1 {
-            // TODO: these lines will all count as having
-            // not been wrapped and will be retained on reflow.
-            // Is that actually what we want?
-            self.add_line(Line::new());
-        }
-
-        if self.cursor.pos.col + cell.width() as usize >= self.size.width + 1 {
-            if let Some(line) = self.get_line_mut(self.cursor.pos.row) {
-                line.is_wrapped = true;
-            } else {
-                return Err(anyhow!(
-                    "unexpectedly missing line when setting wrap marker"
-                ));
-            }
-
-            self.cursor.pos.col = 0;
-            self.cursor.pos.row += 1;
-
-            if self.buf.len() < self.cursor.pos.row + 1 {
-                self.add_line(Line::new())
-            }
-        }
-
-        let mut npad = if cell.width() > 1 {
-            cell.width() - 1
-        } else {
-            0
-        };
-        self.set(self.cursor.pos, cell)
-            .context("setting main cell")?;
-        self.cursor.pos.col += 1;
-        while npad > 0 {
-            assert!(self.cursor.pos.col < self.size.width);
-
-            self.set(self.cursor.pos, Cell::wide_pad())
-                .context("padding after wide char")?;
-            self.cursor.pos.col += 1;
-            npad -= 1;
+    pub fn set(&mut self, size: crate::Size, pos: Pos, cell: Cell) -> anyhow::Result<()> {
+        if let Some(line) = self.get_line_mut(size, pos.row) {
+            return line.set_cell(size.width, pos.col, cell);
         }
 
         Ok(())
@@ -198,7 +109,7 @@ impl Scrollback {
         }
     }
 
-    fn reflow(&mut self, new_width: usize) {
+    pub fn reflow(&mut self, new_width: usize) {
         // TODO: this needs to move the cursor and saved cursor to have them
         // point to the same cell that they did at the start of the reflow
         // process. We currently don't do that, so reflow is broken.
@@ -257,26 +168,11 @@ impl Scrollback {
         self.buf = new_scrollback;
     }
 
-    fn get_line(&self, row: usize) -> Option<&Line> {
-        let in_view_scrollback_len = if self.buf.len() < self.size.height {
+    fn get_line_mut(&mut self, size: crate::Size, row: usize) -> Option<&mut Line> {
+        let in_view_scrollback_len = if self.buf.len() < size.height {
             self.buf.len()
         } else {
-            self.size.height
-        };
-
-        if row >= in_view_scrollback_len {
-            return None;
-        }
-
-        let idx_from_bottom = (in_view_scrollback_len - 1) - row;
-        Some(&self.buf[idx_from_bottom])
-    }
-
-    fn get_line_mut(&mut self, row: usize) -> Option<&mut Line> {
-        let in_view_scrollback_len = if self.buf.len() < self.size.height {
-            self.buf.len()
-        } else {
-            self.size.height
+            size.height
         };
 
         if row >= in_view_scrollback_len {
@@ -286,478 +182,83 @@ impl Scrollback {
         let idx_from_bottom = (in_view_scrollback_len - 1) - row;
         Some(&mut self.buf[idx_from_bottom])
     }
-}
 
-impl vte::Perform for Scrollback {
-    fn print(&mut self, c: char) {
-        let attrs = self.cursor.attrs.clone();
-        if let Err(e) = self.write_at_cursor(Cell::new(c, attrs)) {
-            warn!("writing char at cursor: {e:?}");
-        }
-    }
-
-    fn execute(&mut self, byte: u8) {
-        match byte {
-            b'\n' => {
-                self.cursor.pos.row += 1;
-            }
-            b'\r' => {
-                self.cursor.pos.col = 0;
-            }
-            _ => {
-                warn!("execute: unhandled byte {}", byte);
-            }
-        }
-    }
-
-    fn hook(&mut self, _params: &vte::Params, _intermediates: &[u8], _ignore: bool, _action: char) {
-        // TODO: stub
-    }
-
-    fn put(&mut self, _byte: u8) {
-        // TODO: stub
-    }
-
-    fn unhook(&mut self) {
-        // TODO: stub
-    }
-
-    fn osc_dispatch(&mut self, _params: &[&[u8]], _bell_terminated: bool) {
-        // TODO: stub
-    }
-
-    // Handle escape codes beginning with the CSI indicator ('\x1b[').
-    fn csi_dispatch(
+    /// Write the given cell at the given cursor position, returning the next
+    /// cursor position.
+    pub fn write_at_cursor(
         &mut self,
-        params: &vte::Params,
-        _intermediates: &[u8],
-        _ignore: bool,
-        action: char,
-    ) {
-        match action {
-            // CUU (Cursor Up)
-            'A' => {
-                let n = p1_or(params, 1) as usize;
-                self.cursor.pos.row = self.cursor.pos.row.saturating_sub(n)
-            }
-            // CUD (Cursor Down)
-            'B' => {
-                let n = p1_or(params, 1) as usize;
-                self.cursor.pos.row = self.cursor.pos.row + n;
-                self.cursor.clamp_to(self.size);
-            }
-            // CUF (Cursor Forward)
-            'C' => {
-                let n = p1_or(params, 1) as usize;
-                self.cursor.pos.col = self.cursor.pos.col + n;
-                self.cursor.clamp_to(self.size);
-            }
-            // CUF (Cursor Backwards)
-            'D' => {
-                let n = p1_or(params, 1) as usize;
-                self.cursor.pos.col = self.cursor.pos.col.saturating_sub(n);
-            }
-            // CNL (Cursor Next Line)
-            'E' => {
-                let n = p1_or(params, 1) as usize;
-                self.cursor.pos.row = self.cursor.pos.row + n;
-                self.cursor.pos.col = 0;
-                self.cursor.clamp_to(self.size);
-            }
-            // CPL (Cursor Prev Line)
-            'F' => {
-                let n = p1_or(params, 1) as usize;
-                if n > self.cursor.pos.row {
-                    self.cursor.pos.row = 0;
-                } else {
-                    self.cursor.pos.row -= n;
-                }
-                self.cursor.pos.col = 0;
-            }
-            // CHA (Cursor Horizontal Absolute)
-            'G' => {
-                let n = p1_or(params, 1) as usize;
-                let n = n - 1; // translate to 0 indexing
-                self.cursor.pos.col = n;
-                self.cursor.clamp_to(self.size);
-            }
-            // CUP (Cursor Set Position)
-            'H' => {
-                if let Some((row, col)) = p2(params) {
-                    // adjust 1 indexing to 0 indexing
-                    let (row, col) = ((row - 1) as usize, (col - 1) as usize);
-                    self.cursor.pos.row = row;
-                    self.cursor.pos.col = col;
-                    self.cursor.clamp_to(self.size);
-                }
-            }
-
-            // SCP (Save Cursor Position)
-            's' => self.saved_cursor.pos = self.cursor.pos,
-            // RCP (Restore Cursor Position)
-            'u' => self.cursor.pos = self.saved_cursor.pos,
-
-            // cell attribute manipulation
-            'm' => {
-                let mut param_iter = params.iter();
-                while let Some(param) = param_iter.next() {
-                    if param.len() < 1 {
-                        warn!("m action with no params. Not sure what to do.");
-                        continue;
-                    }
-
-                    match param[0] {
-                        0 => {
-                            self.cursor.attrs = term::Attrs::default();
-                        }
-
-                        // Underline Handling
-                        // TODO: there are lots of other underline styles. To fix,
-                        // we need to update attrs.
-                        //
-                        // Kitty extensions:
-                        //      CSI 4 : 3 m => curly
-                        //      CSI 4 : 2 m => double
-                        //
-                        // Other:
-                        //      CSI 21 m => double
-                        //      CSI 58 ; 2 ; r ; g ; b m => RGB colored underline
-                        4 => self.cursor.attrs.underline = true,
-                        // TODO: should really be a double underline.
-                        21 => self.cursor.attrs.underline = true,
-                        24 => self.cursor.attrs.underline = false,
-
-                        // Bold Handling.
-                        1 => self.cursor.attrs.bold = true,
-                        22 => self.cursor.attrs.bold = false,
-
-                        // Italic Handling.
-                        3 => self.cursor.attrs.italic = true,
-                        23 => self.cursor.attrs.italic = false,
-
-                        // Inverse Handling.
-                        7 => self.cursor.attrs.inverse = true,
-                        27 => self.cursor.attrs.inverse = false,
-
-                        _ => {
-                            warn!("unhandled m action: {:?}", params);
-                        }
-                    }
-                }
-            }
-            _ => {
-                warn!("unhandled action {}", action);
-            }
-        }
-    }
-
-    fn esc_dispatch(&mut self, intermediates: &[u8], ignore: bool, byte: u8) {
-        if ignore {
-            warn!("malformed ESC seq");
-            return;
+        size: crate::Size,
+        mut cursor: Pos,
+        cell: Cell,
+    ) -> anyhow::Result<Pos> {
+        if size.width < 1 {
+            return Err(anyhow!("cannot write to zero width terminal grid"));
         }
 
-        match (intermediates, byte) {
-            // save cursor (ESC 7)
-            ([], b'7') => self.saved_cursor = self.cursor.clone(),
-            // restore cursor (ESC 8)
-            ([], b'8') => self.cursor = self.saved_cursor.clone(),
+        // We do the wrapping before writing a cell rather than after
+        // doing so to allow the user to avoid setting the wrap bit
+        // by entering \r\n right after writing the very rightmost
+        // cell.
+        if cursor.col >= size.width {
+            if let Some(line) = self.get_line_mut(size, cursor.row) {
+                line.is_wrapped = true;
+            } else {
+                return Err(anyhow!(
+                    "unexpectedly missing line when setting wrap marker"
+                ));
+            }
 
-            _ => warn!("unhandled ESC seq ({intermediates:?}, {byte})"),
+            cursor.col = 0;
+            cursor.row += 1;
         }
-    }
 
-    fn terminated(&self) -> bool {
-        // TODO: stub
-        false
-    }
-}
+        // If we've run off the end, add a new line and clamp.
+        if cursor.row >= size.height {
+            self.add_line(Line::new());
+            cursor.row -= 1;
+        }
 
-fn p1_or(params: &vte::Params, default: u16) -> u16 {
-    let n = params.iter().flatten().next().map(|x| *x).unwrap_or(0);
-    if n == 0 {
-        default
-    } else {
-        n
-    }
-}
+        assert!(self.lines >= size.height);
+        while self.buf.len() < cursor.row + 1 {
+            // TODO: these lines will all count as having
+            // not been wrapped and will be retained on reflow.
+            // Is that actually what we want?
+            self.add_line(Line::new());
+        }
 
-fn p2(params: &vte::Params) -> Option<(u16, u16)> {
-    let mut i = params.iter();
-    if let Some(arg) = i.next() {
-        let a1 = if arg.len() == 1 {
-            arg[0]
+        if cursor.col + cell.width() as usize >= size.width + 1 {
+            if let Some(line) = self.get_line_mut(size, cursor.row) {
+                line.is_wrapped = true;
+            } else {
+                return Err(anyhow!(
+                    "unexpectedly missing line when setting wide char wrap marker"
+                ));
+            }
+
+            cursor.col = 0;
+            cursor.row += 1;
+
+            if self.buf.len() < cursor.row + 1 {
+                self.add_line(Line::new())
+            }
+        }
+
+        let mut npad = if cell.width() > 1 {
+            cell.width() - 1
         } else {
-            return None;
+            0
         };
-        if let Some(arg) = i.next() {
-            if arg.len() == 1 {
-                return Some((a1, arg[0]));
-            }
-        }
-    }
-    None
-}
+        self.set(size, cursor, cell).context("setting main cell")?;
+        cursor.col += 1;
+        while npad > 0 {
+            assert!(cursor.col < size.width);
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::Size;
-
-    #[test]
-    fn test_grid_new() {
-        let size = Size {
-            width: 10,
-            height: 5,
-        };
-        let grid = Scrollback::new(5, size);
-        assert_eq!(grid.size, size);
-        assert!(grid.buf.is_empty());
-    }
-
-    #[test]
-    fn test_grid_push_simple() -> anyhow::Result<()> {
-        let size = Size {
-            width: 5,
-            height: 2,
-        };
-        let mut grid = Scrollback::new(5, size);
-        let c = Cell::new('x', term::Attrs::default());
-
-        grid.write_at_cursor(c.clone())?;
-
-        let pos = Pos { row: 0, col: 0 };
-        assert_eq!(grid.get(pos), Some(&c), "Scrollback:\n{grid}");
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_grid_push_wrapping() -> anyhow::Result<()> {
-        let size = Size {
-            width: 2,
-            height: 5,
-        };
-        let mut grid = Scrollback::new(5, size);
-
-        // Fill first line
-        grid.write_at_cursor(Cell::new('1', term::Attrs::default()))?;
-        grid.write_at_cursor(Cell::new('2', term::Attrs::default()))?;
-
-        // This should wrap to next line
-        grid.write_at_cursor(Cell::new('3', term::Attrs::default()))?;
-
-        assert_eq!(
-            grid.get(Pos { row: 0, col: 0 }),
-            Some(&Cell::new('1', term::Attrs::default())),
-            "Scrollback:\n{grid}",
-        );
-        assert_eq!(
-            grid.get(Pos { row: 0, col: 1 }),
-            Some(&Cell::new('2', term::Attrs::default())),
-            "Scrollback:\n{grid}",
-        );
-        assert_eq!(
-            grid.get(Pos { row: 1, col: 0 }),
-            Some(&Cell::new('3', term::Attrs::default())),
-            "Scrollback:\n{grid}",
-        );
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_grid_indexing() -> anyhow::Result<()> {
-        let size = Size {
-            width: 10,
-            height: 3,
-        };
-        let mut grid = Scrollback::new(3, size);
-
-        // Populate 3 lines
-        grid.add_line(Line::new());
-        grid.add_line(Line::new());
-        grid.add_line(Line::new());
-
-        // grid.scrollback now has 3 empty lines.
-        // Let's set some values explicitly to test indexing.
-
-        let top = Pos { row: 0, col: 0 };
-        let middle = Pos { row: 1, col: 0 };
-        let bottom = Pos { row: 2, col: 0 };
-
-        let c_top = Cell::new('T', term::Attrs::default());
-        let c_mid = Cell::new('M', term::Attrs::default());
-        let c_bot = Cell::new('B', term::Attrs::default());
-
-        grid.set(top, c_top.clone())?;
-        grid.set(middle, c_mid.clone())?;
-        grid.set(bottom, c_bot.clone())?;
-
-        assert_eq!(
-            grid.get(top),
-            Some(&c_top),
-            "Failed to get top row. Scrollback:\n{:?}",
-            grid
-        );
-        assert_eq!(
-            grid.get(middle),
-            Some(&c_mid),
-            "Failed to get middle row. Scrollback:\n{:?}",
-            grid
-        );
-        assert_eq!(
-            grid.get(bottom),
-            Some(&c_bot),
-            "Failed to get bottom row. Scrollback:\n{:?}",
-            grid
-        );
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_resize_narrower() -> anyhow::Result<()> {
-        let size = Size {
-            width: 10,
-            height: 5,
-        };
-        let mut grid = Scrollback::new(20, size);
-
-        // Create a line: "0123456789"
-        for i in 0..10 {
-            grid.write_at_cursor(Cell::new(
-                char::from_digit(i, 10).unwrap(),
-                term::Attrs::default(),
-            ))?;
+            self.set(size, cursor, Cell::wide_pad())
+                .context("padding after wide char")?;
+            cursor.col += 1;
+            npad -= 1;
         }
 
-        // Resize to width 5. Should split into "01234" and "56789"
-        let new_size = Size {
-            width: 5,
-            height: 5,
-        };
-        grid.resize(new_size);
-
-        // "56789" should be at bottom (row 1)
-        // "01234" should be above (row 0)
-        assert_eq!(
-            grid.get(Pos { row: 1, col: 0 }),
-            Some(&Cell::new('5', term::Attrs::default())),
-            "Scrollback:\n{:?}",
-            grid
-        );
-        assert_eq!(
-            grid.get(Pos { row: 0, col: 0 }),
-            Some(&Cell::new('0', term::Attrs::default())),
-            "Scrollback:\n{:?}",
-            grid
-        );
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_resize_wider() -> anyhow::Result<()> {
-        let size = Size {
-            width: 5,
-            height: 5,
-        };
-        let mut grid = Scrollback::new(30, size);
-
-        // Create two wrapped lines: "01234" (wrapped) -> "56789"
-        for i in 0..10 {
-            grid.write_at_cursor(Cell::new(
-                char::from_digit(i, 10).unwrap(),
-                term::Attrs::default(),
-            ))?;
-        }
-
-        // Verify initial state
-        assert_eq!(
-            grid.get(Pos { row: 1, col: 0 }),
-            Some(&Cell::new('5', term::Attrs::default())),
-            "Scrollback:\n{:?}",
-            grid
-        );
-
-        // Resize to width 10. Should merge back to "0123456789"
-        let new_size = Size {
-            width: 10,
-            height: 5,
-        };
-        grid.resize(new_size);
-
-        // Should all be on top line
-        assert_eq!(
-            grid.get(Pos { row: 0, col: 0 }),
-            Some(&Cell::new('0', term::Attrs::default())),
-            "Scrollback:\n{:?}",
-            grid
-        );
-        assert_eq!(
-            grid.get(Pos { row: 0, col: 9 }),
-            Some(&Cell::new('9', term::Attrs::default())),
-            "Scrollback:\n{:?}",
-            grid
-        );
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_reflow_roundtrip() -> anyhow::Result<()> {
-        // Parameterized-style test
-        let shapes = vec![
-            (10, 20), // Start wide, go narrow
-            (5, 10),  // Start narrow, go wide
-            (10, 10), // No change
-        ];
-
-        for (start_w, end_w) in shapes {
-            let start_size = Size {
-                width: start_w,
-                height: 10,
-            };
-            let mut grid = Scrollback::new(100, start_size);
-
-            // Fill with deterministic data
-            let count = 30;
-            for i in 0..count {
-                grid.write_at_cursor(Cell::new(
-                    char::from_u32(65 + i % 26).unwrap(),
-                    term::Attrs::default(),
-                ))?;
-            }
-
-            // Snapshot state (conceptually) - we can't easily clone the grid state to compare
-            // directly if we don't have access to inner fields easily, but we can verify content.
-
-            // Resize
-            grid.resize(Size {
-                width: end_w,
-                height: 10,
-            });
-
-            // Resize back
-            grid.resize(start_size);
-
-            // Verify content is identical to if we just pushed it
-            let mut expected_grid = Scrollback::new(100, start_size);
-            for i in 0..count {
-                expected_grid.write_at_cursor(Cell::new(
-                    char::from_u32(65 + i % 26).unwrap(),
-                    term::Attrs::default(),
-                ))?;
-            }
-
-            assert_eq!(
-                grid, expected_grid,
-                "Scrollback state mismatch after roundtrip resize {} -> {} -> {}",
-                start_w, end_w, start_w
-            );
-        }
-
-        Ok(())
+        Ok(cursor)
     }
 }

@@ -14,10 +14,15 @@
 
 //! The altscreen module defines the representation of the alt screen.
 
+use std::collections::VecDeque;
+
 use crate::{
+    cell::Cell,
     line::Line,
-    term::{Cursor, Pos},
+    term::{self, AsTermInput, Pos},
 };
+
+use anyhow::{anyhow, Context};
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct AltScreen {
@@ -25,135 +30,92 @@ pub struct AltScreen {
     /// buf.len().
     ///
     /// buf[0] is at the top of the screen and buf[buf.len()-1] is at the bottom.
-    buf: Vec<Line>,
-    /// The number of lines at the bottom of the scrollback (front of the deque)
-    /// which are logically in view. This is the height of the terminal that the user
-    /// has configured or resized to.
-    size: crate::Size,
-    /// The current position of the cursor within the in-view window described
-    /// by `size`. (0,0) is the upper left.
-    cursor: Cursor,
-    // The slot where cursor position info is saved by the SCP/RCP
-    // and ESC 7 / ESC 8 commands.
-    saved_cursor: Cursor,
+    pub buf: VecDeque<Line>,
 }
 
 impl AltScreen {
-    fn new(size: crate::Size) -> Self {
-        let mut buf = Vec::new();
+    pub fn new(size: crate::Size) -> Self {
+        let mut buf = VecDeque::new();
         for _ in 0..size.height {
-            buf.push(Line::new());
+            buf.push_back(Line::new());
         }
-        AltScreen {
-            buf,
-            size,
-            cursor: Cursor::new(Pos { row: 0, col: 0 }),
-            saved_cursor: Cursor::new(Pos { row: 0, col: 0 }),
+        AltScreen { buf }
+    }
+
+    /// Write the given cell to the given cursor position, returning the next
+    /// cursor position.
+    pub fn write_at_cursor(
+        &mut self,
+        size: crate::Size,
+        mut cursor: Pos,
+        cell: Cell,
+    ) -> anyhow::Result<Pos> {
+        if size.width < 1 {
+            return Err(anyhow!("cannot write to zero width terminal grid"));
         }
+
+        let cell_width = cell.width() as usize;
+        self.buf[cursor.row]
+            .set_cell(size.width, cursor.col, cell)
+            .context("setting cell in alt screen")?;
+
+        cursor.col += cell_width;
+        if cursor.col >= size.width {
+            cursor.row += 1;
+            cursor.col = 0;
+
+            // If we are the very end, scroll by a line.
+            // TODO: if `CSI ? 7 1` has been sent by the application
+            // to disable scrolling, we should instead leave the cursor
+            // where it is in this case.
+            if cursor.row >= size.height {
+                self.buf.pop_front();
+                self.buf.push_back(Line::new());
+            }
+        }
+        cursor.clamp_to(size);
+
+        Ok(cursor)
     }
 
     /// Resize the alt screen. This does not perform any reflow logic,
     /// instead just trimming any cells that are no longer within the
     /// screen.
-    fn resize(&mut self, new_size: crate::Size) {
-        assert_eq!(self.buf.len(), self.size.height);
-
-        if new_size.width < self.size.width {
-            for line in self.buf.iter_mut() {
-                line.truncate(new_size.width);
-            }
+    pub fn resize(&mut self, new_size: crate::Size) {
+        for line in self.buf.iter_mut() {
+            line.truncate(new_size.width);
         }
 
-        if new_size.height > self.size.height {
-            for _ in 0..(new_size.height - self.size.height) {
-                self.buf.push(Line::new());
+        let old_height = self.buf.len();
+        if new_size.height > old_height {
+            for _ in 0..(new_size.height - old_height) {
+                self.buf.push_back(Line::new());
             }
-        } else if new_size.height < self.size.height {
-            for _ in 0..(self.size.height - new_size.height) {
-                self.buf.pop();
+        } else if new_size.height < old_height {
+            for _ in 0..(old_height - new_size.height) {
+                self.buf.pop_back();
             }
         }
         // no-op if they have the same height
-
-        self.size = new_size;
-
-        self.cursor.clamp_to(self.size);
-        self.saved_cursor.clamp_to(self.size);
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::term::Attrs;
-    use crate::Size;
-
-    #[test]
-    fn resize_grow_height() {
-        let mut screen = AltScreen::new(Size {
-            width: 10,
-            height: 5,
-        });
-        screen.resize(Size {
-            width: 10,
-            height: 10,
-        });
-        assert_eq!(screen.buf.len(), 10);
-        assert_eq!(screen.size.height, 10);
+impl std::fmt::Display for AltScreen {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for line in self.buf.iter() {
+            write!(f, "{}", line)?;
+        }
+        Ok(())
     }
+}
 
-    #[test]
-    fn resize_shrink_height() {
-        let mut screen = AltScreen::new(Size {
-            width: 10,
-            height: 10,
-        });
-        screen.resize(Size {
-            width: 10,
-            height: 5,
-        });
-        assert_eq!(screen.buf.len(), 5);
-        assert_eq!(screen.size.height, 5);
-    }
-
-    #[test]
-    fn resize_shrink_width() {
-        let mut screen = AltScreen::new(Size {
-            width: 10,
-            height: 5,
-        });
-        // Add a cell at col 9
-        screen.buf[0]
-            .set_cell(10, 9, crate::cell::Cell::new('a', Attrs::default()))
-            .unwrap();
-        assert_eq!(screen.buf[0].cells.len(), 10);
-
-        screen.resize(Size {
-            width: 5,
-            height: 5,
-        });
-        assert_eq!(screen.size.width, 5);
-        // Line should be truncated
-        assert_eq!(screen.buf[0].cells.len(), 5);
-    }
-
-    #[test]
-    fn cursor_clamping() {
-        let mut screen = AltScreen::new(Size {
-            width: 10,
-            height: 10,
-        });
-        screen.cursor.pos = Pos { row: 9, col: 9 };
-        screen.saved_cursor.pos = Pos { row: 8, col: 8 };
-
-        screen.resize(Size {
-            width: 5,
-            height: 5,
-        });
-
-        assert_eq!(screen.cursor.pos.row, 4);
-        assert_eq!(screen.cursor.pos.col, 4);
-        assert_eq!(screen.saved_cursor.pos.row, 4);
-        assert_eq!(screen.saved_cursor.pos.col, 4);
+impl AsTermInput for AltScreen {
+    fn term_input_into(&self, buf: &mut Vec<u8>) {
+        for (i, line) in self.buf.iter().enumerate() {
+            line.term_input_into(buf);
+            if i != self.buf.len() - 1 {
+                term::Crlf::default().term_input_into(buf);
+            }
+        }
     }
 }

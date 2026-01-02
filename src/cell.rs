@@ -164,7 +164,7 @@ impl std::fmt::Debug for Cell {
         if self.wide_padding {
             write!(f, "-")?;
         } else if self.empty {
-            write!(f, "*")?;
+            write!(f, "☐")?;
         }
 
         if self.attrs.has_attrs() {

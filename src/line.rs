@@ -38,7 +38,7 @@ impl std::fmt::Display for Line {
         for cell in &self.cells {
             write!(f, "{}", cell)?;
         }
-        if !self.is_wrapped {
+        if self.is_wrapped {
             writeln!(f, "⏎")?;
         } else {
             writeln!(f)?;
