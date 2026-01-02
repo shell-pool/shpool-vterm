@@ -88,15 +88,6 @@ pub struct Size {
     pub height: usize,
 }
 
-/// A position within the terminal. Generally, this refers to a grid
-/// mode view of the terminal, not the underlying logical lines mode
-/// that we actually store the data in.
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub struct Pos {
-    pub row: usize,
-    pub col: usize,
-}
-
 // TODO: handle clear
 
 #[cfg(test)]

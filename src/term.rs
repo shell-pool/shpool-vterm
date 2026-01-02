@@ -31,12 +31,12 @@ use std::sync::OnceLock;
 /// have been previously set via control codes.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Cursor {
-    pub pos: crate::Pos,
+    pub pos: Pos,
     pub attrs: Attrs,
 }
 
 impl Cursor {
-    pub fn new(pos: crate::Pos) -> Self {
+    pub fn new(pos: Pos) -> Self {
         Cursor {
             pos,
             attrs: Attrs::default(),
@@ -65,6 +65,15 @@ impl Cursor {
             self.pos.col = high_col - 1;
         }
     }
+}
+
+/// A position within the terminal. Generally, this refers to a grid
+/// mode view of the terminal, not the underlying logical lines mode
+/// that we actually store the data in.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub struct Pos {
+    pub row: usize,
+    pub col: usize,
 }
 
 pub trait Region {

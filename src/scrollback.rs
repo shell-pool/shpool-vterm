@@ -19,7 +19,7 @@
 use crate::{
     cell::Cell,
     line::Line,
-    term::{self, AsTermInput, Cursor},
+    term::{self, AsTermInput, Cursor, Pos},
 };
 use std::collections::VecDeque;
 
@@ -83,11 +83,11 @@ impl Scrollback {
             lines: scrollback_lines,
             size,
             cursor: Cursor {
-                pos: crate::Pos { row: 0, col: 0 },
+                pos: Pos { row: 0, col: 0 },
                 attrs: term::Attrs::default(),
             },
             saved_cursor: Cursor {
-                pos: crate::Pos { row: 0, col: 0 },
+                pos: Pos { row: 0, col: 0 },
                 attrs: term::Attrs::default(),
             },
         }
@@ -123,7 +123,7 @@ impl Scrollback {
 
     /// Get the cell at the given grid coordinates.
     #[allow(dead_code)]
-    pub fn get(&self, pos: crate::Pos) -> Option<&Cell> {
+    pub fn get(&self, pos: Pos) -> Option<&Cell> {
         if let Some(line) = self.get_line(pos.row) {
             return line.get_cell(self.size.width, pos.col);
         }
@@ -131,7 +131,7 @@ impl Scrollback {
     }
 
     /// Set the cell at the given grid coordinates.
-    pub fn set(&mut self, pos: crate::Pos, cell: Cell) -> anyhow::Result<()> {
+    pub fn set(&mut self, pos: Pos, cell: Cell) -> anyhow::Result<()> {
         let width = self.size.width;
         if let Some(line) = self.get_line_mut(pos.row) {
             return line.set_cell(width, pos.col, cell);
@@ -502,7 +502,7 @@ fn p2(params: &vte::Params) -> Option<(u16, u16)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Pos, Size};
+    use crate::Size;
 
     #[test]
     fn test_grid_new() {

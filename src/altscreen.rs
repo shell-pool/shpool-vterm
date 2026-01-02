@@ -14,7 +14,10 @@
 
 //! The altscreen module defines the representation of the alt screen.
 
-use crate::{line::Line, term::Cursor, Pos};
+use crate::{
+    line::Line,
+    term::{Cursor, Pos},
+};
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct AltScreen {
@@ -83,7 +86,7 @@ impl AltScreen {
 mod tests {
     use super::*;
     use crate::term::Attrs;
-    use crate::{Pos, Size};
+    use crate::Size;
 
     #[test]
     fn resize_grow_height() {
