@@ -12,12 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod altscreen;
 mod cell;
+mod line;
 mod scrollback;
 mod term;
 
-use term::AsTermInput;
 use scrollback::Scrollback;
+use term::AsTermInput;
 
 /// A representation of a terminal.
 pub struct Term {

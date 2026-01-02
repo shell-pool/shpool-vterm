@@ -17,8 +17,9 @@
 //! a complete terminal representation in lib.rs.
 
 use crate::{
-    cell::{self, Cell},
-    term::{self, AsTermInput},
+    cell::Cell,
+    line::Line,
+    term::{self, AsTermInput, Cursor},
 };
 use std::collections::VecDeque;
 
@@ -52,12 +53,6 @@ pub struct Scrollback {
 // TODO: to support the alt screen, I need to refactor the grid structures
 // into a Scrollback struct, then make an AltScreen struct that actually
 // has a fixed grid of cells plus its own dedicated cursor/saved_cursor.
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-struct Cursor {
-    pos: crate::Pos,
-    attrs: term::Attrs,
-}
 
 impl std::fmt::Display for Scrollback {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -204,6 +199,10 @@ impl Scrollback {
     }
 
     fn reflow(&mut self, new_width: usize) {
+        // TODO: this needs to move the cursor and saved cursor to have them
+        // point to the same cell that they did at the start of the reflow
+        // process. We currently don't do that, so reflow is broken.
+
         let mut new_scrollback = VecDeque::with_capacity(self.buf.len());
         let mut logical_line = VecDeque::new();
         while let Some(grid_line) = self.buf.pop_back() {
@@ -339,36 +338,31 @@ impl vte::Perform for Scrollback {
             // CUU (Cursor Up)
             'A' => {
                 let n = p1_or(params, 1) as usize;
-                if n > self.cursor.pos.row {
-                    self.cursor.pos.row = 0;
-                } else {
-                    self.cursor.pos.row -= n;
-                }
+                self.cursor.pos.row = self.cursor.pos.row.saturating_sub(n)
             }
             // CUD (Cursor Down)
             'B' => {
                 let n = p1_or(params, 1) as usize;
-                self.cursor.pos.row = std::cmp::min(self.size.height - 1, self.cursor.pos.row + n);
+                self.cursor.pos.row = self.cursor.pos.row + n;
+                self.cursor.clamp_to(self.size);
             }
             // CUF (Cursor Forward)
             'C' => {
                 let n = p1_or(params, 1) as usize;
-                self.cursor.pos.col = std::cmp::min(self.size.width - 1, self.cursor.pos.col + n);
+                self.cursor.pos.col = self.cursor.pos.col + n;
+                self.cursor.clamp_to(self.size);
             }
             // CUF (Cursor Backwards)
             'D' => {
                 let n = p1_or(params, 1) as usize;
-                if n > self.cursor.pos.col {
-                    self.cursor.pos.col = 0;
-                } else {
-                    self.cursor.pos.col -= n;
-                }
+                self.cursor.pos.col = self.cursor.pos.col.saturating_sub(n);
             }
             // CNL (Cursor Next Line)
             'E' => {
                 let n = p1_or(params, 1) as usize;
-                self.cursor.pos.row = std::cmp::min(self.size.height - 1, self.cursor.pos.row + n);
+                self.cursor.pos.row = self.cursor.pos.row + n;
                 self.cursor.pos.col = 0;
+                self.cursor.clamp_to(self.size);
             }
             // CPL (Cursor Prev Line)
             'F' => {
@@ -384,21 +378,17 @@ impl vte::Perform for Scrollback {
             'G' => {
                 let n = p1_or(params, 1) as usize;
                 let n = n - 1; // translate to 0 indexing
-                self.cursor.pos.col = std::cmp::min(self.size.width - 1, n);
+                self.cursor.pos.col = n;
+                self.cursor.clamp_to(self.size);
             }
             // CUP (Cursor Set Position)
             'H' => {
                 if let Some((row, col)) = p2(params) {
                     // adjust 1 indexing to 0 indexing
-                    let (mut row, mut col) = ((row - 1) as usize, (col - 1) as usize);
-                    if row >= self.size.height {
-                        row = self.size.height - 1;
-                    }
-                    if col >= self.size.width {
-                        col = self.size.width - 1;
-                    }
+                    let (row, col) = ((row - 1) as usize, (col - 1) as usize);
                     self.cursor.pos.row = row;
                     self.cursor.pos.col = col;
+                    self.cursor.clamp_to(self.size);
                 }
             }
 
@@ -509,153 +499,10 @@ fn p2(params: &vte::Params) -> Option<(u16, u16)> {
     None
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
-struct Line {
-    /// The cells stored in this line.
-    cells: Vec<Cell>,
-    /// If true, indicates that this line was automatically wrapped due to
-    /// the terminal width. The following line is part of the same logical
-    /// line and should be reflowed together with this line on terminal resize.
-    is_wrapped: bool,
-}
-
-impl std::fmt::Display for Line {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        for cell in &self.cells {
-            write!(f, "{}", cell)?;
-        }
-        if !self.is_wrapped {
-            writeln!(f, "⏎")?;
-        } else {
-            writeln!(f)?;
-        }
-        Ok(())
-    }
-}
-
-impl AsTermInput for Line {
-    // We start every line with blank attrs, and it is our responsibility
-    // to reset the attrs at the end of each line. We could produce more
-    // optimal output if we fused attr runs across lines, but it is probably
-    // fine to just do it like this and it is better to keep things simple
-    // unless we need to fuse.
-    fn term_input_into(&self, buf: &mut Vec<u8>) {
-        let blank_attrs = term::Attrs::default();
-        let mut current_attrs = &blank_attrs;
-
-        for cell in self.cells.iter() {
-            if cell.attrs() != current_attrs {
-                for code in current_attrs.transition_to(cell.attrs()) {
-                    code.term_input_into(buf);
-                }
-                current_attrs = cell.attrs();
-            }
-            cell.term_input_into(buf);
-        }
-
-        if current_attrs != &blank_attrs {
-            for code in current_attrs.transition_to(&blank_attrs) {
-                code.term_input_into(buf);
-            }
-        }
-    }
-}
-
-/// A line contains a list of cells.
-///
-/// Note that a line can't really be used on its own because the grid
-/// width is not stored within the line. For this reason, a line is really
-/// an internal implementation detail of a grid, since most operations need
-/// to have the grid width passed down by the grid implementation.
-impl Line {
-    fn new() -> Self {
-        Line {
-            cells: vec![],
-            is_wrapped: false,
-        }
-    }
-
-    /// Get the cell at the given grid position.
-    #[allow(dead_code)]
-    fn get_cell(&self, width: usize, col: usize) -> Option<&Cell> {
-        if col >= width {
-            return None;
-        }
-
-        if col >= self.cells.len() {
-            return Some(cell::empty());
-        }
-
-        return Some(&self.cells[col]);
-    }
-
-    // Set the given column to the given cell.
-    //
-    // Panics: if this is out of bounds.
-    fn set_cell(&mut self, width: usize, col: usize, cell: Cell) -> anyhow::Result<()> {
-        if col >= width {
-            return Err(anyhow!("{} out of bounds (width={})", col, width));
-        }
-
-        if col >= self.cells.len() {
-            while self.cells.len() < col {
-                self.cells.push(Cell::empty())
-            }
-            self.cells.push(cell);
-            return Ok(());
-        }
-
-        self.cells[col] = cell;
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{Pos, Size};
-
-    #[test]
-    fn test_line_new() {
-        let line = Line::new();
-        assert!(line.cells.is_empty());
-        assert!(!line.is_wrapped);
-    }
-
-    #[test]
-    fn test_line_set() -> anyhow::Result<()> {
-        let mut line = Line::new();
-        let width = 5;
-        let c1 = Cell::new('a', term::Attrs::default());
-        let c2 = Cell::new('b', term::Attrs::default());
-
-        // Set within current length (needs push first to not be out of bounds of vector if we treated it strictly,
-        // but set() handles extension)
-
-        // set at 0
-        line.set_cell(width, 0, c1.clone())?;
-        assert_eq!(line.get_cell(width, 0), Some(&c1));
-
-        // set at 2 (should pad with empty)
-        line.set_cell(width, 2, c2.clone())?;
-        assert_eq!(line.get_cell(width, 0), Some(&c1));
-        assert!(line.get_cell(width, 1).unwrap().is_empty());
-        assert_eq!(line.get_cell(width, 2), Some(&c2));
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_line_set_oob() -> anyhow::Result<()> {
-        let mut line = Line::new();
-        let width = 5;
-        match line.set_cell(width, 5, Cell::new('a', term::Attrs::default())) {
-            Err(e) => assert!(format!("{e:?}").contains("out of bounds")),
-            _ => assert!(false, "expected out of bounds error"),
-        }
-
-        Ok(())
-    }
 
     #[test]
     fn test_grid_new() {
