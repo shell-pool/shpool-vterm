@@ -13,30 +13,16 @@
 // limitations under the License.
 
 mod cell;
-mod grid;
+mod scrollback;
 mod term;
 
 use term::AsTermInput;
+use scrollback::Scrollback;
 
 /// A representation of a terminal.
-///
-/// The terminal state is represented as a dequeue of lines which
-/// might be arbitrarily long. If a new line is added to the terminal
-/// when the queue is full, the oldest line will be discarded. It is
-/// importaint to understand that lines in the terminal state do not
-/// corrispond to physical lines as they would appear on the screen.
-/// A single logical line could wrap zero or more times, causing it
-/// to take up one or more physical lines when displayed.
-///
-/// TODO: Will I need to have a "grid view" layer that allows indexing
-/// into the logical data as if it were laid out in a grid? I think this
-/// may be required to handle certain control sequences. Might need to
-/// use some sort of weird tree structure that notes the grid line that
-/// each logical line starts on and then allows you to find the logical
-/// line for each grid line.
 pub struct Term {
     parser: vte::Parser,
-    grid: grid::Grid,
+    grid: Scrollback,
 }
 
 impl Term {
@@ -47,7 +33,7 @@ impl Term {
     pub fn new(scrollback_lines: usize, size: Size) -> Self {
         Term {
             parser: vte::Parser::new(),
-            grid: grid::Grid::new(scrollback_lines, size),
+            grid: Scrollback::new(scrollback_lines, size),
         }
     }
 

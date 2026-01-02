@@ -12,10 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The grid module defines a view of the terminal where every cell is
-//! assigned to a definite row and column. It is used at dump time to
-//! dump the precise information requested and is also used to display
-//! some commands.
+//! The scrollback module defines the representation of the main terminal
+//! screen. This gets stiched together with the alt screen module to form
+//! a complete terminal representation in lib.rs.
 
 use crate::{
     cell::{self, Cell},
@@ -26,17 +25,18 @@ use std::collections::VecDeque;
 use anyhow::{anyhow, Context};
 use tracing::warn;
 
-// A grid stores all the termianal state.
+// A scrollback stores the termianal state for the main screen.
+// Alt screen state is stored seperately.
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub struct Grid {
+pub struct Scrollback {
     /// The entire scrollback buffer for the terminal.
     ///
     /// The bottom of the terminal is stored at the front of the deque
     /// and the top is stored at the back of the deque.
-    scrollback: VecDeque<Line>,
+    buf: VecDeque<Line>,
     /// The number of lines of scrollback to store, independent of the
     /// size of the grid that is in view.
-    scrollback_lines: usize,
+    lines: usize,
     /// The number of lines at the bottom of the scrollback (front of the deque)
     /// which are logically in view. This is the height of the terminal that the user
     /// has configured or resized to.
@@ -49,24 +49,28 @@ pub struct Grid {
     saved_cursor: Cursor,
 }
 
+// TODO: to support the alt screen, I need to refactor the grid structures
+// into a Scrollback struct, then make an AltScreen struct that actually
+// has a fixed grid of cells plus its own dedicated cursor/saved_cursor.
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct Cursor {
     pos: crate::Pos,
     attrs: term::Attrs,
 }
 
-impl std::fmt::Display for Grid {
+impl std::fmt::Display for Scrollback {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        for line in self.scrollback.iter().rev() {
+        for line in self.buf.iter().rev() {
             write!(f, "{}", line)?;
         }
         Ok(())
     }
 }
 
-impl AsTermInput for Grid {
+impl AsTermInput for Scrollback {
     fn term_input_into(&self, buf: &mut Vec<u8>) {
-        for (i, line) in self.scrollback.iter().enumerate().rev() {
+        for (i, line) in self.buf.iter().enumerate().rev() {
             line.term_input_into(buf);
             if i != 0 {
                 term::Crlf::default().term_input_into(buf);
@@ -75,13 +79,13 @@ impl AsTermInput for Grid {
     }
 }
 
-impl Grid {
+impl Scrollback {
     /// Create a new grid with the given number of lines of scrollback
     /// storage, and the given size window in view.
     pub fn new(scrollback_lines: usize, size: crate::Size) -> Self {
-        Grid {
-            scrollback: VecDeque::new(),
-            scrollback_lines,
+        Scrollback {
+            buf: VecDeque::new(),
+            lines: scrollback_lines,
             size,
             cursor: Cursor {
                 pos: crate::Pos { row: 0, col: 0 },
@@ -109,17 +113,17 @@ impl Grid {
     /// Get the max number of scrollback lines this grid
     /// can store.
     pub fn scrollback_lines(&self) -> usize {
-        self.scrollback_lines
+        self.lines
     }
 
     /// Set a new max number of scrollback lines this grid can
     /// store. If this is less than the current number, trailing
     /// data will be dropped.
     pub fn set_scrollback_lines(&mut self, scrollback_lines: usize) {
-        while self.scrollback.len() > scrollback_lines {
-            self.scrollback.pop_back();
+        while self.buf.len() > scrollback_lines {
+            self.buf.pop_back();
         }
-        self.scrollback_lines = scrollback_lines;
+        self.lines = scrollback_lines;
     }
 
     /// Get the cell at the given grid coordinates.
@@ -148,7 +152,7 @@ impl Grid {
             return Err(anyhow!("cannot write to zero width terminal grid"));
         }
 
-        while self.scrollback.len() < self.cursor.pos.row + 1 {
+        while self.buf.len() < self.cursor.pos.row + 1 {
             // TODO: these lines will all count as having
             // not been wrapped and will be retained on reflow.
             // Is that actually what we want?
@@ -167,7 +171,7 @@ impl Grid {
             self.cursor.pos.col = 0;
             self.cursor.pos.row += 1;
 
-            if self.scrollback.len() < self.cursor.pos.row + 1 {
+            if self.buf.len() < self.cursor.pos.row + 1 {
                 self.add_line(Line::new())
             }
         }
@@ -193,16 +197,16 @@ impl Grid {
     }
 
     fn add_line(&mut self, line: Line) {
-        self.scrollback.push_front(line);
-        while self.scrollback.len() > self.scrollback_lines {
-            self.scrollback.pop_back();
+        self.buf.push_front(line);
+        while self.buf.len() > self.lines {
+            self.buf.pop_back();
         }
     }
 
     fn reflow(&mut self, new_width: usize) {
-        let mut new_scrollback = VecDeque::with_capacity(self.scrollback.len());
+        let mut new_scrollback = VecDeque::with_capacity(self.buf.len());
         let mut logical_line = VecDeque::new();
-        while let Some(grid_line) = self.scrollback.pop_back() {
+        while let Some(grid_line) = self.buf.pop_back() {
             let is_wrapped = grid_line.is_wrapped;
             logical_line.push_back(grid_line);
 
@@ -251,12 +255,12 @@ impl Grid {
             }
         }
 
-        self.scrollback = new_scrollback;
+        self.buf = new_scrollback;
     }
 
     fn get_line(&self, row: usize) -> Option<&Line> {
-        let in_view_scrollback_len = if self.scrollback.len() < self.size.height {
-            self.scrollback.len()
+        let in_view_scrollback_len = if self.buf.len() < self.size.height {
+            self.buf.len()
         } else {
             self.size.height
         };
@@ -266,12 +270,12 @@ impl Grid {
         }
 
         let idx_from_bottom = (in_view_scrollback_len - 1) - row;
-        Some(&self.scrollback[idx_from_bottom])
+        Some(&self.buf[idx_from_bottom])
     }
 
     fn get_line_mut(&mut self, row: usize) -> Option<&mut Line> {
-        let in_view_scrollback_len = if self.scrollback.len() < self.size.height {
-            self.scrollback.len()
+        let in_view_scrollback_len = if self.buf.len() < self.size.height {
+            self.buf.len()
         } else {
             self.size.height
         };
@@ -281,11 +285,11 @@ impl Grid {
         }
 
         let idx_from_bottom = (in_view_scrollback_len - 1) - row;
-        Some(&mut self.scrollback[idx_from_bottom])
+        Some(&mut self.buf[idx_from_bottom])
     }
 }
 
-impl vte::Perform for Grid {
+impl vte::Perform for Scrollback {
     fn print(&mut self, c: char) {
         let attrs = self.cursor.attrs.clone();
         if let Err(e) = self.write_at_cursor(Cell::new(c, attrs)) {
@@ -659,9 +663,9 @@ mod tests {
             width: 10,
             height: 5,
         };
-        let grid = Grid::new(5, size);
+        let grid = Scrollback::new(5, size);
         assert_eq!(grid.size, size);
-        assert!(grid.scrollback.is_empty());
+        assert!(grid.buf.is_empty());
     }
 
     #[test]
@@ -670,13 +674,13 @@ mod tests {
             width: 5,
             height: 2,
         };
-        let mut grid = Grid::new(5, size);
+        let mut grid = Scrollback::new(5, size);
         let c = Cell::new('x', term::Attrs::default());
 
         grid.write_at_cursor(c.clone())?;
 
         let pos = Pos { row: 0, col: 0 };
-        assert_eq!(grid.get(pos), Some(&c), "Grid:\n{grid}");
+        assert_eq!(grid.get(pos), Some(&c), "Scrollback:\n{grid}");
 
         Ok(())
     }
@@ -687,7 +691,7 @@ mod tests {
             width: 2,
             height: 5,
         };
-        let mut grid = Grid::new(5, size);
+        let mut grid = Scrollback::new(5, size);
 
         // Fill first line
         grid.write_at_cursor(Cell::new('1', term::Attrs::default()))?;
@@ -699,17 +703,17 @@ mod tests {
         assert_eq!(
             grid.get(Pos { row: 0, col: 0 }),
             Some(&Cell::new('1', term::Attrs::default())),
-            "Grid:\n{grid}",
+            "Scrollback:\n{grid}",
         );
         assert_eq!(
             grid.get(Pos { row: 0, col: 1 }),
             Some(&Cell::new('2', term::Attrs::default())),
-            "Grid:\n{grid}",
+            "Scrollback:\n{grid}",
         );
         assert_eq!(
             grid.get(Pos { row: 1, col: 0 }),
             Some(&Cell::new('3', term::Attrs::default())),
-            "Grid:\n{grid}",
+            "Scrollback:\n{grid}",
         );
 
         Ok(())
@@ -721,7 +725,7 @@ mod tests {
             width: 10,
             height: 3,
         };
-        let mut grid = Grid::new(3, size);
+        let mut grid = Scrollback::new(3, size);
 
         // Populate 3 lines
         grid.add_line(Line::new());
@@ -746,19 +750,19 @@ mod tests {
         assert_eq!(
             grid.get(top),
             Some(&c_top),
-            "Failed to get top row. Grid:\n{:?}",
+            "Failed to get top row. Scrollback:\n{:?}",
             grid
         );
         assert_eq!(
             grid.get(middle),
             Some(&c_mid),
-            "Failed to get middle row. Grid:\n{:?}",
+            "Failed to get middle row. Scrollback:\n{:?}",
             grid
         );
         assert_eq!(
             grid.get(bottom),
             Some(&c_bot),
-            "Failed to get bottom row. Grid:\n{:?}",
+            "Failed to get bottom row. Scrollback:\n{:?}",
             grid
         );
 
@@ -771,7 +775,7 @@ mod tests {
             width: 10,
             height: 5,
         };
-        let mut grid = Grid::new(20, size);
+        let mut grid = Scrollback::new(20, size);
 
         // Create a line: "0123456789"
         for i in 0..10 {
@@ -793,13 +797,13 @@ mod tests {
         assert_eq!(
             grid.get(Pos { row: 1, col: 0 }),
             Some(&Cell::new('5', term::Attrs::default())),
-            "Grid:\n{:?}",
+            "Scrollback:\n{:?}",
             grid
         );
         assert_eq!(
             grid.get(Pos { row: 0, col: 0 }),
             Some(&Cell::new('0', term::Attrs::default())),
-            "Grid:\n{:?}",
+            "Scrollback:\n{:?}",
             grid
         );
 
@@ -812,7 +816,7 @@ mod tests {
             width: 5,
             height: 5,
         };
-        let mut grid = Grid::new(30, size);
+        let mut grid = Scrollback::new(30, size);
 
         // Create two wrapped lines: "01234" (wrapped) -> "56789"
         for i in 0..10 {
@@ -826,7 +830,7 @@ mod tests {
         assert_eq!(
             grid.get(Pos { row: 1, col: 0 }),
             Some(&Cell::new('5', term::Attrs::default())),
-            "Grid:\n{:?}",
+            "Scrollback:\n{:?}",
             grid
         );
 
@@ -841,13 +845,13 @@ mod tests {
         assert_eq!(
             grid.get(Pos { row: 0, col: 0 }),
             Some(&Cell::new('0', term::Attrs::default())),
-            "Grid:\n{:?}",
+            "Scrollback:\n{:?}",
             grid
         );
         assert_eq!(
             grid.get(Pos { row: 0, col: 9 }),
             Some(&Cell::new('9', term::Attrs::default())),
-            "Grid:\n{:?}",
+            "Scrollback:\n{:?}",
             grid
         );
 
@@ -868,7 +872,7 @@ mod tests {
                 width: start_w,
                 height: 10,
             };
-            let mut grid = Grid::new(100, start_size);
+            let mut grid = Scrollback::new(100, start_size);
 
             // Fill with deterministic data
             let count = 30;
@@ -892,7 +896,7 @@ mod tests {
             grid.resize(start_size);
 
             // Verify content is identical to if we just pushed it
-            let mut expected_grid = Grid::new(100, start_size);
+            let mut expected_grid = Scrollback::new(100, start_size);
             for i in 0..count {
                 expected_grid.write_at_cursor(Cell::new(
                     char::from_u32(65 + i % 26).unwrap(),
@@ -902,13 +906,11 @@ mod tests {
 
             assert_eq!(
                 grid, expected_grid,
-                "Grid state mismatch after roundtrip resize {} -> {} -> {}",
+                "Scrollback state mismatch after roundtrip resize {} -> {} -> {}",
                 start_w, end_w, start_w
             );
         }
 
         Ok(())
     }
-
-    // TODO: write a test for a wide char
 }
