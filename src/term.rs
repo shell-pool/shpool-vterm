@@ -247,21 +247,35 @@ pub struct ControlCodes {
     pub restore_cursor_position: ControlCode,
     pub save_cursor: ControlCode,
     pub restore_cursor: ControlCode,
+    pub enable_alt_screen: ControlCode,
+    pub disable_alt_screen: ControlCode,
 }
 
 #[derive(Clone, Debug)]
 #[non_exhaustive]
 pub enum ControlCode {
-    CSI { params: Vec<Vec<u16>>, action: char },
-    ESC { intermediates: Vec<u8>, byte: u8 },
+    CSI {
+        params: Vec<Vec<u16>>,
+        intermediates: Vec<u8>,
+        action: char,
+    },
+    ESC {
+        intermediates: Vec<u8>,
+        byte: u8,
+    },
     __NonExhaustive,
 }
 
 impl AsTermInput for ControlCode {
     fn term_input_into(&self, buf: &mut Vec<u8>) {
         match self {
-            ControlCode::CSI { params, action } => {
+            ControlCode::CSI {
+                params,
+                intermediates,
+                action,
+            } => {
                 buf.extend_from_slice(b"\x1b["); // CSI
+                buf.extend_from_slice(intermediates);
 
                 for (i, param) in params.iter().enumerate() {
                     if i != 0 {
@@ -296,8 +310,15 @@ impl AsTermInput for ControlCode {
 impl std::fmt::Display for ControlCode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ControlCode::CSI { params, action } => {
+            ControlCode::CSI {
+                params,
+                intermediates,
+                action,
+            } => {
                 write!(f, "CSI ")?;
+                for intermediate in intermediates {
+                    write!(f, "{} ", *intermediate as char)?;
+                }
                 for (i, param) in params.iter().enumerate() {
                     if i != 0 {
                         write!(f, "; ")?;
@@ -325,27 +346,38 @@ impl ControlCode {
     {
         let mut fused_codes = vec![];
         let mut current_params = vec![];
+        let mut current_intermediates = vec![];
         let mut current_action = None;
         for code in control_codes.into_iter() {
-            if let ControlCode::CSI { params, action } = code {
+            if let ControlCode::CSI {
+                params,
+                intermediates,
+                action,
+            } = code
+            {
                 if let Some(cur_action) = current_action {
-                    if cur_action == action {
+                    if cur_action == action && current_intermediates == intermediates {
                         current_params.extend(params);
                     } else {
                         fused_codes.push(ControlCode::CSI {
                             params: std::mem::take(&mut current_params),
-                            action,
+                            intermediates: std::mem::take(&mut current_intermediates),
+                            action: cur_action,
                         });
                         current_action = Some(action);
+                        current_intermediates = intermediates;
+                        current_params = params;
                     }
                 } else {
                     current_action = Some(action);
+                    current_intermediates = intermediates;
                     current_params.extend(params);
                 }
             } else {
                 if let Some(action) = current_action {
                     fused_codes.push(ControlCode::CSI {
                         params: std::mem::take(&mut current_params),
+                        intermediates: std::mem::take(&mut current_intermediates),
                         action,
                     });
                     current_action = None;
@@ -357,6 +389,7 @@ impl ControlCode {
         if let Some(action) = current_action {
             fused_codes.push(ControlCode::CSI {
                 params: std::mem::take(&mut current_params),
+                intermediates: std::mem::take(&mut current_intermediates),
                 action,
             })
         }
@@ -371,50 +404,62 @@ pub fn control_codes() -> &'static ControlCodes {
     CONTROL_CODES.get_or_init(|| ControlCodes {
         fgcolor_default: ControlCode::CSI {
             params: vec![vec![39]],
+            intermediates: vec![],
             action: 'm',
         },
         bgcolor_default: ControlCode::CSI {
             params: vec![vec![49]],
+            intermediates: vec![],
             action: 'm',
         },
         underline: ControlCode::CSI {
             params: vec![vec![4]],
+            intermediates: vec![],
             action: 'm',
         },
         undo_underline: ControlCode::CSI {
             params: vec![vec![24]],
+            intermediates: vec![],
             action: 'm',
         },
         bold: ControlCode::CSI {
             params: vec![vec![1]],
+            intermediates: vec![],
             action: 'm',
         },
         undo_bold: ControlCode::CSI {
             params: vec![vec![22]],
+            intermediates: vec![],
             action: 'm',
         },
         italic: ControlCode::CSI {
             params: vec![vec![3]],
+            intermediates: vec![],
             action: 'm',
         },
         undo_italic: ControlCode::CSI {
             params: vec![vec![23]],
+            intermediates: vec![],
             action: 'm',
         },
         inverse: ControlCode::CSI {
             params: vec![vec![7]],
+            intermediates: vec![],
             action: 'm',
         },
         undo_inverse: ControlCode::CSI {
             params: vec![vec![27]],
+            intermediates: vec![],
             action: 'm',
         },
         save_cursor_position: ControlCode::CSI {
             params: vec![],
+            intermediates: vec![],
             action: 's',
         },
         restore_cursor_position: ControlCode::CSI {
             params: vec![],
+            intermediates: vec![],
             action: 'u',
         },
         save_cursor: ControlCode::ESC {
@@ -425,6 +470,16 @@ pub fn control_codes() -> &'static ControlCodes {
             intermediates: vec![],
             byte: b'8',
         },
+        enable_alt_screen: ControlCode::CSI {
+            params: vec![vec![1049]],
+            intermediates: vec![b'?'],
+            action: 'h',
+        },
+        disable_alt_screen: ControlCode::CSI {
+            params: vec![vec![1049]],
+            intermediates: vec![b'?'],
+            action: 'l',
+        },
     })
 }
 
@@ -434,16 +489,19 @@ impl ControlCodes {
         if i < 8 {
             ControlCode::CSI {
                 params: vec![vec![(i + 30) as u16]],
+                intermediates: vec![],
                 action: 'm',
             }
         } else if i < 16 {
             ControlCode::CSI {
                 params: vec![vec![(i + 82) as u16]],
+                intermediates: vec![],
                 action: 'm',
             }
         } else {
             ControlCode::CSI {
                 params: vec![vec![38], vec![5], vec![i as u16]],
+                intermediates: vec![],
                 action: 'm',
             }
         }
@@ -458,6 +516,7 @@ impl ControlCodes {
                 vec![g as u16],
                 vec![b as u16],
             ],
+            intermediates: vec![],
             action: 'm',
         }
     }
@@ -466,16 +525,19 @@ impl ControlCodes {
         if i < 8 {
             ControlCode::CSI {
                 params: vec![vec![(i + 40) as u16]],
+                intermediates: vec![],
                 action: 'm',
             }
         } else if i < 16 {
             ControlCode::CSI {
                 params: vec![vec![(i + 92) as u16]],
+                intermediates: vec![],
                 action: 'm',
             }
         } else {
             ControlCode::CSI {
                 params: vec![vec![48], vec![5], vec![i as u16]],
+                intermediates: vec![],
                 action: 'm',
             }
         }
@@ -490,6 +552,7 @@ impl ControlCodes {
                 vec![g as u16],
                 vec![b as u16],
             ],
+            intermediates: vec![],
             action: 'm',
         }
     }
@@ -521,6 +584,7 @@ impl ControlCodes {
     pub fn cursor_position(row: u16, col: u16) -> ControlCode {
         ControlCode::CSI {
             params: vec![vec![row], vec![col]],
+            intermediates: vec![],
             action: 'H',
         }
     }
@@ -528,6 +592,7 @@ impl ControlCodes {
     pub fn cursor_horizontal_absolute(col: u16) -> ControlCode {
         ControlCode::CSI {
             params: vec![vec![col]],
+            intermediates: vec![],
             action: 'G',
         }
     }
@@ -536,11 +601,13 @@ impl ControlCodes {
         if n == 1 {
             ControlCode::CSI {
                 params: vec![],
+                intermediates: vec![],
                 action,
             }
         } else {
             ControlCode::CSI {
                 params: vec![vec![n]],
+                intermediates: vec![],
                 action,
             }
         }

@@ -25,7 +25,7 @@ use term::AsTermInput;
 
 use tracing::warn;
 
-use crate::screen::SavedCursor;
+use crate::{screen::SavedCursor, term::ClearAttrs};
 
 /// A representation of a terminal.
 pub struct Term {
@@ -106,6 +106,12 @@ impl Term {
     }
 }
 
+impl std::fmt::Display for Term {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.state.fmt(f)
+    }
+}
+
 /// The size of the terminal.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct Size {
@@ -125,6 +131,23 @@ struct State {
     /// and alt screens, which is why they are stored here rather than
     /// with the curors themsevles.
     cursor_attrs: term::Attrs,
+}
+
+impl std::fmt::Display for State {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.screen_mode {
+            ScreenMode::Scrollback => {
+                writeln!(f, "Screen Mode: Scrollback")?;
+                write!(f, "{}", self.scrollback)?;
+            }
+            ScreenMode::Alt => {
+                writeln!(f, "Screen Mode: AltScreen")?;
+                write!(f, "{}", self.altscreen)?;
+            }
+        }
+
+        Ok(())
+    }
 }
 
 impl State {
@@ -157,6 +180,14 @@ impl AsTermInput for State {
         match self.screen_mode {
             ScreenMode::Scrollback => self.scrollback.term_input_into(buf),
             ScreenMode::Alt => self.altscreen.term_input_into(buf),
+        }
+
+        // restore cursor attributes (the screen will have already restored our
+        // position).
+        ClearAttrs::default().term_input_into(buf);
+        let codes = term::Attrs::default().transition_to(&self.cursor_attrs);
+        for c in codes.into_iter() {
+            c.term_input_into(buf);
         }
     }
 }
@@ -206,10 +237,17 @@ impl vte::Perform for State {
     fn csi_dispatch(
         &mut self,
         params: &vte::Params,
-        _intermediates: &[u8],
-        _ignore: bool,
+        intermediates: &[u8],
+        ignore: bool,
         action: char,
     ) {
+        if ignore {
+            warn!("malformed CSI seq");
+            return;
+        }
+
+        let mut params_iter = params.iter();
+
         match action {
             // CUU (Cursor Up)
             'A' => {
@@ -286,6 +324,54 @@ impl vte::Perform for State {
                 screen.cursor = screen.saved_cursor.pos;
             }
 
+            'h' => {
+                match intermediates {
+                    [b'?'] => while let Some(code) = params_iter.next() {
+                        match code {
+                            [1049] => {
+                                // The alt-screen gets reset upon entry, so we need to
+                                // clobber it here.
+                                self.altscreen = Screen::alt(self.altscreen.size);
+                                self.screen_mode = ScreenMode::Alt;
+                            }
+                            _ => {
+                                warn!(
+                                    "Unhandled CSI l command: CSI {:?} {:?} l",
+                                    intermediates,
+                                    params.iter().collect::<Vec<&[u16]>>());
+                                return;
+                            }
+                        }
+                    }
+                    _ => warn!(
+                        "Unhandled CSI h command: CSI {:?} {:?} h",
+                        intermediates,
+                        params.iter().collect::<Vec<&[u16]>>()
+                    ),
+                }
+            }
+            'l' => {
+                match intermediates {
+                    [b'?'] => while let Some(code) = params_iter.next() {
+                        match code {
+                            [1049] => self.screen_mode = ScreenMode::Scrollback,
+                            _ => {
+                                warn!(
+                                    "Unhandled CSI l command: CSI {:?} {:?} l",
+                                    intermediates,
+                                    params.iter().collect::<Vec<&[u16]>>());
+                                return;
+                            }
+                        }
+                    },
+                    _ => warn!(
+                        "Unhandled CSI l command: CSI {:?} {:?} l",
+                        intermediates,
+                        params.iter().collect::<Vec<&[u16]>>()
+                    ),
+                }
+            }
+
             // cell attribute manipulation
             'm' => {
                 let mut param_iter = params.iter();
@@ -298,16 +384,6 @@ impl vte::Perform for State {
 
                     match param[0] {
                         0 => self.cursor_attrs = term::Attrs::default(),
-
-                        // TODO: apparently while the altscreen and scrollback
-                        // are supposed to have seperate cursor positions,
-                        // their attributes (SGR state) are shared. However,
-                        // when saving a cursor with ESC 7, the whole state
-                        // including the attributes needs to be saved. I need
-                        // to rename the cursor type into a "SavedCursor" which
-                        // has attributes and then just use Pos as for the actual
-                        // cursor type, and then move attrs for the normal cursor
-                        // up into the top level State struct.
 
                         // Underline Handling
                         // TODO: there are lots of other underline styles. To fix,
@@ -398,7 +474,7 @@ fn p2(params: &vte::Params) -> Option<(u16, u16)> {
             return None;
         };
         if let Some(arg) = i.next() {
-            if arg.len() == 1 {
+            if arg.len() == 1 && i.next() == None {
                 return Some((a1, arg[0]));
             }
         }
@@ -445,18 +521,22 @@ mod test {
         simple_str { scrollback_lines: 100, width: 100, height: 100 }
         <= term::Raw::from("foobar")
         => term::ClearAttrs::default(),
-            term::ClearScreen::default(),
-            term::Raw::from("foobar")
+           term::ClearScreen::default(),
+           term::Raw::from("foobar"),
+           term::ControlCodes::cursor_position(0, 6),
+           term::ClearAttrs::default()
     }
 
     frag! {
         newline2line { scrollback_lines: 100, width: 100, height: 100 }
         <= term::Raw::from("foo\r\nbar")
         => term::ClearAttrs::default(),
-            term::ClearScreen::default(),
-            term::Raw::from("foo"),
-            term::Crlf::default(),
-            term::Raw::from("bar")
+           term::ClearScreen::default(),
+           term::Raw::from("foo"),
+           term::Crlf::default(),
+           term::Raw::from("bar"),
+           term::ControlCodes::cursor_position(1, 3),
+           term::ClearAttrs::default()
     }
 
     frag! {
@@ -472,7 +552,9 @@ mod test {
            term::control_codes().underline,
            term::Raw::from("b"),
            term::control_codes().undo_underline,
-           term::Raw::from("a")
+           term::Raw::from("a"),
+           term::ControlCodes::cursor_position(0, 3),
+           term::ClearAttrs::default()
     }
 
     frag! {
@@ -488,7 +570,9 @@ mod test {
            term::control_codes().bold,
            term::Raw::from("b"),
            term::control_codes().undo_bold,
-           term::Raw::from("a")
+           term::Raw::from("a"),
+           term::ControlCodes::cursor_position(0, 3),
+           term::ClearAttrs::default()
     }
 
     frag! {
@@ -504,7 +588,9 @@ mod test {
            term::control_codes().italic,
            term::Raw::from("b"),
            term::control_codes().undo_italic,
-           term::Raw::from("a")
+           term::Raw::from("a"),
+           term::ControlCodes::cursor_position(0, 3),
+           term::ClearAttrs::default()
     }
 
     frag! {
@@ -520,7 +606,9 @@ mod test {
            term::control_codes().inverse,
            term::Raw::from("b"),
            term::control_codes().undo_inverse,
-           term::Raw::from("a")
+           term::Raw::from("a"),
+           term::ControlCodes::cursor_position(0, 3),
+           term::ClearAttrs::default()
     }
 
     frag! {
@@ -530,7 +618,9 @@ mod test {
            term::Raw::from("B")
         => term::ClearAttrs::default(),
            term::ClearScreen::default(),
-           term::Raw::from("B")
+           term::Raw::from("B"),
+           term::ControlCodes::cursor_position(0, 1),
+           term::ClearAttrs::default()
     }
 
     frag! {
@@ -542,7 +632,9 @@ mod test {
            term::ClearScreen::default(),
            term::Raw::from("A"),
            term::Raw::from("X"),
-           term::Raw::from("C")
+           term::Raw::from("C"),
+           term::ControlCodes::cursor_position(0, 2),
+           term::ClearAttrs::default()
     }
 
     frag! {
@@ -562,7 +654,9 @@ mod test {
            term::Raw::from(" "),
            term::control_codes().inverse,
            term::Raw::from("C"),
-           term::control_codes().undo_inverse
+           term::control_codes().undo_inverse,
+           term::ControlCodes::cursor_position(0, 3),
+           term::ClearAttrs::default()
     }
 
     frag! {
@@ -575,7 +669,9 @@ mod test {
            term::Raw::from("A"),
            term::Raw::from(" "),
            term::Raw::from(" "),
-           term::Raw::from("B")
+           term::Raw::from("B"),
+           term::ControlCodes::cursor_position(0, 4),
+           term::ClearAttrs::default()
     }
 
     frag! {
@@ -588,7 +684,9 @@ mod test {
            term::ClearScreen::default(),
            term::Raw::from("A"),
            term::Crlf::default(),
-           term::Raw::from("B")
+           term::Raw::from("B"),
+           term::ControlCodes::cursor_position(1, 1),
+           term::ClearAttrs::default()
     }
 
     frag! {
@@ -602,7 +700,9 @@ mod test {
            term::Raw::from("A"),
            term::Crlf::default(),
            term::Crlf::default(),
-           term::Raw::from("B")
+           term::Raw::from("B"),
+           term::ControlCodes::cursor_position(2, 1),
+           term::ClearAttrs::default()
     }
 
     frag! {
@@ -617,7 +717,9 @@ mod test {
            term::Raw::from("A"),
            term::Raw::from("C"),
            term::Crlf::default(),
-           term::Raw::from("B")
+           term::Raw::from("B"),
+           term::ControlCodes::cursor_position(0, 2),
+           term::ClearAttrs::default()
     }
 
     frag! {
@@ -634,7 +736,9 @@ mod test {
            term::Raw::from("C"),
            term::Crlf::default(),
            term::Crlf::default(),
-           term::Raw::from("B")
+           term::Raw::from("B"),
+           term::ControlCodes::cursor_position(0, 2),
+           term::ClearAttrs::default()
     }
 
     frag! {
@@ -646,7 +750,9 @@ mod test {
            term::ClearScreen::default(),
            term::Raw::from("A"),
            term::Crlf::default(),
-           term::Raw::from("B")
+           term::Raw::from("B"),
+           term::ControlCodes::cursor_position(1, 1),
+           term::ClearAttrs::default()
     }
 
     frag! {
@@ -659,7 +765,9 @@ mod test {
            term::Raw::from("A"),
            term::Crlf::default(),
            term::Crlf::default(),
-           term::Raw::from("B")
+           term::Raw::from("B"),
+           term::ControlCodes::cursor_position(2, 1),
+           term::ClearAttrs::default()
     }
 
     frag! {
@@ -673,7 +781,9 @@ mod test {
            term::ClearScreen::default(),
            term::Raw::from("C"),
            term::Crlf::default(),
-           term::Raw::from("B")
+           term::Raw::from("B"),
+           term::ControlCodes::cursor_position(0, 1),
+           term::ClearAttrs::default()
     }
 
     frag! {
@@ -689,7 +799,9 @@ mod test {
            term::Raw::from("C"),
            term::Crlf::default(),
            term::Crlf::default(),
-           term::Raw::from("B")
+           term::Raw::from("B"),
+           term::ControlCodes::cursor_position(0, 1),
+           term::ClearAttrs::default()
     }
 
     frag! {
@@ -702,7 +814,9 @@ mod test {
            term::Raw::from("A"),
            term::Crlf::default(),
            term::Crlf::default(),
-           term::Raw::from("  B")
+           term::Raw::from("  B"),
+           term::ControlCodes::cursor_position(2, 3),
+           term::ClearAttrs::default()
     }
 
     frag! {
@@ -717,7 +831,9 @@ mod test {
            term::ClearScreen::default(),
            term::Raw::from("AC"),
            term::Crlf::default(),
-           term::Raw::from("B")
+           term::Raw::from("B"),
+           term::ControlCodes::cursor_position(0, 2),
+           term::ClearAttrs::default()
     }
 
     frag! {
@@ -729,7 +845,9 @@ mod test {
            term::ClearScreen::default(),
            term::Raw::from("A"),
            term::Raw::from(" "),
-           term::Raw::from("B")
+           term::Raw::from("B"),
+           term::ControlCodes::cursor_position(0, 3),
+           term::ClearAttrs::default()
     }
 
     frag! {
@@ -739,7 +857,9 @@ mod test {
            term::Raw::from("B")
         => term::ClearAttrs::default(),
            term::ClearScreen::default(),
-           term::Raw::from("A😊B")
+           term::Raw::from("A😊B"),
+           term::ControlCodes::cursor_position(0, 4),
+           term::ClearAttrs::default()
     }
 
     frag! {
@@ -750,7 +870,9 @@ mod test {
            term::ClearScreen::default(),
            term::Raw::from("A"),
            term::Crlf::default(),
-           term::Raw::from("😊")
+           term::Raw::from("😊"),
+           term::ControlCodes::cursor_position(1, 2),
+           term::ClearAttrs::default()
     }
 
     frag! {
@@ -760,7 +882,9 @@ mod test {
            term::ClearScreen::default(),
            term::Raw::from("a😊"),
            term::Crlf::default(),
-           term::Raw::from("b")
+           term::Raw::from("b"),
+           term::ControlCodes::cursor_position(1, 1),
+           term::ClearAttrs::default()
     }
 
     frag! {
@@ -778,7 +902,66 @@ mod test {
            term::control_codes().bold,
            term::Raw::from("AC"),
            term::control_codes().undo_bold,
+           term::Raw::from("B"),
+           term::ControlCodes::cursor_position(0, 2),
+           term::ClearAttrs::default(),
+           term::control_codes().bold
+    }
+
+    frag! {
+        alt_screen_basic { scrollback_lines: 100, width: 2, height: 2 }
+        <= term::Raw::from("A"),
+           term::control_codes().enable_alt_screen,
            term::Raw::from("B")
+        => term::ClearAttrs::default(),
+           term::ClearScreen::default(),
+           term::Raw::from("B"),
+           term::Crlf::default(),
+           term::ControlCodes::cursor_position(0, 1),
+           term::ClearAttrs::default()
+    }
+
+    frag! {
+        alt_screen_isolation { scrollback_lines: 100, width: 2, height: 2 }
+        <= term::Raw::from("A"),
+           term::control_codes().enable_alt_screen,
+           term::Raw::from("B"),
+           term::control_codes().disable_alt_screen
+        => term::ClearAttrs::default(),
+           term::ClearScreen::default(),
+           term::Raw::from("A"),
+           term::ControlCodes::cursor_position(0, 1),
+           term::ClearAttrs::default()
+    }
+
+    frag! {
+        alt_screen_clears { scrollback_lines: 100, width: 5, height: 2 }
+        <= term::control_codes().enable_alt_screen,
+           term::Raw::from("JUNK"),
+           term::control_codes().disable_alt_screen,
+           term::control_codes().enable_alt_screen
+        => term::ClearAttrs::default(),
+           term::ClearScreen::default(),
+           term::Crlf::default(),
+           term::ControlCodes::cursor_position(0, 0),
+           term::ClearAttrs::default()
+    }
+
+    frag! {
+        fused_alt_screen_enable { scrollback_lines: 100, width: 2, height: 2 }
+        <= term::Raw::from("A"),
+           term::ControlCode::CSI {
+               params: vec![vec![1049], vec![1049]],
+               intermediates: vec![b'?'],
+               action: 'h',
+           },
+           term::Raw::from("B")
+        => term::ClearAttrs::default(),
+           term::ClearScreen::default(),
+           term::Raw::from("B"),
+           term::Crlf::default(),
+           term::ControlCodes::cursor_position(0, 1),
+           term::ClearAttrs::default()
     }
 
     fn round_trip_frag(
@@ -789,6 +972,7 @@ mod test {
     ) {
         let mut term = crate::Term::new(scrollback_lines, size);
         term.process(input);
+        eprintln!("TERM:\n{term}");
         assert_eq!(term.contents().as_slice(), want_output);
     }
 }

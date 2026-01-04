@@ -117,9 +117,18 @@ impl Screen {
 
 impl std::fmt::Display for Screen {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for _ in 0..self.size.width {
+            write!(f, "-")?;
+        }
+        writeln!(f, "")?;
+
         match &self.grid {
             Grid::Scrollback(s) => write!(f, "{}", s)?,
             Grid::AltScreen(alt) => write!(f, "{}", alt)?,
+        }
+
+        for _ in 0..self.size.width {
+            write!(f, "-")?;
         }
 
         Ok(())
@@ -132,6 +141,9 @@ impl AsTermInput for Screen {
             Grid::Scrollback(scrollback) => scrollback.term_input_into(buf),
             Grid::AltScreen(altscreen) => altscreen.term_input_into(buf),
         }
+
+        term::ControlCodes::cursor_position(self.cursor.row as u16, self.cursor.col as u16)
+            .term_input_into(buf);
     }
 }
 

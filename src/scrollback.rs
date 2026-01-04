@@ -39,10 +39,6 @@ pub struct Scrollback {
     lines: usize,
 }
 
-// TODO: to support the alt screen, I need to refactor the grid structures
-// into a Scrollback struct, then make an AltScreen struct that actually
-// has a fixed grid of cells plus its own dedicated cursor/saved_cursor.
-
 impl std::fmt::Display for Scrollback {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         for line in self.buf.iter().rev() {
