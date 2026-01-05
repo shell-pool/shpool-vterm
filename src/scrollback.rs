@@ -165,18 +165,37 @@ impl Scrollback {
     }
 
     fn get_line_mut(&mut self, size: crate::Size, row: usize) -> Option<&mut Line> {
-        let in_view_scrollback_len = if self.buf.len() < size.height {
-            self.buf.len()
-        } else {
-            size.height
-        };
-
-        if row >= in_view_scrollback_len {
+        let in_view_len = self.in_view_len(size);
+        if row >= in_view_len {
             return None;
         }
 
-        let idx_from_bottom = (in_view_scrollback_len - 1) - row;
+        let idx_from_bottom = (in_view_len - 1) - row;
         Some(&mut self.buf[idx_from_bottom])
+    }
+
+    /// The number of lines at the front of the scrollback queue that
+    /// are actually in view and are not just in the hidden scrollback
+    /// region.
+    pub fn in_view_len(&self, size: crate::Size) -> usize {
+        if self.buf.len() < size.height {
+            self.buf.len()
+        } else {
+            size.height
+        }
+    }
+
+    /// Translate a row index to an index into the actual backing dequeue.
+    ///
+    /// Returns None if self.buf is not large enough to contain an actual
+    /// line for that row.
+    pub fn line_idx_from_bottom(&self, size: crate::Size, row: usize) -> Option<usize> {
+        let in_view = self.in_view_len(size);
+        if in_view > row {
+            Some((in_view - 1) - row)
+        } else {
+            None
+        }
     }
 
     /// Write the given cell at the given cursor position, returning the next
@@ -256,5 +275,43 @@ impl Scrollback {
         }
 
         Ok(cursor)
+    }
+
+    pub fn erase_to_end(&mut self, size: crate::Size, cursor: Pos) {
+        if let Some(snip_line) = self.line_idx_from_bottom(size, cursor.row) {
+            self.buf[snip_line].truncate(cursor.col);
+            for _ in 0..snip_line {
+                self.buf.pop_front();
+            }
+        }
+
+        // If we already don't have any lines at the given row, there is
+        // nothing to do. The data is already clear.
+    }
+
+    pub fn erase_from_start(&mut self, size: crate::Size, cursor: Pos) {
+        let lines_in_view = self.in_view_len(size);
+
+        if let Some(snip_line) = self.line_idx_from_bottom(size, cursor.row) {
+            for i in (snip_line + 1)..lines_in_view {
+                self.buf[i].truncate(0);
+            }
+            self.buf[snip_line].clobber_til(cursor.col);
+        } else {
+            for i in 0..lines_in_view {
+                self.buf[i].truncate(0);
+            }
+        }
+    }
+
+    pub fn erase(&mut self, size: crate::Size, include_scrollback: bool) {
+        if include_scrollback {
+            self.buf.truncate(0);
+            return;
+        }
+
+        for i in 0..self.in_view_len(size) {
+            self.buf[i].truncate(0);
+        }
     }
 }

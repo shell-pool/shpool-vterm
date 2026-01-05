@@ -72,7 +72,6 @@ impl AsTermInput for Line {
                 code.term_input_into(buf);
             }
         }
-        eprintln!("DEBUG: line end buf={buf:?}")
     }
 }
 
@@ -125,6 +124,14 @@ impl Line {
     /// Trim the line to the new width, dropping any cells too far to the right.
     pub fn truncate(&mut self, width: usize) {
         self.cells.truncate(width);
+    }
+
+    /// Overwrite all cells up to and including the one at col with an empty
+    /// cell.
+    pub fn clobber_til(&mut self, col: usize) {
+        for i in 0..std::cmp::min(col + 1, self.cells.len()) {
+            self.cells[i] = Cell::empty();
+        }
     }
 }
 

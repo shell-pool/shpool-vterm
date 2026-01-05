@@ -113,6 +113,33 @@ impl Screen {
 
         Ok(())
     }
+
+    /// Erase whichever screen is currently active from the cursor
+    /// position to the bottom. Used to implement 'CSI 0 J'
+    pub fn erase_to_end(&mut self) {
+        match &mut self.grid {
+            Grid::Scrollback(s) => s.erase_to_end(self.size, self.cursor),
+            Grid::AltScreen(alt) => alt.erase_to_end(self.cursor),
+        }
+    }
+
+    /// Erase whichever screen is currently active from the top to the
+    /// cursor position. Used to implement 'CSI 1 J'
+    pub fn erase_from_start(&mut self) {
+        match &mut self.grid {
+            Grid::Scrollback(s) => s.erase_from_start(self.size, self.cursor),
+            Grid::AltScreen(alt) => alt.erase_from_start(self.cursor),
+        }
+    }
+
+    /// Erase whichever screen is currently active, not including scrollback.
+    /// Used to implement 'CSI 2 J' and 'CSI 3 J' (which includes the scrollback).
+    pub fn erase(&mut self, include_scrollback: bool) {
+        match &mut self.grid {
+            Grid::Scrollback(s) => s.erase(self.size, include_scrollback),
+            Grid::AltScreen(alt) => alt.erase(),
+        }
+    }
 }
 
 impl std::fmt::Display for Screen {

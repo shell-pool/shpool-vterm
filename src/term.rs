@@ -231,6 +231,10 @@ pub struct ControlCodes {
     pub restore_cursor: ControlCode,
     pub enable_alt_screen: ControlCode,
     pub disable_alt_screen: ControlCode,
+    pub erase_to_end: ControlCode,
+    pub erase_from_start: ControlCode,
+    pub erase_screen: ControlCode,
+    pub erase_scrollback: ControlCode,
 }
 
 #[derive(Clone, Debug)]
@@ -470,6 +474,26 @@ pub fn control_codes() -> &'static ControlCodes {
             params: vec![vec![1049]],
             intermediates: vec![b'?'],
             action: 'l',
+        },
+        erase_to_end: ControlCode::CSI {
+            params: vec![vec![0]],
+            intermediates: vec![],
+            action: 'J',
+        },
+        erase_from_start: ControlCode::CSI {
+            params: vec![vec![1]],
+            intermediates: vec![],
+            action: 'J',
+        },
+        erase_screen: ControlCode::CSI {
+            params: vec![vec![2]],
+            intermediates: vec![],
+            action: 'J',
+        },
+        erase_scrollback: ControlCode::CSI {
+            params: vec![vec![3]],
+            intermediates: vec![],
+            action: 'J',
         },
     })
 }

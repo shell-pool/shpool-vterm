@@ -324,6 +324,18 @@ impl vte::Perform for State {
                 screen.cursor.col = col;
                 screen.clamp();
             }
+            // ED (Erase in Display)
+            'J' => {
+                while let Some(code) = params_iter.next() {
+                    match code {
+                        [] | [0] => self.screen_mut().erase_to_end(),
+                        [1] => self.screen_mut().erase_from_start(),
+                        [2] => self.screen_mut().erase(false),
+                        [3] => self.screen_mut().erase(true),
+                        _ => warn!("unhandled 'CSI {:?} J'", code),
+                    }
+                }
+            }
 
             // SCP (Save Cursor Position)
             's' => {
@@ -481,25 +493,6 @@ fn p1_or(params: &vte::Params, default: u16) -> u16 {
         n
     }
 }
-
-fn p2(params: &vte::Params) -> Option<(u16, u16)> {
-    let mut i = params.iter();
-    if let Some(arg) = i.next() {
-        let a1 = if arg.len() == 1 {
-            arg[0]
-        } else {
-            return None;
-        };
-        if let Some(arg) = i.next() {
-            if arg.len() == 1 && i.next() == None {
-                return Some((a1, arg[0]));
-            }
-        }
-    }
-    None
-}
-
-// TODO: handle clear
 
 #[cfg(test)]
 mod test {
@@ -1025,6 +1018,69 @@ mod test {
            term::control_codes().clear_screen,
            term::Raw::from("X23"),
            term::ControlCodes::cursor_position(1, 2),
+           term::control_codes().clear_attrs
+    }
+
+    frag! {
+        erase_display_to_end { scrollback_lines: 100, width: 10, height: 10 }
+        <= term::Raw::from("ABCDEF"),
+           term::ControlCodes::cursor_backwards(3),
+           term::control_codes().erase_to_end
+        => term::control_codes().clear_attrs,
+           term::ControlCodes::cursor_position(1, 1),
+           term::control_codes().clear_screen,
+           term::Raw::from("ABC"),
+           term::ControlCodes::cursor_position(1, 4),
+           term::control_codes().clear_attrs
+    }
+
+    frag! {
+        erase_display_from_start { scrollback_lines: 100, width: 10, height: 10 }
+        <= term::Raw::from("ABCDEF"),
+           term::ControlCodes::cursor_backwards(3),
+           term::control_codes().erase_from_start
+        => term::control_codes().clear_attrs,
+           term::ControlCodes::cursor_position(1, 1),
+           term::control_codes().clear_screen,
+           // Standard behavior: inclusive of cursor (D cleared)
+           term::Raw::from("    EF"),
+           term::ControlCodes::cursor_position(1, 4),
+           term::control_codes().clear_attrs
+    }
+
+    frag! {
+        erase_screen_basic { scrollback_lines: 100, width: 10, height: 10 }
+        <= term::Raw::from("ABCDEF"),
+           term::control_codes().erase_screen
+        => term::control_codes().clear_attrs,
+           term::ControlCodes::cursor_position(1, 1),
+           term::control_codes().clear_screen,
+           term::ControlCodes::cursor_position(1, 7),
+           term::control_codes().clear_attrs
+    }
+
+    frag! {
+        erase_screen_no_scrollback { scrollback_lines: 10, width: 5, height: 2 }
+        <= term::Raw::from("1\r\n2\r\n3"),
+           term::control_codes().erase_screen
+        => term::control_codes().clear_attrs,
+           term::ControlCodes::cursor_position(1, 1),
+           term::control_codes().clear_screen,
+           term::Raw::from("1"),
+           term::Crlf::default(),
+           term::Crlf::default(),
+           term::ControlCodes::cursor_position(2, 2),
+           term::control_codes().clear_attrs
+    }
+
+    frag! {
+        erase_scrollback { scrollback_lines: 10, width: 5, height: 2 }
+        <= term::Raw::from("1\r\n2\r\n3"),
+           term::control_codes().erase_scrollback
+        => term::control_codes().clear_attrs,
+           term::ControlCodes::cursor_position(1, 1),
+           term::control_codes().clear_screen,
+           term::ControlCodes::cursor_position(2, 2),
            term::control_codes().clear_attrs
     }
 

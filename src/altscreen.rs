@@ -98,6 +98,27 @@ impl AltScreen {
         }
         // no-op if they have the same height
     }
+
+    pub fn erase_to_end(&mut self, cursor: Pos) {
+        self.buf[cursor.row].truncate(cursor.col);
+
+        for i in (cursor.row + 1)..self.buf.len() {
+            self.buf[i].truncate(0);
+        }
+    }
+
+    pub fn erase_from_start(&mut self, cursor: Pos) {
+        for i in 0..cursor.row {
+            self.buf[i].truncate(0);
+        }
+        self.buf[cursor.row].clobber_til(cursor.col);
+    }
+
+    pub fn erase(&mut self) {
+        for line in self.buf.iter_mut() {
+            line.truncate(0);
+        }
+    }
 }
 
 impl std::fmt::Display for AltScreen {
