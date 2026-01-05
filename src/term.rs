@@ -81,16 +81,6 @@ pub trait AsTermInput {
     fn term_input_into(&self, buf: &mut Vec<u8>);
 }
 
-#[derive(Default, Debug)]
-#[must_use = "this struct does nothing unless you call term_input_into"]
-pub struct ClearAttrs;
-
-impl AsTermInput for ClearAttrs {
-    fn term_input_into(&self, buf: &mut Vec<u8>) {
-        buf.extend_from_slice(b"\x1b[m");
-    }
-}
-
 #[derive(Debug)]
 #[must_use = "this struct does nothing unless you call term_input_into"]
 pub struct Raw {
@@ -224,6 +214,7 @@ impl Attrs {
 #[allow(dead_code)]
 pub struct ControlCodes {
     pub clear_screen: ControlCode,
+    pub clear_attrs: ControlCode,
     pub fgcolor_default: ControlCode,
     pub bgcolor_default: ControlCode,
     pub underline: ControlCode,
@@ -396,6 +387,11 @@ pub fn control_codes() -> &'static ControlCodes {
             params: vec![],
             intermediates: vec![],
             action: 'J',
+        },
+        clear_attrs: ControlCode::CSI {
+            params: vec![],
+            intermediates: vec![],
+            action: 'm',
         },
         fgcolor_default: ControlCode::CSI {
             params: vec![vec![39]],
