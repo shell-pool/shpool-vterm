@@ -72,6 +72,7 @@ impl AsTermInput for Line {
                 code.term_input_into(buf);
             }
         }
+        eprintln!("DEBUG: line end buf={buf:?}")
     }
 }
 

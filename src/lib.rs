@@ -302,15 +302,27 @@ impl vte::Perform for State {
             }
             // CUP (Cursor Set Position)
             'H' => {
-                if let Some((row, col)) = p2(params) {
-                    // adjust 1 indexing to 0 indexing
-                    let (row, col) = ((row - 1) as usize, (col - 1) as usize);
+                // parse the params and adjust 1 indexing to 0 indexing
+                let default = [1];
+                let row = *params_iter
+                    .next()
+                    .unwrap_or(&default)
+                    .iter()
+                    .next()
+                    .unwrap_or(&default[0]);
+                let col = *params_iter
+                    .next()
+                    .unwrap_or(&default)
+                    .iter()
+                    .next()
+                    .unwrap_or(&default[0]);
+                let row = row.saturating_sub(1) as usize;
+                let col = col.saturating_sub(1) as usize;
 
-                    let screen = self.screen_mut();
-                    screen.cursor.row = row;
-                    screen.cursor.col = col;
-                    screen.clamp();
-                }
+                let screen = self.screen_mut();
+                screen.cursor.row = row;
+                screen.cursor.col = col;
+                screen.clamp();
             }
 
             // SCP (Save Cursor Position)
@@ -994,6 +1006,24 @@ mod test {
            term::control_codes().clear_screen,
            term::Raw::from("B"),
            term::Crlf::default(),
+           term::ControlCodes::cursor_position(1, 2),
+           term::control_codes().clear_attrs
+    }
+
+    frag! {
+        cursor_position_no_params { scrollback_lines: 100, width: 10, height: 10 }
+        <= term::Raw::from("123"),
+           // cursor position with no params (should be the same as (1,1)).
+           term::ControlCode::CSI {
+               params: vec![],
+               intermediates: vec![],
+               action: 'H',
+           },
+           term::Raw::from("X")
+        => term::control_codes().clear_attrs,
+           term::ControlCodes::cursor_position(1, 1),
+           term::control_codes().clear_screen,
+           term::Raw::from("X23"),
            term::ControlCodes::cursor_position(1, 2),
            term::control_codes().clear_attrs
     }
