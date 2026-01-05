@@ -99,7 +99,8 @@ impl Term {
     pub fn contents(&self) -> Vec<u8> {
         let mut buf = vec![];
         term::ClearAttrs::default().term_input_into(&mut buf);
-        term::ClearScreen::default().term_input_into(&mut buf);
+        term::ControlCodes::cursor_position(1, 1).term_input_into(&mut buf);
+        term::control_codes().clear_screen.term_input_into(&mut buf);
         self.state.term_input_into(&mut buf);
 
         buf
@@ -326,20 +327,23 @@ impl vte::Perform for State {
 
             'h' => {
                 match intermediates {
-                    [b'?'] => while let Some(code) = params_iter.next() {
-                        match code {
-                            [1049] => {
-                                // The alt-screen gets reset upon entry, so we need to
-                                // clobber it here.
-                                self.altscreen = Screen::alt(self.altscreen.size);
-                                self.screen_mode = ScreenMode::Alt;
-                            }
-                            _ => {
-                                warn!(
-                                    "Unhandled CSI l command: CSI {:?} {:?} l",
-                                    intermediates,
-                                    params.iter().collect::<Vec<&[u16]>>());
-                                return;
+                    [b'?'] => {
+                        while let Some(code) = params_iter.next() {
+                            match code {
+                                [1049] => {
+                                    // The alt-screen gets reset upon entry, so we need to
+                                    // clobber it here.
+                                    self.altscreen = Screen::alt(self.altscreen.size);
+                                    self.screen_mode = ScreenMode::Alt;
+                                }
+                                _ => {
+                                    warn!(
+                                        "Unhandled CSI l command: CSI {:?} {:?} l",
+                                        intermediates,
+                                        params.iter().collect::<Vec<&[u16]>>()
+                                    );
+                                    return;
+                                }
                             }
                         }
                     }
@@ -350,27 +354,28 @@ impl vte::Perform for State {
                     ),
                 }
             }
-            'l' => {
-                match intermediates {
-                    [b'?'] => while let Some(code) = params_iter.next() {
+            'l' => match intermediates {
+                [b'?'] => {
+                    while let Some(code) = params_iter.next() {
                         match code {
                             [1049] => self.screen_mode = ScreenMode::Scrollback,
                             _ => {
                                 warn!(
                                     "Unhandled CSI l command: CSI {:?} {:?} l",
                                     intermediates,
-                                    params.iter().collect::<Vec<&[u16]>>());
+                                    params.iter().collect::<Vec<&[u16]>>()
+                                );
                                 return;
                             }
                         }
-                    },
-                    _ => warn!(
-                        "Unhandled CSI l command: CSI {:?} {:?} l",
-                        intermediates,
-                        params.iter().collect::<Vec<&[u16]>>()
-                    ),
+                    }
                 }
-            }
+                _ => warn!(
+                    "Unhandled CSI l command: CSI {:?} {:?} l",
+                    intermediates,
+                    params.iter().collect::<Vec<&[u16]>>()
+                ),
+            },
 
             // cell attribute manipulation
             'm' => {
@@ -521,9 +526,10 @@ mod test {
         simple_str { scrollback_lines: 100, width: 100, height: 100 }
         <= term::Raw::from("foobar")
         => term::ClearAttrs::default(),
-           term::ClearScreen::default(),
+           term::ControlCodes::cursor_position(1, 1),
+           term::control_codes().clear_screen,
            term::Raw::from("foobar"),
-           term::ControlCodes::cursor_position(0, 6),
+           term::ControlCodes::cursor_position(1, 7),
            term::ClearAttrs::default()
     }
 
@@ -531,11 +537,12 @@ mod test {
         newline2line { scrollback_lines: 100, width: 100, height: 100 }
         <= term::Raw::from("foo\r\nbar")
         => term::ClearAttrs::default(),
-           term::ClearScreen::default(),
+           term::ControlCodes::cursor_position(1, 1),
+           term::control_codes().clear_screen,
            term::Raw::from("foo"),
            term::Crlf::default(),
            term::Raw::from("bar"),
-           term::ControlCodes::cursor_position(1, 3),
+           term::ControlCodes::cursor_position(2, 4),
            term::ClearAttrs::default()
     }
 
@@ -547,13 +554,14 @@ mod test {
            term::control_codes().undo_underline,
            term::Raw::from("a")
         => term::ClearAttrs::default(),
-           term::ClearScreen::default(),
+           term::ControlCodes::cursor_position(1, 1),
+           term::control_codes().clear_screen,
            term::Raw::from("a"),
            term::control_codes().underline,
            term::Raw::from("b"),
            term::control_codes().undo_underline,
            term::Raw::from("a"),
-           term::ControlCodes::cursor_position(0, 3),
+           term::ControlCodes::cursor_position(1, 4),
            term::ClearAttrs::default()
     }
 
@@ -565,13 +573,14 @@ mod test {
            term::control_codes().undo_bold,
            term::Raw::from("a")
         => term::ClearAttrs::default(),
-           term::ClearScreen::default(),
+           term::ControlCodes::cursor_position(1, 1),
+           term::control_codes().clear_screen,
            term::Raw::from("a"),
            term::control_codes().bold,
            term::Raw::from("b"),
            term::control_codes().undo_bold,
            term::Raw::from("a"),
-           term::ControlCodes::cursor_position(0, 3),
+           term::ControlCodes::cursor_position(1, 4),
            term::ClearAttrs::default()
     }
 
@@ -583,13 +592,14 @@ mod test {
            term::control_codes().undo_italic,
            term::Raw::from("a")
         => term::ClearAttrs::default(),
-           term::ClearScreen::default(),
+           term::ControlCodes::cursor_position(1, 1),
+           term::control_codes().clear_screen,
            term::Raw::from("a"),
            term::control_codes().italic,
            term::Raw::from("b"),
            term::control_codes().undo_italic,
            term::Raw::from("a"),
-           term::ControlCodes::cursor_position(0, 3),
+           term::ControlCodes::cursor_position(1, 4),
            term::ClearAttrs::default()
     }
 
@@ -601,13 +611,14 @@ mod test {
            term::control_codes().undo_inverse,
            term::Raw::from("a")
         => term::ClearAttrs::default(),
-           term::ClearScreen::default(),
+           term::ControlCodes::cursor_position(1, 1),
+           term::control_codes().clear_screen,
            term::Raw::from("a"),
            term::control_codes().inverse,
            term::Raw::from("b"),
            term::control_codes().undo_inverse,
            term::Raw::from("a"),
-           term::ControlCodes::cursor_position(0, 3),
+           term::ControlCodes::cursor_position(1, 4),
            term::ClearAttrs::default()
     }
 
@@ -617,9 +628,10 @@ mod test {
            term::ControlCodes::cursor_backwards(1),
            term::Raw::from("B")
         => term::ClearAttrs::default(),
-           term::ClearScreen::default(),
+           term::ControlCodes::cursor_position(1, 1),
+           term::control_codes().clear_screen,
            term::Raw::from("B"),
-           term::ControlCodes::cursor_position(0, 1),
+           term::ControlCodes::cursor_position(1, 2),
            term::ClearAttrs::default()
     }
 
@@ -629,11 +641,12 @@ mod test {
            term::ControlCodes::cursor_backwards(2),
            term::Raw::from("X")
         => term::ClearAttrs::default(),
-           term::ClearScreen::default(),
+           term::ControlCodes::cursor_position(1, 1),
+           term::control_codes().clear_screen,
            term::Raw::from("A"),
            term::Raw::from("X"),
            term::Raw::from("C"),
-           term::ControlCodes::cursor_position(0, 2),
+           term::ControlCodes::cursor_position(1, 3),
            term::ClearAttrs::default()
     }
 
@@ -647,7 +660,8 @@ mod test {
            term::Raw::from("C"),
            term::control_codes().undo_inverse
         => term::ClearAttrs::default(),
-           term::ClearScreen::default(),
+           term::ControlCodes::cursor_position(1, 1),
+           term::control_codes().clear_screen,
            term::control_codes().inverse,
            term::Raw::from("B"),
            term::control_codes().undo_inverse,
@@ -655,7 +669,7 @@ mod test {
            term::control_codes().inverse,
            term::Raw::from("C"),
            term::control_codes().undo_inverse,
-           term::ControlCodes::cursor_position(0, 3),
+           term::ControlCodes::cursor_position(1, 4),
            term::ClearAttrs::default()
     }
 
@@ -665,12 +679,13 @@ mod test {
            term::ControlCodes::cursor_forward(2),
            term::Raw::from("B")
         => term::ClearAttrs::default(),
-           term::ClearScreen::default(),
+           term::ControlCodes::cursor_position(1, 1),
+           term::control_codes().clear_screen,
            term::Raw::from("A"),
            term::Raw::from(" "),
            term::Raw::from(" "),
            term::Raw::from("B"),
-           term::ControlCodes::cursor_position(0, 4),
+           term::ControlCodes::cursor_position(1, 5),
            term::ClearAttrs::default()
     }
 
@@ -681,11 +696,12 @@ mod test {
            term::ControlCodes::cursor_backwards(1),
            term::Raw::from("B")
         => term::ClearAttrs::default(),
-           term::ClearScreen::default(),
+           term::ControlCodes::cursor_position(1, 1),
+           term::control_codes().clear_screen,
            term::Raw::from("A"),
            term::Crlf::default(),
            term::Raw::from("B"),
-           term::ControlCodes::cursor_position(1, 1),
+           term::ControlCodes::cursor_position(2, 2),
            term::ClearAttrs::default()
     }
 
@@ -696,12 +712,13 @@ mod test {
            term::ControlCodes::cursor_backwards(1),
            term::Raw::from("B")
         => term::ClearAttrs::default(),
-           term::ClearScreen::default(),
+           term::ControlCodes::cursor_position(1, 1),
+           term::control_codes().clear_screen,
            term::Raw::from("A"),
            term::Crlf::default(),
            term::Crlf::default(),
            term::Raw::from("B"),
-           term::ControlCodes::cursor_position(2, 1),
+           term::ControlCodes::cursor_position(3, 2),
            term::ClearAttrs::default()
     }
 
@@ -713,12 +730,13 @@ mod test {
            term::ControlCodes::cursor_up(1),
            term::Raw::from("C")
         => term::ClearAttrs::default(),
-           term::ClearScreen::default(),
+           term::ControlCodes::cursor_position(1, 1),
+           term::control_codes().clear_screen,
            term::Raw::from("A"),
            term::Raw::from("C"),
            term::Crlf::default(),
            term::Raw::from("B"),
-           term::ControlCodes::cursor_position(0, 2),
+           term::ControlCodes::cursor_position(1, 3),
            term::ClearAttrs::default()
     }
 
@@ -731,13 +749,14 @@ mod test {
            term::ControlCodes::cursor_up(2),
            term::Raw::from("C")
         => term::ClearAttrs::default(),
-           term::ClearScreen::default(),
+           term::ControlCodes::cursor_position(1, 1),
+           term::control_codes().clear_screen,
            term::Raw::from("A"),
            term::Raw::from("C"),
            term::Crlf::default(),
            term::Crlf::default(),
            term::Raw::from("B"),
-           term::ControlCodes::cursor_position(0, 2),
+           term::ControlCodes::cursor_position(1, 3),
            term::ClearAttrs::default()
     }
 
@@ -747,11 +766,12 @@ mod test {
            term::ControlCodes::cursor_next_line(1),
            term::Raw::from("B")
         => term::ClearAttrs::default(),
-           term::ClearScreen::default(),
+           term::ControlCodes::cursor_position(1, 1),
+           term::control_codes().clear_screen,
            term::Raw::from("A"),
            term::Crlf::default(),
            term::Raw::from("B"),
-           term::ControlCodes::cursor_position(1, 1),
+           term::ControlCodes::cursor_position(2, 2),
            term::ClearAttrs::default()
     }
 
@@ -761,12 +781,13 @@ mod test {
            term::ControlCodes::cursor_next_line(2),
            term::Raw::from("B")
         => term::ClearAttrs::default(),
-           term::ClearScreen::default(),
+           term::ControlCodes::cursor_position(1, 1),
+           term::control_codes().clear_screen,
            term::Raw::from("A"),
            term::Crlf::default(),
            term::Crlf::default(),
            term::Raw::from("B"),
-           term::ControlCodes::cursor_position(2, 1),
+           term::ControlCodes::cursor_position(3, 2),
            term::ClearAttrs::default()
     }
 
@@ -778,11 +799,12 @@ mod test {
            term::ControlCodes::cursor_prev_line(1),
            term::Raw::from("C")
         => term::ClearAttrs::default(),
-           term::ClearScreen::default(),
+           term::ControlCodes::cursor_position(1, 1),
+           term::control_codes().clear_screen,
            term::Raw::from("C"),
            term::Crlf::default(),
            term::Raw::from("B"),
-           term::ControlCodes::cursor_position(0, 1),
+           term::ControlCodes::cursor_position(1, 2),
            term::ClearAttrs::default()
     }
 
@@ -795,12 +817,13 @@ mod test {
            term::ControlCodes::cursor_prev_line(2),
            term::Raw::from("C")
         => term::ClearAttrs::default(),
-           term::ClearScreen::default(),
+           term::ControlCodes::cursor_position(1, 1),
+           term::control_codes().clear_screen,
            term::Raw::from("C"),
            term::Crlf::default(),
            term::Crlf::default(),
            term::Raw::from("B"),
-           term::ControlCodes::cursor_position(0, 1),
+           term::ControlCodes::cursor_position(1, 2),
            term::ClearAttrs::default()
     }
 
@@ -810,12 +833,13 @@ mod test {
            term::ControlCodes::cursor_position(3, 3),
            term::Raw::from("B")
         => term::ClearAttrs::default(),
-           term::ClearScreen::default(),
+           term::ControlCodes::cursor_position(1, 1),
+           term::control_codes().clear_screen,
            term::Raw::from("A"),
            term::Crlf::default(),
            term::Crlf::default(),
            term::Raw::from("  B"),
-           term::ControlCodes::cursor_position(2, 3),
+           term::ControlCodes::cursor_position(3, 4),
            term::ClearAttrs::default()
     }
 
@@ -828,11 +852,12 @@ mod test {
            term::control_codes().restore_cursor_position,
            term::Raw::from("C")
         => term::ClearAttrs::default(),
-           term::ClearScreen::default(),
+           term::ControlCodes::cursor_position(1, 1),
+           term::control_codes().clear_screen,
            term::Raw::from("AC"),
            term::Crlf::default(),
            term::Raw::from("B"),
-           term::ControlCodes::cursor_position(0, 2),
+           term::ControlCodes::cursor_position(1, 3),
            term::ClearAttrs::default()
     }
 
@@ -842,11 +867,12 @@ mod test {
            term::ControlCodes::cursor_horizontal_absolute(3),
            term::Raw::from("B")
         => term::ClearAttrs::default(),
-           term::ClearScreen::default(),
+           term::ControlCodes::cursor_position(1, 1),
+           term::control_codes().clear_screen,
            term::Raw::from("A"),
            term::Raw::from(" "),
            term::Raw::from("B"),
-           term::ControlCodes::cursor_position(0, 3),
+           term::ControlCodes::cursor_position(1, 4),
            term::ClearAttrs::default()
     }
 
@@ -856,9 +882,10 @@ mod test {
            term::Raw::from("😊"),
            term::Raw::from("B")
         => term::ClearAttrs::default(),
-           term::ClearScreen::default(),
+           term::ControlCodes::cursor_position(1, 1),
+           term::control_codes().clear_screen,
            term::Raw::from("A😊B"),
-           term::ControlCodes::cursor_position(0, 4),
+           term::ControlCodes::cursor_position(1, 5),
            term::ClearAttrs::default()
     }
 
@@ -867,11 +894,12 @@ mod test {
         <= term::Raw::from("A"),
            term::Raw::from("😊")
         => term::ClearAttrs::default(),
-           term::ClearScreen::default(),
+           term::ControlCodes::cursor_position(1, 1),
+           term::control_codes().clear_screen,
            term::Raw::from("A"),
            term::Crlf::default(),
            term::Raw::from("😊"),
-           term::ControlCodes::cursor_position(1, 2),
+           term::ControlCodes::cursor_position(2, 3),
            term::ClearAttrs::default()
     }
 
@@ -879,11 +907,12 @@ mod test {
         wide_char_wrap_mid { scrollback_lines: 100, width: 3, height: 10 }
         <= term::Raw::from("a😊b")
         => term::ClearAttrs::default(),
-           term::ClearScreen::default(),
+           term::ControlCodes::cursor_position(1, 1),
+           term::control_codes().clear_screen,
            term::Raw::from("a😊"),
            term::Crlf::default(),
            term::Raw::from("b"),
-           term::ControlCodes::cursor_position(1, 1),
+           term::ControlCodes::cursor_position(2, 2),
            term::ClearAttrs::default()
     }
 
@@ -898,12 +927,13 @@ mod test {
            term::control_codes().restore_cursor,
            term::Raw::from("C")
         => term::ClearAttrs::default(),
-           term::ClearScreen::default(),
+           term::ControlCodes::cursor_position(1, 1),
+           term::control_codes().clear_screen,
            term::control_codes().bold,
            term::Raw::from("AC"),
            term::control_codes().undo_bold,
            term::Raw::from("B"),
-           term::ControlCodes::cursor_position(0, 2),
+           term::ControlCodes::cursor_position(1, 3),
            term::ClearAttrs::default(),
            term::control_codes().bold
     }
@@ -914,10 +944,11 @@ mod test {
            term::control_codes().enable_alt_screen,
            term::Raw::from("B")
         => term::ClearAttrs::default(),
-           term::ClearScreen::default(),
+           term::ControlCodes::cursor_position(1, 1),
+           term::control_codes().clear_screen,
            term::Raw::from("B"),
            term::Crlf::default(),
-           term::ControlCodes::cursor_position(0, 1),
+           term::ControlCodes::cursor_position(1, 2),
            term::ClearAttrs::default()
     }
 
@@ -928,9 +959,10 @@ mod test {
            term::Raw::from("B"),
            term::control_codes().disable_alt_screen
         => term::ClearAttrs::default(),
-           term::ClearScreen::default(),
+           term::ControlCodes::cursor_position(1, 1),
+           term::control_codes().clear_screen,
            term::Raw::from("A"),
-           term::ControlCodes::cursor_position(0, 1),
+           term::ControlCodes::cursor_position(1, 2),
            term::ClearAttrs::default()
     }
 
@@ -941,9 +973,10 @@ mod test {
            term::control_codes().disable_alt_screen,
            term::control_codes().enable_alt_screen
         => term::ClearAttrs::default(),
-           term::ClearScreen::default(),
+           term::ControlCodes::cursor_position(1, 1),
+           term::control_codes().clear_screen,
            term::Crlf::default(),
-           term::ControlCodes::cursor_position(0, 0),
+           term::ControlCodes::cursor_position(1, 1),
            term::ClearAttrs::default()
     }
 
@@ -957,10 +990,11 @@ mod test {
            },
            term::Raw::from("B")
         => term::ClearAttrs::default(),
-           term::ClearScreen::default(),
+           term::ControlCodes::cursor_position(1, 1),
+           term::control_codes().clear_screen,
            term::Raw::from("B"),
            term::Crlf::default(),
-           term::ControlCodes::cursor_position(0, 1),
+           term::ControlCodes::cursor_position(1, 2),
            term::ClearAttrs::default()
     }
 

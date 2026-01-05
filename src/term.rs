@@ -83,16 +83,6 @@ pub trait AsTermInput {
 
 #[derive(Default, Debug)]
 #[must_use = "this struct does nothing unless you call term_input_into"]
-pub struct ClearScreen;
-
-impl AsTermInput for ClearScreen {
-    fn term_input_into(&self, buf: &mut Vec<u8>) {
-        buf.extend_from_slice(b"\x1b[H\x1b[J");
-    }
-}
-
-#[derive(Default, Debug)]
-#[must_use = "this struct does nothing unless you call term_input_into"]
 pub struct ClearAttrs;
 
 impl AsTermInput for ClearAttrs {
@@ -233,6 +223,7 @@ impl Attrs {
 // Codes with dynamic params are generated on the fly via methods.
 #[allow(dead_code)]
 pub struct ControlCodes {
+    pub clear_screen: ControlCode,
     pub fgcolor_default: ControlCode,
     pub bgcolor_default: ControlCode,
     pub underline: ControlCode,
@@ -291,8 +282,7 @@ impl AsTermInput for ControlCode {
                 }
 
                 let mut action_buf = [0; 4];
-                action.encode_utf8(&mut action_buf);
-                buf.extend_from_slice(&action_buf);
+                buf.extend_from_slice(action.encode_utf8(&mut action_buf).as_bytes());
             }
             ControlCode::ESC {
                 intermediates,
@@ -402,6 +392,11 @@ static CONTROL_CODES: OnceLock<ControlCodes> = OnceLock::new();
 
 pub fn control_codes() -> &'static ControlCodes {
     CONTROL_CODES.get_or_init(|| ControlCodes {
+        clear_screen: ControlCode::CSI {
+            params: vec![],
+            intermediates: vec![],
+            action: 'J',
+        },
         fgcolor_default: ControlCode::CSI {
             params: vec![vec![39]],
             intermediates: vec![],
@@ -582,10 +577,18 @@ impl ControlCodes {
     }
 
     pub fn cursor_position(row: u16, col: u16) -> ControlCode {
-        ControlCode::CSI {
-            params: vec![vec![row], vec![col]],
-            intermediates: vec![],
-            action: 'H',
+        if row == 1 && col == 1 {
+            ControlCode::CSI {
+                params: vec![],
+                intermediates: vec![],
+                action: 'H',
+            }
+        } else {
+            ControlCode::CSI {
+                params: vec![vec![row], vec![col]],
+                intermediates: vec![],
+                action: 'H',
+            }
         }
     }
 

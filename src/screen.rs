@@ -142,8 +142,11 @@ impl AsTermInput for Screen {
             Grid::AltScreen(altscreen) => altscreen.term_input_into(buf),
         }
 
-        term::ControlCodes::cursor_position(self.cursor.row as u16, self.cursor.col as u16)
-            .term_input_into(buf);
+        term::ControlCodes::cursor_position(
+            (self.cursor.row + 1) as u16,
+            (self.cursor.col + 1) as u16,
+        )
+        .term_input_into(buf);
     }
 }
 
