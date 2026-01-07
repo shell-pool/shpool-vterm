@@ -377,6 +377,7 @@ pub struct ControlCodes {
     pub erase_to_end_of_line: ControlCode,
     pub erase_to_start_of_line: ControlCode,
     pub erase_line: ControlCode,
+    pub device_status_report: ControlCode,
 }
 
 #[derive(Clone, Debug)]
@@ -633,6 +634,7 @@ pub fn control_codes() -> &'static ControlCodes {
             action: 'K',
         },
         erase_line: ControlCode::CSI { params: vec![vec![2]], intermediates: vec![], action: 'K' },
+        device_status_report: ControlCode::CSI { params: vec![vec![6]], intermediates: vec![], action: 'n' },
     })
 }
 

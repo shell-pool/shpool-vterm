@@ -30,7 +30,7 @@ use crate::{
     term::{AsTermInput, BlinkStyle, FontWeight, FrameStyle, UnderlineStyle},
 };
 
-use tracing::warn;
+use tracing::{debug, warn};
 
 use crate::screen::SavedCursor;
 
@@ -409,6 +409,13 @@ impl vte::Perform for State {
                     intermediates,
                     params.iter().collect::<Vec<&[u16]>>()
                 ),
+            },
+            // DSR (Device Status Report)
+            'n' => while let Some(param) = params_iter.next() {
+                match param {
+                    [6] => debug!("ignoring DSR (CSI 6 n), that's the real terminal's job"),
+                    _ => {}
+                }
             },
 
             // cell attribute manipulation

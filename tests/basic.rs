@@ -173,3 +173,16 @@ frag! {
        term::ControlCodes::cursor_position(4, 3),
        term::control_codes().clear_attrs
 }
+
+frag! {
+    dsr_ignored { scrollback_lines: 100, width: 10, height: 10 }
+    <= term::Raw::from("A"),
+       term::control_codes().device_status_report,
+       term::Raw::from("B")
+    => term::control_codes().clear_attrs,
+       term::ControlCodes::cursor_position(1, 1),
+       term::control_codes().clear_screen,
+       term::Raw::from("AB"),
+       term::ControlCodes::cursor_position(1, 3),
+       term::control_codes().clear_attrs
+}
