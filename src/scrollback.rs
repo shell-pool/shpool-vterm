@@ -18,7 +18,7 @@
 
 use crate::{
     cell::Cell,
-    line::Line,
+    line::{self, Line},
     term::{self, AsTermInput, Pos},
 };
 use std::collections::VecDeque;
@@ -164,7 +164,7 @@ impl Scrollback {
         self.buf = new_scrollback;
     }
 
-    fn get_line_mut(&mut self, size: crate::Size, row: usize) -> Option<&mut Line> {
+    pub fn get_line_mut(&mut self, size: crate::Size, row: usize) -> Option<&mut Line> {
         let in_view_len = self.in_view_len(size);
         if row >= in_view_len {
             return None;
@@ -296,7 +296,7 @@ impl Scrollback {
             for i in (snip_line + 1)..lines_in_view {
                 self.buf[i].truncate(0);
             }
-            self.buf[snip_line].clobber_til(cursor.col);
+            self.buf[snip_line].erase(line::Section::StartTo(cursor.col));
         } else {
             for i in 0..lines_in_view {
                 self.buf[i].truncate(0);

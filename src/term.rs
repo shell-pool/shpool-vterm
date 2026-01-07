@@ -235,6 +235,9 @@ pub struct ControlCodes {
     pub erase_from_start: ControlCode,
     pub erase_screen: ControlCode,
     pub erase_scrollback: ControlCode,
+    pub erase_to_end_of_line: ControlCode,
+    pub erase_to_start_of_line: ControlCode,
+    pub erase_line: ControlCode,
 }
 
 #[derive(Clone, Debug)]
@@ -494,6 +497,21 @@ pub fn control_codes() -> &'static ControlCodes {
             params: vec![vec![3]],
             intermediates: vec![],
             action: 'J',
+        },
+        erase_to_end_of_line: ControlCode::CSI {
+            params: vec![vec![0]],
+            intermediates: vec![],
+            action: 'K',
+        },
+        erase_to_start_of_line: ControlCode::CSI {
+            params: vec![vec![1]],
+            intermediates: vec![],
+            action: 'K',
+        },
+        erase_line: ControlCode::CSI {
+            params: vec![vec![2]],
+            intermediates: vec![],
+            action: 'K',
         },
     })
 }

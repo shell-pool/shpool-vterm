@@ -126,13 +126,24 @@ impl Line {
         self.cells.truncate(width);
     }
 
-    /// Overwrite all cells up to and including the one at col with an empty
-    /// cell.
-    pub fn clobber_til(&mut self, col: usize) {
-        for i in 0..std::cmp::min(col + 1, self.cells.len()) {
-            self.cells[i] = Cell::empty();
+    /// Clobber the given section, either by trimming the underlying storage
+    /// or by overwriting with empty cells.
+    pub fn erase(&mut self, section: Section) {
+        match section {
+            Section::StartTo(col) => for i in 0..std::cmp::min(col + 1, self.cells.len()) {
+                self.cells[i] = Cell::empty();
+            }
+            Section::ToEnd(col) => self.truncate(col),
+            Section::Whole => self.truncate(0),
         }
     }
+}
+
+/// Specify a region of the line.
+pub enum Section {
+    StartTo(usize),
+    ToEnd(usize),
+    Whole,
 }
 
 #[cfg(test)]

@@ -18,7 +18,7 @@ use std::collections::VecDeque;
 
 use crate::{
     cell::Cell,
-    line::Line,
+    line::{self, Line},
     term::{self, AsTermInput, Pos},
 };
 
@@ -99,6 +99,11 @@ impl AltScreen {
         // no-op if they have the same height
     }
 
+    pub fn get_line_mut(&mut self, row: usize) -> &mut Line {
+        assert!(row <= self.buf.len());
+        &mut self.buf[row]
+    }
+
     pub fn erase_to_end(&mut self, cursor: Pos) {
         self.buf[cursor.row].truncate(cursor.col);
 
@@ -111,7 +116,7 @@ impl AltScreen {
         for i in 0..cursor.row {
             self.buf[i].truncate(0);
         }
-        self.buf[cursor.row].clobber_til(cursor.col);
+        self.buf[cursor.row].erase(line::Section::StartTo(cursor.col));
     }
 
     pub fn erase(&mut self) {

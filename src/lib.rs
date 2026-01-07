@@ -332,7 +332,18 @@ impl vte::Perform for State {
                         [1] => self.screen_mut().erase_from_start(),
                         [2] => self.screen_mut().erase(false),
                         [3] => self.screen_mut().erase(true),
-                        _ => warn!("unhandled 'CSI {:?} J'", code),
+                        _ => warn!("unhandled 'CSI {code:?} J'"),
+                    }
+                }
+            }
+            // EL (Erase in Line)
+            'K' => {
+                while let Some(code) = params_iter.next() {
+                    match code {
+                        [] | [0] => self.screen_mut().erase_to_end_of_line(),
+                        [1] => self.screen_mut().erase_to_start_of_line(),
+                        [2] => self.screen_mut().erase_line(),
+                        _ => warn!("unhandled 'CSI {code:?} K'"),
                     }
                 }
             }
@@ -1081,6 +1092,49 @@ mod test {
            term::ControlCodes::cursor_position(1, 1),
            term::control_codes().clear_screen,
            term::ControlCodes::cursor_position(2, 2),
+           term::control_codes().clear_attrs
+    }
+
+    frag! {
+        erase_in_line { scrollback_lines: 100, width: 10, height: 10 }
+        <= term::Raw::from("ABCDE"),
+           term::ControlCodes::cursor_backwards(4), // at B (1)
+           term::control_codes().erase_to_end_of_line,
+           term::Raw::from("X"),
+
+           term::ControlCodes::cursor_next_line(1),
+           term::Raw::from("ABCDE"),
+           term::ControlCodes::cursor_backwards(2), // at D (3)
+           term::control_codes().erase_to_start_of_line,
+           term::Raw::from("Y"),
+
+           term::ControlCodes::cursor_next_line(1),
+           term::Raw::from("ABCDE"),
+           term::ControlCodes::cursor_backwards(2), // at D (3)
+           term::control_codes().erase_line,
+           term::Raw::from("Z"),
+
+           term::ControlCodes::cursor_next_line(1),
+           term::Raw::from("ABCDE"),
+           term::ControlCodes::cursor_backwards(4), // at B (1)
+           term::Raw::from("\x1b[K"), // Raw CSI K (default 0)
+           term::Raw::from("W")
+        => term::control_codes().clear_attrs,
+           term::ControlCodes::cursor_position(1, 1),
+           term::control_codes().clear_screen,
+
+           term::Raw::from("AX"),
+           term::Crlf::default(),
+
+           term::Raw::from("   YE"),
+           term::Crlf::default(),
+
+           term::Raw::from("   Z"),
+           term::Crlf::default(),
+
+           term::Raw::from("AW"),
+
+           term::ControlCodes::cursor_position(4, 3),
            term::control_codes().clear_attrs
     }
 

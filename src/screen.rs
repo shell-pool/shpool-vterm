@@ -20,6 +20,7 @@ use crate::{
     cell::Cell,
     scrollback::Scrollback,
     term::{self, AsTermInput, Pos},
+    line,
 };
 
 use tracing::warn;
@@ -138,6 +139,33 @@ impl Screen {
         match &mut self.grid {
             Grid::Scrollback(s) => s.erase(self.size, include_scrollback),
             Grid::AltScreen(alt) => alt.erase(),
+        }
+    }
+
+    pub fn erase_to_end_of_line(&mut self) {
+        match &mut self.grid {
+            Grid::Scrollback(s) => if let Some(l) = s.get_line_mut(self.size, self.cursor.row) {
+                l.erase(line::Section::ToEnd(self.cursor.col));
+            },
+            Grid::AltScreen(alt) => alt.get_line_mut(self.cursor.row).erase(line::Section::ToEnd(self.cursor.col)),
+        }
+    }
+
+    pub fn erase_to_start_of_line(&mut self) {
+        match &mut self.grid {
+            Grid::Scrollback(s) => if let Some(l) = s.get_line_mut(self.size, self.cursor.row) {
+                l.erase(line::Section::StartTo(self.cursor.col));
+            },
+            Grid::AltScreen(alt) => alt.get_line_mut(self.cursor.row).erase(line::Section::StartTo(self.cursor.col)),
+        }
+    }
+
+    pub fn erase_line(&mut self) {
+        match &mut self.grid {
+            Grid::Scrollback(s) => if let Some(l) = s.get_line_mut(self.size, self.cursor.row) {
+                l.erase(line::Section::Whole);
+            },
+            Grid::AltScreen(alt) => alt.get_line_mut(self.cursor.row).erase(line::Section::Whole),
         }
     }
 }
