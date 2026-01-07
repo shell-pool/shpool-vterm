@@ -111,10 +111,39 @@ impl AsTermInput for Raw {
 pub struct Attrs {
     pub fgcolor: Option<Color>,
     pub bgcolor: Option<Color>,
-    pub bold: bool,
+    pub font_weight: Option<FontWeight>,
     pub italic: bool,
-    pub underline: bool,
+    pub underline: Option<UnderlineStyle>,
     pub inverse: bool,
+    pub blink: Option<BlinkStyle>,
+    pub conceal: bool,
+    pub strikethrough: bool,
+    pub framed: Option<FrameStyle>,
+    pub overline: bool,
+}
+
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub enum UnderlineStyle {
+    Single,
+    Double,
+}
+
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub enum FontWeight {
+    Bold,
+    Faint,
+}
+
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub enum BlinkStyle {
+    Slow,
+    Rapid,
+}
+
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub enum FrameStyle {
+    Frame,
+    Circle,
 }
 
 impl std::fmt::Display for Attrs {
@@ -127,17 +156,40 @@ impl std::fmt::Display for Attrs {
             write!(f, "<BG {c:?}>")?;
         }
 
-        if self.bold {
-            write!(f, "b")?;
+        match self.font_weight {
+            Some(FontWeight::Bold) => write!(f, "b")?,
+            Some(FontWeight::Faint) => write!(f, "f")?,
+            _ => {}
         }
         if self.italic {
             write!(f, "i")?;
         }
-        if self.underline {
-            write!(f, "_")?;
+        match self.underline {
+            Some(UnderlineStyle::Single) => write!(f, "_")?,
+            Some(UnderlineStyle::Double) => write!(f, "‗")?,
+            _ => {}
         }
         if self.inverse {
             write!(f, "<")?;
+        }
+        match self.blink {
+            Some(BlinkStyle::Slow) => write!(f, "*")?,
+            Some(BlinkStyle::Rapid) => write!(f, "!")?,
+            _ => {}
+        }
+        if self.conceal {
+            write!(f, "?")?;
+        }
+        if self.strikethrough {
+            write!(f, "-")?;
+        }
+        match self.framed {
+            Some(FrameStyle::Frame) => write!(f, "□")?,
+            Some(FrameStyle::Circle) => write!(f, "○")?,
+            _ => {}
+        }
+        if self.overline {
+            write!(f, "‾")?;
         }
 
         Ok(())
@@ -148,10 +200,15 @@ impl Attrs {
     pub fn has_attrs(&self) -> bool {
         self.fgcolor.is_some()
             || self.bgcolor.is_some()
-            || self.bold
+            || self.font_weight.is_some()
             || self.italic
-            || self.underline
+            || self.underline.is_some()
             || self.inverse
+            || self.blink.is_some()
+            || self.conceal
+            || self.strikethrough
+            || self.framed.is_some()
+            || self.overline
     }
 
     /// Given another set of attributes, generate the minimal control codes
@@ -178,28 +235,98 @@ impl Attrs {
             }
         }
 
-        if self.bold && !next.bold {
-            codes.push(controls.undo_bold.clone());
-        } else if !self.bold && next.bold {
-            codes.push(controls.bold.clone());
-        }
-
         if self.italic && !next.italic {
             codes.push(controls.undo_italic.clone());
         } else if !self.italic && next.italic {
             codes.push(controls.italic.clone());
         }
 
-        if self.underline && !next.underline {
-            codes.push(controls.undo_underline.clone());
-        } else if !self.italic && next.underline {
-            codes.push(controls.underline.clone());
+        match (&self.underline, &next.underline) {
+            (None, None) => {}
+            (Some(_), None) => codes.push(controls.undo_underline.clone()),
+            (None, Some(style)) => match style {
+                UnderlineStyle::Single => codes.push(controls.underline.clone()),
+                UnderlineStyle::Double => codes.push(controls.double_underline.clone()),
+            },
+            (Some(_), Some(style)) => {
+                codes.push(controls.undo_underline.clone());
+                match style {
+                    UnderlineStyle::Single => codes.push(controls.underline.clone()),
+                    UnderlineStyle::Double => codes.push(controls.double_underline.clone()),
+                }
+            }
         }
 
         if self.inverse && !next.inverse {
             codes.push(controls.undo_inverse.clone());
         } else if !self.inverse && next.inverse {
             codes.push(controls.inverse.clone());
+        }
+
+        match (&self.font_weight, &next.font_weight) {
+            (None, None) => {}
+            (Some(_), None) => codes.push(controls.reset_font_weight.clone()),
+            (None, Some(style)) => match style {
+                FontWeight::Bold => codes.push(controls.bold.clone()),
+                FontWeight::Faint => codes.push(controls.faint.clone()),
+            },
+            (Some(_), Some(style)) => {
+                codes.push(controls.reset_font_weight.clone());
+                match style {
+                    FontWeight::Bold => codes.push(controls.bold.clone()),
+                    FontWeight::Faint => codes.push(controls.faint.clone()),
+                }
+            }
+        }
+
+        match (&self.blink, &next.blink) {
+            (None, None) => {}
+            (Some(_), None) => codes.push(controls.undo_blink.clone()),
+            (None, Some(style)) => match style {
+                BlinkStyle::Slow => codes.push(controls.slow_blink.clone()),
+                BlinkStyle::Rapid => codes.push(controls.rapid_blink.clone()),
+            },
+            (Some(_), Some(style)) => {
+                codes.push(controls.undo_blink.clone());
+                match style {
+                    BlinkStyle::Slow => codes.push(controls.slow_blink.clone()),
+                    BlinkStyle::Rapid => codes.push(controls.rapid_blink.clone()),
+                }
+            }
+        }
+
+        if self.conceal && !next.conceal {
+            codes.push(controls.undo_conceal.clone());
+        } else if !self.conceal && next.conceal {
+            codes.push(controls.conceal.clone());
+        }
+
+        if self.strikethrough && !next.strikethrough {
+            codes.push(controls.undo_strikethrough.clone());
+        } else if !self.strikethrough && next.strikethrough {
+            codes.push(controls.strikethrough.clone());
+        }
+
+        match (&self.framed, &next.framed) {
+            (None, None) => {}
+            (Some(_), None) => codes.push(controls.undo_framed.clone()),
+            (None, Some(style)) => match style {
+                FrameStyle::Frame => codes.push(controls.framed.clone()),
+                FrameStyle::Circle => codes.push(controls.encircled.clone()),
+            },
+            (Some(_), Some(style)) => {
+                codes.push(controls.undo_framed.clone());
+                match style {
+                    FrameStyle::Frame => codes.push(controls.framed.clone()),
+                    FrameStyle::Circle => codes.push(controls.encircled.clone()),
+                }
+            }
+        }
+
+        if self.overline && !next.overline {
+            codes.push(controls.undo_overline.clone());
+        } else if !self.overline && next.overline {
+            codes.push(controls.overline.clone());
         }
 
         ControlCode::fuse_csi(codes)
@@ -216,13 +343,27 @@ pub struct ControlCodes {
     pub fgcolor_default: ControlCode,
     pub bgcolor_default: ControlCode,
     pub underline: ControlCode,
+    pub double_underline: ControlCode,
     pub undo_underline: ControlCode,
     pub bold: ControlCode,
-    pub undo_bold: ControlCode,
+    pub faint: ControlCode,
+    pub reset_font_weight: ControlCode,
     pub italic: ControlCode,
     pub undo_italic: ControlCode,
     pub inverse: ControlCode,
     pub undo_inverse: ControlCode,
+    pub slow_blink: ControlCode,
+    pub rapid_blink: ControlCode,
+    pub undo_blink: ControlCode,
+    pub conceal: ControlCode,
+    pub undo_conceal: ControlCode,
+    pub strikethrough: ControlCode,
+    pub undo_strikethrough: ControlCode,
+    pub framed: ControlCode,
+    pub encircled: ControlCode,
+    pub undo_framed: ControlCode,
+    pub overline: ControlCode,
+    pub undo_overline: ControlCode,
     pub save_cursor_position: ControlCode,
     pub restore_cursor_position: ControlCode,
     pub save_cursor: ControlCode,
@@ -378,13 +519,23 @@ pub fn control_codes() -> &'static ControlCodes {
             action: 'm',
         },
         underline: ControlCode::CSI { params: vec![vec![4]], intermediates: vec![], action: 'm' },
+        double_underline: ControlCode::CSI {
+            params: vec![vec![21]],
+            intermediates: vec![],
+            action: 'm',
+        },
         undo_underline: ControlCode::CSI {
             params: vec![vec![24]],
             intermediates: vec![],
             action: 'm',
         },
         bold: ControlCode::CSI { params: vec![vec![1]], intermediates: vec![], action: 'm' },
-        undo_bold: ControlCode::CSI { params: vec![vec![22]], intermediates: vec![], action: 'm' },
+        faint: ControlCode::CSI { params: vec![vec![2]], intermediates: vec![], action: 'm' },
+        reset_font_weight: ControlCode::CSI {
+            params: vec![vec![22]],
+            intermediates: vec![],
+            action: 'm',
+        },
         italic: ControlCode::CSI { params: vec![vec![3]], intermediates: vec![], action: 'm' },
         undo_italic: ControlCode::CSI {
             params: vec![vec![23]],
@@ -394,6 +545,38 @@ pub fn control_codes() -> &'static ControlCodes {
         inverse: ControlCode::CSI { params: vec![vec![7]], intermediates: vec![], action: 'm' },
         undo_inverse: ControlCode::CSI {
             params: vec![vec![27]],
+            intermediates: vec![],
+            action: 'm',
+        },
+        slow_blink: ControlCode::CSI { params: vec![vec![5]], intermediates: vec![], action: 'm' },
+        rapid_blink: ControlCode::CSI { params: vec![vec![6]], intermediates: vec![], action: 'm' },
+        undo_blink: ControlCode::CSI { params: vec![vec![25]], intermediates: vec![], action: 'm' },
+        conceal: ControlCode::CSI { params: vec![vec![8]], intermediates: vec![], action: 'm' },
+        undo_conceal: ControlCode::CSI {
+            params: vec![vec![28]],
+            intermediates: vec![],
+            action: 'm',
+        },
+        strikethrough: ControlCode::CSI {
+            params: vec![vec![9]],
+            intermediates: vec![],
+            action: 'm',
+        },
+        undo_strikethrough: ControlCode::CSI {
+            params: vec![vec![29]],
+            intermediates: vec![],
+            action: 'm',
+        },
+        framed: ControlCode::CSI { params: vec![vec![51]], intermediates: vec![], action: 'm' },
+        encircled: ControlCode::CSI { params: vec![vec![52]], intermediates: vec![], action: 'm' },
+        undo_framed: ControlCode::CSI {
+            params: vec![vec![54]],
+            intermediates: vec![],
+            action: 'm',
+        },
+        overline: ControlCode::CSI { params: vec![vec![53]], intermediates: vec![], action: 'm' },
+        undo_overline: ControlCode::CSI {
+            params: vec![vec![55]],
             intermediates: vec![],
             action: 'm',
         },

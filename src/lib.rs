@@ -19,9 +19,11 @@ mod screen;
 mod scrollback;
 mod term;
 
-use cell::Cell;
-use screen::Screen;
-use term::AsTermInput;
+use crate::{
+    cell::Cell,
+    screen::Screen,
+    term::{AsTermInput, BlinkStyle, FontWeight, FrameStyle, UnderlineStyle},
+};
 
 use tracing::warn;
 
@@ -420,14 +422,14 @@ impl vte::Perform for State {
                     // Other:
                     //      CSI 21 m => double
                     //      CSI 58 ; 2 ; r ; g ; b m => RGB colored underline
-                    [4] => self.cursor_attrs.underline = true,
-                    // TODO: should really be a double underline.
-                    [21] => self.cursor_attrs.underline = true,
-                    [24] => self.cursor_attrs.underline = false,
+                    [4] => self.cursor_attrs.underline = Some(UnderlineStyle::Single),
+                    [21] => self.cursor_attrs.underline = Some(UnderlineStyle::Double),
+                    [24] => self.cursor_attrs.underline = None,
 
-                    // Bold Handling.
-                    [1] => self.cursor_attrs.bold = true,
-                    [22] => self.cursor_attrs.bold = false,
+                    // Font Weight Handling.
+                    [1] => self.cursor_attrs.font_weight = Some(FontWeight::Bold),
+                    [2] => self.cursor_attrs.font_weight = Some(FontWeight::Faint),
+                    [22] => self.cursor_attrs.font_weight = None,
 
                     // Italic Handling.
                     [3] => self.cursor_attrs.italic = true,
@@ -436,6 +438,28 @@ impl vte::Perform for State {
                     // Inverse Handling.
                     [7] => self.cursor_attrs.inverse = true,
                     [27] => self.cursor_attrs.inverse = false,
+
+                    // Blink Handling
+                    [5] => self.cursor_attrs.blink = Some(BlinkStyle::Slow),
+                    [6] => self.cursor_attrs.blink = Some(BlinkStyle::Rapid),
+                    [25] => self.cursor_attrs.blink = None,
+
+                    // Conceal Handling
+                    [8] => self.cursor_attrs.conceal = true,
+                    [28] => self.cursor_attrs.conceal = false,
+
+                    // Strikethrough Handling.
+                    [9] => self.cursor_attrs.strikethrough = true,
+                    [29] => self.cursor_attrs.strikethrough = false,
+
+                    // Frame Handling.
+                    [51] => self.cursor_attrs.framed = Some(FrameStyle::Frame),
+                    [52] => self.cursor_attrs.framed = Some(FrameStyle::Circle),
+                    [54] => self.cursor_attrs.framed = None,
+
+                    // Overline Handling.
+                    [53] => self.cursor_attrs.overline = true,
+                    [55] => self.cursor_attrs.overline = false,
 
                     _ => warn!("unhandled 'CSI {param:?} m'"),
                 }
@@ -544,7 +568,7 @@ mod test {
     }
 
     frag! {
-        underline_rt { scrollback_lines: 100, width: 100, height: 100 }
+        underline { scrollback_lines: 100, width: 100, height: 100 }
         <= term::Raw::from("a"),
            term::control_codes().underline,
            term::Raw::from("b"),
@@ -563,11 +587,11 @@ mod test {
     }
 
     frag! {
-        bold_rt { scrollback_lines: 100, width: 100, height: 100 }
+        bold { scrollback_lines: 100, width: 100, height: 100 }
         <= term::Raw::from("a"),
            term::control_codes().bold,
            term::Raw::from("b"),
-           term::control_codes().undo_bold,
+           term::control_codes().reset_font_weight,
            term::Raw::from("a")
         => term::control_codes().clear_attrs,
            term::ControlCodes::cursor_position(1, 1),
@@ -575,14 +599,14 @@ mod test {
            term::Raw::from("a"),
            term::control_codes().bold,
            term::Raw::from("b"),
-           term::control_codes().undo_bold,
+           term::control_codes().reset_font_weight,
            term::Raw::from("a"),
            term::ControlCodes::cursor_position(1, 4),
            term::control_codes().clear_attrs
     }
 
     frag! {
-        italic_rt { scrollback_lines: 100, width: 100, height: 100 }
+        italic { scrollback_lines: 100, width: 100, height: 100 }
         <= term::Raw::from("a"),
            term::control_codes().italic,
            term::Raw::from("b"),
@@ -601,7 +625,7 @@ mod test {
     }
 
     frag! {
-        inverse_rt { scrollback_lines: 100, width: 100, height: 100 }
+        inverse { scrollback_lines: 100, width: 100, height: 100 }
         <= term::Raw::from("a"),
            term::control_codes().inverse,
            term::Raw::from("b"),
@@ -918,7 +942,7 @@ mod test {
         <= term::control_codes().bold,
            term::Raw::from("A"),
            term::control_codes().save_cursor,
-           term::control_codes().undo_bold,
+           term::control_codes().reset_font_weight,
            term::ControlCodes::cursor_forward(1),
            term::Raw::from("B"),
            term::control_codes().restore_cursor,
@@ -928,7 +952,7 @@ mod test {
            term::control_codes().clear_screen,
            term::control_codes().bold,
            term::Raw::from("AC"),
-           term::control_codes().undo_bold,
+           term::control_codes().reset_font_weight,
            term::Raw::from("B"),
            term::ControlCodes::cursor_position(1, 3),
            term::control_codes().clear_attrs,
@@ -1116,6 +1140,151 @@ mod test {
            term::Raw::from("AW"),
 
            term::ControlCodes::cursor_position(4, 3),
+           term::control_codes().clear_attrs
+    }
+
+    frag! {
+        faint { scrollback_lines: 100, width: 100, height: 100 }
+        <= term::Raw::from("a"),
+           term::control_codes().faint,
+           term::Raw::from("b"),
+           term::control_codes().reset_font_weight,
+           term::Raw::from("a")
+        => term::control_codes().clear_attrs,
+           term::ControlCodes::cursor_position(1, 1),
+           term::control_codes().clear_screen,
+           term::Raw::from("a"),
+           term::control_codes().faint,
+           term::Raw::from("b"),
+           term::control_codes().reset_font_weight,
+           term::Raw::from("a"),
+           term::ControlCodes::cursor_position(1, 4),
+           term::control_codes().clear_attrs
+    }
+
+    frag! {
+        blink { scrollback_lines: 100, width: 100, height: 100 }
+        <= term::Raw::from("a"),
+           term::control_codes().slow_blink,
+           term::Raw::from("b"),
+           term::control_codes().undo_blink,
+           term::Raw::from("a"),
+           term::control_codes().rapid_blink,
+           term::Raw::from("c")
+        => term::control_codes().clear_attrs,
+           term::ControlCodes::cursor_position(1, 1),
+           term::control_codes().clear_screen,
+           term::Raw::from("a"),
+           term::control_codes().slow_blink,
+           term::Raw::from("b"),
+           term::control_codes().undo_blink,
+           term::Raw::from("a"),
+           term::control_codes().rapid_blink,
+           term::Raw::from("c"),
+           term::control_codes().undo_blink,
+           term::ControlCodes::cursor_position(1, 5),
+           term::control_codes().clear_attrs,
+           term::control_codes().rapid_blink
+    }
+
+    frag! {
+        conceal { scrollback_lines: 100, width: 100, height: 100 }
+        <= term::Raw::from("a"),
+           term::control_codes().conceal,
+           term::Raw::from("b"),
+           term::control_codes().undo_conceal,
+           term::Raw::from("a")
+        => term::control_codes().clear_attrs,
+           term::ControlCodes::cursor_position(1, 1),
+           term::control_codes().clear_screen,
+           term::Raw::from("a"),
+           term::control_codes().conceal,
+           term::Raw::from("b"),
+           term::control_codes().undo_conceal,
+           term::Raw::from("a"),
+           term::ControlCodes::cursor_position(1, 4),
+           term::control_codes().clear_attrs
+    }
+
+    frag! {
+        strikethrough { scrollback_lines: 100, width: 100, height: 100 }
+        <= term::Raw::from("a"),
+           term::control_codes().strikethrough,
+           term::Raw::from("b"),
+           term::control_codes().undo_strikethrough,
+           term::Raw::from("a")
+        => term::control_codes().clear_attrs,
+           term::ControlCodes::cursor_position(1, 1),
+           term::control_codes().clear_screen,
+           term::Raw::from("a"),
+           term::control_codes().strikethrough,
+           term::Raw::from("b"),
+           term::control_codes().undo_strikethrough,
+           term::Raw::from("a"),
+           term::ControlCodes::cursor_position(1, 4),
+           term::control_codes().clear_attrs
+    }
+
+    frag! {
+        framed { scrollback_lines: 100, width: 100, height: 100 }
+        <= term::Raw::from("a"),
+           term::control_codes().framed,
+           term::Raw::from("b"),
+           term::control_codes().undo_framed,
+           term::Raw::from("a"),
+           term::control_codes().encircled,
+           term::Raw::from("c")
+        => term::control_codes().clear_attrs,
+           term::ControlCodes::cursor_position(1, 1),
+           term::control_codes().clear_screen,
+           term::Raw::from("a"),
+           term::control_codes().framed,
+           term::Raw::from("b"),
+           term::control_codes().undo_framed,
+           term::Raw::from("a"),
+           term::control_codes().encircled,
+           term::Raw::from("c"),
+           term::control_codes().undo_framed,
+           term::ControlCodes::cursor_position(1, 5),
+           term::control_codes().clear_attrs,
+           term::control_codes().encircled
+    }
+
+    frag! {
+        overline { scrollback_lines: 100, width: 100, height: 100 }
+        <= term::Raw::from("a"),
+           term::control_codes().overline,
+           term::Raw::from("b"),
+           term::control_codes().undo_overline,
+           term::Raw::from("a")
+        => term::control_codes().clear_attrs,
+           term::ControlCodes::cursor_position(1, 1),
+           term::control_codes().clear_screen,
+           term::Raw::from("a"),
+           term::control_codes().overline,
+           term::Raw::from("b"),
+           term::control_codes().undo_overline,
+           term::Raw::from("a"),
+           term::ControlCodes::cursor_position(1, 4),
+           term::control_codes().clear_attrs
+    }
+
+    frag! {
+        double_underline { scrollback_lines: 100, width: 100, height: 100 }
+        <= term::Raw::from("a"),
+           term::control_codes().double_underline,
+           term::Raw::from("b"),
+           term::control_codes().undo_underline,
+           term::Raw::from("a")
+        => term::control_codes().clear_attrs,
+           term::ControlCodes::cursor_position(1, 1),
+           term::control_codes().clear_screen,
+           term::Raw::from("a"),
+           term::control_codes().double_underline,
+           term::Raw::from("b"),
+           term::control_codes().undo_underline,
+           term::Raw::from("a"),
+           term::ControlCodes::cursor_position(1, 4),
            term::control_codes().clear_attrs
     }
 
