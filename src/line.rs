@@ -83,10 +83,7 @@ impl AsTermInput for Line {
 /// to have the grid width passed down by the grid implementation.
 impl Line {
     pub fn new() -> Self {
-        Line {
-            cells: vec![],
-            is_wrapped: false,
-        }
+        Line { cells: vec![], is_wrapped: false }
     }
 
     /// Get the cell at the given grid position.
@@ -130,8 +127,10 @@ impl Line {
     /// or by overwriting with empty cells.
     pub fn erase(&mut self, section: Section) {
         match section {
-            Section::StartTo(col) => for i in 0..std::cmp::min(col + 1, self.cells.len()) {
-                self.cells[i] = Cell::empty();
+            Section::StartTo(col) => {
+                for i in 0..std::cmp::min(col + 1, self.cells.len()) {
+                    self.cells[i] = Cell::empty();
+                }
             }
             Section::ToEnd(col) => self.truncate(col),
             Section::Whole => self.truncate(0),
@@ -164,8 +163,8 @@ mod tests {
         let c1 = Cell::new('a', term::Attrs::default());
         let c2 = Cell::new('b', term::Attrs::default());
 
-        // Set within current length (needs push first to not be out of bounds of vector if we treated it strictly,
-        // but set() handles extension)
+        // Set within current length (needs push first to not be out of bounds of vector
+        // if we treated it strictly, but set() handles extension)
 
         // set at 0
         line.set_cell(width, 0, c1.clone())?;

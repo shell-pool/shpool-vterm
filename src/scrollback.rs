@@ -63,10 +63,7 @@ impl Scrollback {
     /// Create a new grid with the given number of lines of scrollback
     /// storage, and the given size window in view.
     pub fn new(scrollback_lines: usize) -> Self {
-        Scrollback {
-            buf: VecDeque::new(),
-            lines: scrollback_lines,
-        }
+        Scrollback { buf: VecDeque::new(), lines: scrollback_lines }
     }
 
     /// Get the max number of scrollback lines this grid
@@ -218,9 +215,7 @@ impl Scrollback {
             if let Some(line) = self.get_line_mut(size, cursor.row) {
                 line.is_wrapped = true;
             } else {
-                return Err(anyhow!(
-                    "unexpectedly missing line when setting wrap marker"
-                ));
+                return Err(anyhow!("unexpectedly missing line when setting wrap marker"));
             }
 
             cursor.col = 0;
@@ -258,18 +253,13 @@ impl Scrollback {
             }
         }
 
-        let mut npad = if cell.width() > 1 {
-            cell.width() - 1
-        } else {
-            0
-        };
+        let mut npad = if cell.width() > 1 { cell.width() - 1 } else { 0 };
         self.set(size, cursor, cell).context("setting main cell")?;
         cursor.col += 1;
         while npad > 0 {
             assert!(cursor.col < size.width);
 
-            self.set(size, cursor, Cell::wide_pad())
-                .context("padding after wide char")?;
+            self.set(size, cursor, Cell::wide_pad()).context("padding after wide char")?;
             cursor.col += 1;
             npad -= 1;
         }

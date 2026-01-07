@@ -43,10 +43,7 @@ impl Term {
     /// less than size.height, it will be automatically adjusted
     /// to be equal to size.height.
     pub fn new(scrollback_lines: usize, size: Size) -> Self {
-        Term {
-            parser: vte::Parser::new(),
-            state: State::new(scrollback_lines, size),
-        }
+        Term { parser: vte::Parser::new(), state: State::new(scrollback_lines, size) }
     }
 
     /// Get the current terminal size.
@@ -69,10 +66,7 @@ impl Term {
 
     /// Get the current number of lines of stored scrollback.
     pub fn scrollback_lines(&self) -> usize {
-        self.state
-            .scrollback
-            .scrollback_lines()
-            .expect("scrollback screen to have lines")
+        self.state.scrollback.scrollback_lines().expect("scrollback screen to have lines")
     }
 
     /// Set the number of lines of scrollback to store. This will drop
@@ -235,6 +229,12 @@ impl vte::Perform for State {
     }
 
     // Handle escape codes beginning with the CSI indicator ('\x1b[').
+    //
+    // rustfmt has insane ideas about match arm formatting and there is
+    // apparently no way to make it do the reasonable thing of preserving
+    // horizontal whitespace by placing loops directly in match arm statement
+    // position.
+    #[rustfmt::skip]
     fn csi_dispatch(
         &mut self,
         params: &vte::Params,
@@ -325,26 +325,22 @@ impl vte::Perform for State {
                 screen.clamp();
             }
             // ED (Erase in Display)
-            'J' => {
-                while let Some(code) = params_iter.next() {
-                    match code {
-                        [] | [0] => self.screen_mut().erase_to_end(),
-                        [1] => self.screen_mut().erase_from_start(),
-                        [2] => self.screen_mut().erase(false),
-                        [3] => self.screen_mut().erase(true),
-                        _ => warn!("unhandled 'CSI {code:?} J'"),
-                    }
+            'J' => while let Some(code) = params_iter.next() {
+                match code {
+                    [] | [0] => self.screen_mut().erase_to_end(),
+                    [1] => self.screen_mut().erase_from_start(),
+                    [2] => self.screen_mut().erase(false),
+                    [3] => self.screen_mut().erase(true),
+                    _ => warn!("unhandled 'CSI {code:?} J'"),
                 }
             }
             // EL (Erase in Line)
-            'K' => {
-                while let Some(code) = params_iter.next() {
-                    match code {
-                        [] | [0] => self.screen_mut().erase_to_end_of_line(),
-                        [1] => self.screen_mut().erase_to_start_of_line(),
-                        [2] => self.screen_mut().erase_line(),
-                        _ => warn!("unhandled 'CSI {code:?} K'"),
-                    }
+            'K' => while let Some(code) = params_iter.next() {
+                match code {
+                    [] | [0] => self.screen_mut().erase_to_end_of_line(),
+                    [1] => self.screen_mut().erase_to_start_of_line(),
+                    [2] => self.screen_mut().erase_line(),
+                    _ => warn!("unhandled 'CSI {code:?} K'"),
                 }
             }
 
@@ -362,23 +358,21 @@ impl vte::Perform for State {
 
             'h' => {
                 match intermediates {
-                    [b'?'] => {
-                        while let Some(code) = params_iter.next() {
-                            match code {
-                                [1049] => {
-                                    // The alt-screen gets reset upon entry, so we need to
-                                    // clobber it here.
-                                    self.altscreen = Screen::alt(self.altscreen.size);
-                                    self.screen_mode = ScreenMode::Alt;
-                                }
-                                _ => {
-                                    warn!(
-                                        "Unhandled CSI l command: CSI {:?} {:?} l",
-                                        intermediates,
-                                        params.iter().collect::<Vec<&[u16]>>()
-                                    );
-                                    return;
-                                }
+                    [b'?'] => while let Some(code) = params_iter.next() {
+                        match code {
+                            [1049] => {
+                                // The alt-screen gets reset upon entry, so we need to
+                                // clobber it here.
+                                self.altscreen = Screen::alt(self.altscreen.size);
+                                self.screen_mode = ScreenMode::Alt;
+                            }
+                            _ => {
+                                warn!(
+                                    "Unhandled CSI l command: CSI {:?} {:?} l",
+                                    intermediates,
+                                    params.iter().collect::<Vec<&[u16]>>()
+                                );
+                                return;
                             }
                         }
                     }
@@ -390,18 +384,16 @@ impl vte::Perform for State {
                 }
             }
             'l' => match intermediates {
-                [b'?'] => {
-                    while let Some(code) = params_iter.next() {
-                        match code {
-                            [1049] => self.screen_mode = ScreenMode::Scrollback,
-                            _ => {
-                                warn!(
-                                    "Unhandled CSI l command: CSI {:?} {:?} l",
-                                    intermediates,
-                                    params.iter().collect::<Vec<&[u16]>>()
-                                );
-                                return;
-                            }
+                [b'?'] => while let Some(code) = params_iter.next() {
+                    match code {
+                        [1049] => self.screen_mode = ScreenMode::Scrollback,
+                        _ => {
+                            warn!(
+                                "Unhandled CSI l command: CSI {:?} {:?} l",
+                                intermediates,
+                                params.iter().collect::<Vec<&[u16]>>()
+                            );
+                            return;
                         }
                     }
                 }
@@ -413,50 +405,39 @@ impl vte::Perform for State {
             },
 
             // cell attribute manipulation
-            'm' => {
-                let mut param_iter = params.iter();
+            'm' => while let Some(param) = params_iter.next() {
+                match param {
+                    [] | [0] => self.cursor_attrs = term::Attrs::default(),
 
-                while let Some(param) = param_iter.next() {
-                    if param.len() < 1 {
-                        warn!("m action with no params. Not sure what to do.");
-                        continue;
-                    }
+                    // Underline Handling
+                    // TODO: there are lots of other underline styles. To fix,
+                    // we need to update attrs.
+                    //
+                    // Kitty extensions:
+                    //      CSI 4 : 3 m => curly
+                    //      CSI 4 : 2 m => double
+                    //
+                    // Other:
+                    //      CSI 21 m => double
+                    //      CSI 58 ; 2 ; r ; g ; b m => RGB colored underline
+                    [4] => self.cursor_attrs.underline = true,
+                    // TODO: should really be a double underline.
+                    [21] => self.cursor_attrs.underline = true,
+                    [24] => self.cursor_attrs.underline = false,
 
-                    match param[0] {
-                        0 => self.cursor_attrs = term::Attrs::default(),
+                    // Bold Handling.
+                    [1] => self.cursor_attrs.bold = true,
+                    [22] => self.cursor_attrs.bold = false,
 
-                        // Underline Handling
-                        // TODO: there are lots of other underline styles. To fix,
-                        // we need to update attrs.
-                        //
-                        // Kitty extensions:
-                        //      CSI 4 : 3 m => curly
-                        //      CSI 4 : 2 m => double
-                        //
-                        // Other:
-                        //      CSI 21 m => double
-                        //      CSI 58 ; 2 ; r ; g ; b m => RGB colored underline
-                        4 => self.cursor_attrs.underline = true,
-                        // TODO: should really be a double underline.
-                        21 => self.cursor_attrs.underline = true,
-                        24 => self.cursor_attrs.underline = false,
+                    // Italic Handling.
+                    [3] => self.cursor_attrs.italic = true,
+                    [23] => self.cursor_attrs.italic = false,
 
-                        // Bold Handling.
-                        1 => self.cursor_attrs.bold = true,
-                        22 => self.cursor_attrs.bold = false,
+                    // Inverse Handling.
+                    [7] => self.cursor_attrs.inverse = true,
+                    [27] => self.cursor_attrs.inverse = false,
 
-                        // Italic Handling.
-                        3 => self.cursor_attrs.italic = true,
-                        23 => self.cursor_attrs.italic = false,
-
-                        // Inverse Handling.
-                        7 => self.cursor_attrs.inverse = true,
-                        27 => self.cursor_attrs.inverse = false,
-
-                        _ => {
-                            warn!("unhandled m action: {:?}", params);
-                        }
-                    }
+                    _ => warn!("unhandled 'CSI {param:?} m'"),
                 }
             }
             _ => {

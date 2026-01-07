@@ -29,7 +29,8 @@ pub struct AltScreen {
     /// The entire grid the altscreen. size.height should always equal
     /// buf.len().
     ///
-    /// buf[0] is at the top of the screen and buf[buf.len()-1] is at the bottom.
+    /// buf[0] is at the top of the screen and buf[buf.len()-1] is at the
+    /// bottom.
     pub buf: VecDeque<Line>,
 }
 

@@ -99,10 +99,7 @@ impl Cell {
 
     /// Append a modifier char to the grapheme_cluster.
     pub fn add_char(&mut self, c: char) {
-        assert!(
-            UnicodeWidthChar::width(c).unwrap_or(0) > 0,
-            "non-zero width char added to cell"
-        );
+        assert!(UnicodeWidthChar::width(c).unwrap_or(0) > 0, "non-zero width char added to cell");
 
         self.grapheme_cluster.push(c);
     }

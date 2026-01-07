@@ -2,15 +2,15 @@
 //
 // Copyright (c) 2016 Jesse Luehrs
 //
-// Permission is hereby granted, free of charge, to any person obtaining a copy of
-// this software and associated documentation files (the "Software"), to deal in
-// the Software without restriction, including without limitation the rights to
-// use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
-// of the Software, and to permit persons to whom the Software is furnished to do
-// so, subject to the following conditions:
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
 //
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 //
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
@@ -96,9 +96,7 @@ impl Raw {
 
 impl std::convert::From<&str> for Raw {
     fn from(value: &str) -> Self {
-        Raw {
-            inner: Vec::from(value.as_bytes()),
-        }
+        Raw { inner: Vec::from(value.as_bytes()) }
     }
 }
 
@@ -243,26 +241,15 @@ pub struct ControlCodes {
 #[derive(Clone, Debug)]
 #[non_exhaustive]
 pub enum ControlCode {
-    CSI {
-        params: Vec<Vec<u16>>,
-        intermediates: Vec<u8>,
-        action: char,
-    },
-    ESC {
-        intermediates: Vec<u8>,
-        byte: u8,
-    },
+    CSI { params: Vec<Vec<u16>>, intermediates: Vec<u8>, action: char },
+    ESC { intermediates: Vec<u8>, byte: u8 },
     __NonExhaustive,
 }
 
 impl AsTermInput for ControlCode {
     fn term_input_into(&self, buf: &mut Vec<u8>) {
         match self {
-            ControlCode::CSI {
-                params,
-                intermediates,
-                action,
-            } => {
+            ControlCode::CSI { params, intermediates, action } => {
                 buf.extend_from_slice(b"\x1b["); // CSI
                 buf.extend_from_slice(intermediates);
 
@@ -282,10 +269,7 @@ impl AsTermInput for ControlCode {
                 let mut action_buf = [0; 4];
                 buf.extend_from_slice(action.encode_utf8(&mut action_buf).as_bytes());
             }
-            ControlCode::ESC {
-                intermediates,
-                byte,
-            } => {
+            ControlCode::ESC { intermediates, byte } => {
                 buf.extend_from_slice(b"\x1b"); // ESC
                 buf.extend_from_slice(intermediates);
                 buf.push(*byte);
@@ -298,11 +282,7 @@ impl AsTermInput for ControlCode {
 impl std::fmt::Display for ControlCode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ControlCode::CSI {
-                params,
-                intermediates,
-                action,
-            } => {
+            ControlCode::CSI { params, intermediates, action } => {
                 write!(f, "CSI ")?;
                 for intermediate in intermediates {
                     write!(f, "{} ", *intermediate as char)?;
@@ -337,12 +317,7 @@ impl ControlCode {
         let mut current_intermediates = vec![];
         let mut current_action = None;
         for code in control_codes.into_iter() {
-            if let ControlCode::CSI {
-                params,
-                intermediates,
-                action,
-            } = code
-            {
+            if let ControlCode::CSI { params, intermediates, action } = code {
                 if let Some(cur_action) = current_action {
                     if cur_action == action && current_intermediates == intermediates {
                         current_params.extend(params);
@@ -390,16 +365,8 @@ static CONTROL_CODES: OnceLock<ControlCodes> = OnceLock::new();
 
 pub fn control_codes() -> &'static ControlCodes {
     CONTROL_CODES.get_or_init(|| ControlCodes {
-        clear_screen: ControlCode::CSI {
-            params: vec![],
-            intermediates: vec![],
-            action: 'J',
-        },
-        clear_attrs: ControlCode::CSI {
-            params: vec![],
-            intermediates: vec![],
-            action: 'm',
-        },
+        clear_screen: ControlCode::CSI { params: vec![], intermediates: vec![], action: 'J' },
+        clear_attrs: ControlCode::CSI { params: vec![], intermediates: vec![], action: 'm' },
         fgcolor_default: ControlCode::CSI {
             params: vec![vec![39]],
             intermediates: vec![],
@@ -410,41 +377,21 @@ pub fn control_codes() -> &'static ControlCodes {
             intermediates: vec![],
             action: 'm',
         },
-        underline: ControlCode::CSI {
-            params: vec![vec![4]],
-            intermediates: vec![],
-            action: 'm',
-        },
+        underline: ControlCode::CSI { params: vec![vec![4]], intermediates: vec![], action: 'm' },
         undo_underline: ControlCode::CSI {
             params: vec![vec![24]],
             intermediates: vec![],
             action: 'm',
         },
-        bold: ControlCode::CSI {
-            params: vec![vec![1]],
-            intermediates: vec![],
-            action: 'm',
-        },
-        undo_bold: ControlCode::CSI {
-            params: vec![vec![22]],
-            intermediates: vec![],
-            action: 'm',
-        },
-        italic: ControlCode::CSI {
-            params: vec![vec![3]],
-            intermediates: vec![],
-            action: 'm',
-        },
+        bold: ControlCode::CSI { params: vec![vec![1]], intermediates: vec![], action: 'm' },
+        undo_bold: ControlCode::CSI { params: vec![vec![22]], intermediates: vec![], action: 'm' },
+        italic: ControlCode::CSI { params: vec![vec![3]], intermediates: vec![], action: 'm' },
         undo_italic: ControlCode::CSI {
             params: vec![vec![23]],
             intermediates: vec![],
             action: 'm',
         },
-        inverse: ControlCode::CSI {
-            params: vec![vec![7]],
-            intermediates: vec![],
-            action: 'm',
-        },
+        inverse: ControlCode::CSI { params: vec![vec![7]], intermediates: vec![], action: 'm' },
         undo_inverse: ControlCode::CSI {
             params: vec![vec![27]],
             intermediates: vec![],
@@ -460,14 +407,8 @@ pub fn control_codes() -> &'static ControlCodes {
             intermediates: vec![],
             action: 'u',
         },
-        save_cursor: ControlCode::ESC {
-            intermediates: vec![],
-            byte: b'7',
-        },
-        restore_cursor: ControlCode::ESC {
-            intermediates: vec![],
-            byte: b'8',
-        },
+        save_cursor: ControlCode::ESC { intermediates: vec![], byte: b'7' },
+        restore_cursor: ControlCode::ESC { intermediates: vec![], byte: b'8' },
         enable_alt_screen: ControlCode::CSI {
             params: vec![vec![1049]],
             intermediates: vec![b'?'],
@@ -508,11 +449,7 @@ pub fn control_codes() -> &'static ControlCodes {
             intermediates: vec![],
             action: 'K',
         },
-        erase_line: ControlCode::CSI {
-            params: vec![vec![2]],
-            intermediates: vec![],
-            action: 'K',
-        },
+        erase_line: ControlCode::CSI { params: vec![vec![2]], intermediates: vec![], action: 'K' },
     })
 }
 
@@ -542,13 +479,7 @@ impl ControlCodes {
 
     pub fn fgcolor_rgb(r: u8, g: u8, b: u8) -> ControlCode {
         ControlCode::CSI {
-            params: vec![
-                vec![38],
-                vec![2],
-                vec![r as u16],
-                vec![g as u16],
-                vec![b as u16],
-            ],
+            params: vec![vec![38], vec![2], vec![r as u16], vec![g as u16], vec![b as u16]],
             intermediates: vec![],
             action: 'm',
         }
@@ -578,13 +509,7 @@ impl ControlCodes {
 
     pub fn bgcolor_rgb(r: u8, g: u8, b: u8) -> ControlCode {
         ControlCode::CSI {
-            params: vec![
-                vec![48],
-                vec![2],
-                vec![r as u16],
-                vec![g as u16],
-                vec![b as u16],
-            ],
+            params: vec![vec![48], vec![2], vec![r as u16], vec![g as u16], vec![b as u16]],
             intermediates: vec![],
             action: 'm',
         }
@@ -616,11 +541,7 @@ impl ControlCodes {
 
     pub fn cursor_position(row: u16, col: u16) -> ControlCode {
         if row == 1 && col == 1 {
-            ControlCode::CSI {
-                params: vec![],
-                intermediates: vec![],
-                action: 'H',
-            }
+            ControlCode::CSI { params: vec![], intermediates: vec![], action: 'H' }
         } else {
             ControlCode::CSI {
                 params: vec![vec![row], vec![col]],
@@ -631,26 +552,14 @@ impl ControlCodes {
     }
 
     pub fn cursor_horizontal_absolute(col: u16) -> ControlCode {
-        ControlCode::CSI {
-            params: vec![vec![col]],
-            intermediates: vec![],
-            action: 'G',
-        }
+        ControlCode::CSI { params: vec![vec![col]], intermediates: vec![], action: 'G' }
     }
 
     fn move_cursor(n: u16, action: char) -> ControlCode {
         if n == 1 {
-            ControlCode::CSI {
-                params: vec![],
-                intermediates: vec![],
-                action,
-            }
+            ControlCode::CSI { params: vec![], intermediates: vec![], action }
         } else {
-            ControlCode::CSI {
-                params: vec![vec![n]],
-                intermediates: vec![],
-                action,
-            }
+            ControlCode::CSI { params: vec![vec![n]], intermediates: vec![], action }
         }
     }
 }

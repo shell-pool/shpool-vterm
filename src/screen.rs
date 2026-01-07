@@ -18,9 +18,9 @@
 use crate::{
     altscreen::AltScreen,
     cell::Cell,
+    line,
     scrollback::Scrollback,
     term::{self, AsTermInput, Pos},
-    line,
 };
 
 use tracing::warn;
@@ -134,7 +134,8 @@ impl Screen {
     }
 
     /// Erase whichever screen is currently active, not including scrollback.
-    /// Used to implement 'CSI 2 J' and 'CSI 3 J' (which includes the scrollback).
+    /// Used to implement 'CSI 2 J' and 'CSI 3 J' (which includes the
+    /// scrollback).
     pub fn erase(&mut self, include_scrollback: bool) {
         match &mut self.grid {
             Grid::Scrollback(s) => s.erase(self.size, include_scrollback),
@@ -144,27 +145,37 @@ impl Screen {
 
     pub fn erase_to_end_of_line(&mut self) {
         match &mut self.grid {
-            Grid::Scrollback(s) => if let Some(l) = s.get_line_mut(self.size, self.cursor.row) {
-                l.erase(line::Section::ToEnd(self.cursor.col));
-            },
-            Grid::AltScreen(alt) => alt.get_line_mut(self.cursor.row).erase(line::Section::ToEnd(self.cursor.col)),
+            Grid::Scrollback(s) => {
+                if let Some(l) = s.get_line_mut(self.size, self.cursor.row) {
+                    l.erase(line::Section::ToEnd(self.cursor.col));
+                }
+            }
+            Grid::AltScreen(alt) => {
+                alt.get_line_mut(self.cursor.row).erase(line::Section::ToEnd(self.cursor.col))
+            }
         }
     }
 
     pub fn erase_to_start_of_line(&mut self) {
         match &mut self.grid {
-            Grid::Scrollback(s) => if let Some(l) = s.get_line_mut(self.size, self.cursor.row) {
-                l.erase(line::Section::StartTo(self.cursor.col));
-            },
-            Grid::AltScreen(alt) => alt.get_line_mut(self.cursor.row).erase(line::Section::StartTo(self.cursor.col)),
+            Grid::Scrollback(s) => {
+                if let Some(l) = s.get_line_mut(self.size, self.cursor.row) {
+                    l.erase(line::Section::StartTo(self.cursor.col));
+                }
+            }
+            Grid::AltScreen(alt) => {
+                alt.get_line_mut(self.cursor.row).erase(line::Section::StartTo(self.cursor.col))
+            }
         }
     }
 
     pub fn erase_line(&mut self) {
         match &mut self.grid {
-            Grid::Scrollback(s) => if let Some(l) = s.get_line_mut(self.size, self.cursor.row) {
-                l.erase(line::Section::Whole);
-            },
+            Grid::Scrollback(s) => {
+                if let Some(l) = s.get_line_mut(self.size, self.cursor.row) {
+                    l.erase(line::Section::Whole);
+                }
+            }
             Grid::AltScreen(alt) => alt.get_line_mut(self.cursor.row).erase(line::Section::Whole),
         }
     }
@@ -215,10 +226,7 @@ pub struct SavedCursor {
 
 impl SavedCursor {
     pub fn new(pos: Pos) -> Self {
-        SavedCursor {
-            pos,
-            attrs: term::Attrs::default(),
-        }
+        SavedCursor { pos, attrs: term::Attrs::default() }
     }
 }
 
@@ -236,14 +244,8 @@ mod tests {
 
     #[test]
     fn altscreen_resize_grow_height() {
-        let mut screen = Screen::alt(Size {
-            width: 10,
-            height: 5,
-        });
-        screen.resize(Size {
-            width: 10,
-            height: 10,
-        });
+        let mut screen = Screen::alt(Size { width: 10, height: 5 });
+        screen.resize(Size { width: 10, height: 10 });
 
         match &screen.grid {
             Grid::AltScreen(alt) => {
@@ -256,14 +258,8 @@ mod tests {
 
     #[test]
     fn altscreen_resize_shrink_height() {
-        let mut screen = Screen::alt(Size {
-            width: 10,
-            height: 10,
-        });
-        screen.resize(Size {
-            width: 10,
-            height: 5,
-        });
+        let mut screen = Screen::alt(Size { width: 10, height: 10 });
+        screen.resize(Size { width: 10, height: 5 });
         match &screen.grid {
             Grid::AltScreen(alt) => {
                 assert_eq!(alt.buf.len(), 5);
@@ -275,25 +271,17 @@ mod tests {
 
     #[test]
     fn altscreen_resize_shrink_width() {
-        let mut screen = Screen::alt(Size {
-            width: 10,
-            height: 5,
-        });
+        let mut screen = Screen::alt(Size { width: 10, height: 5 });
 
         match &mut screen.grid {
             Grid::AltScreen(alt) => {
-                alt.buf[0]
-                    .set_cell(10, 9, crate::cell::Cell::new('a', Attrs::default()))
-                    .unwrap();
+                alt.buf[0].set_cell(10, 9, crate::cell::Cell::new('a', Attrs::default())).unwrap();
                 assert_eq!(alt.buf[0].cells.len(), 10);
             }
             _ => panic!("wrong grid type"),
         }
 
-        screen.resize(Size {
-            width: 5,
-            height: 5,
-        });
+        screen.resize(Size { width: 5, height: 5 });
         assert_eq!(screen.size.width, 5);
 
         // Line should be truncated
@@ -307,17 +295,11 @@ mod tests {
 
     #[test]
     fn altscreen_cursor_clamping() {
-        let mut screen = Screen::alt(Size {
-            width: 10,
-            height: 10,
-        });
+        let mut screen = Screen::alt(Size { width: 10, height: 10 });
         screen.cursor = Pos { row: 9, col: 9 };
         screen.saved_cursor.pos = Pos { row: 8, col: 8 };
 
-        screen.resize(Size {
-            width: 5,
-            height: 5,
-        });
+        screen.resize(Size { width: 5, height: 5 });
 
         assert_eq!(screen.cursor.row, 4);
         assert_eq!(screen.cursor.col, 4);
@@ -345,10 +327,7 @@ mod tests {
 
     #[test]
     fn scrollback_grid_new() {
-        let size = Size {
-            width: 10,
-            height: 5,
-        };
+        let size = Size { width: 10, height: 5 };
         let screen = Screen::scrollback(5, size);
         assert_eq!(screen.size, size);
         match &screen.grid {
@@ -359,10 +338,7 @@ mod tests {
 
     #[test]
     fn scrollback_push_simple() -> anyhow::Result<()> {
-        let size = Size {
-            width: 5,
-            height: 2,
-        };
+        let size = Size { width: 5, height: 2 };
         let mut screen = Screen::scrollback(5, size);
         let c = Cell::new('x', term::Attrs::default());
 
@@ -381,10 +357,7 @@ mod tests {
 
     #[test]
     fn scrollback_push_wrapping() -> anyhow::Result<()> {
-        let size = Size {
-            width: 2,
-            height: 5,
-        };
+        let size = Size { width: 2, height: 5 };
         let mut screen = Screen::scrollback(5, size);
 
         // Fill first line
@@ -418,10 +391,7 @@ mod tests {
 
     #[test]
     fn scrollback_indexing() -> anyhow::Result<()> {
-        let size = Size {
-            width: 10,
-            height: 3,
-        };
+        let size = Size { width: 10, height: 3 };
         let mut screen = Screen::scrollback(3, size);
 
         // Populate an initial line that will get pushed off
@@ -460,10 +430,7 @@ mod tests {
 
     #[test]
     fn scrollback_resize_narrower() -> anyhow::Result<()> {
-        let size = Size {
-            width: 10,
-            height: 5,
-        };
+        let size = Size { width: 10, height: 5 };
         let mut screen = Screen::scrollback(20, size);
 
         // Create a line: "0123456789"
@@ -475,10 +442,7 @@ mod tests {
         }
 
         // Resize to width 5. Should split into "01234" and "56789"
-        let new_size = Size {
-            width: 5,
-            height: 5,
-        };
+        let new_size = Size { width: 5, height: 5 };
         screen.resize(new_size);
 
         // "56789" should be at row 1 (since it wrapped)
@@ -504,10 +468,7 @@ mod tests {
 
     #[test]
     fn scrollback_resize_wider() -> anyhow::Result<()> {
-        let size = Size {
-            width: 5,
-            height: 5,
-        };
+        let size = Size { width: 5, height: 5 };
         let mut screen = Screen::scrollback(30, size);
 
         // Create two wrapped lines: "01234" (wrapped) -> "56789"
@@ -527,10 +488,7 @@ mod tests {
         );
 
         // Resize to width 10. Should merge back to "0123456789"
-        let new_size = Size {
-            width: 10,
-            height: 5,
-        };
+        let new_size = Size { width: 10, height: 5 };
         screen.resize(new_size);
 
         // Should all be on top line (Row 0)
@@ -560,10 +518,7 @@ mod tests {
         ];
 
         for (start_w, end_w) in shapes {
-            let start_size = Size {
-                width: start_w,
-                height: 10,
-            };
+            let start_size = Size { width: start_w, height: 10 };
             let mut screen = Screen::scrollback(100, start_size);
 
             // Fill with deterministic data
@@ -576,10 +531,7 @@ mod tests {
             }
 
             // Resize
-            screen.resize(Size {
-                width: end_w,
-                height: 10,
-            });
+            screen.resize(Size { width: end_w, height: 10 });
 
             // Resize back
             screen.resize(start_size);
