@@ -34,6 +34,9 @@ pub struct Scrollback {
     /// The bottom of the terminal is stored at the front of the deque
     /// and the top is stored at the back of the deque.
     pub buf: VecDeque<Line>,
+    /// How far above the bottom of the buffer the visible window
+    /// is.
+    scroll_offset: usize,
     /// The number of lines of scrollback to store, independent of the
     /// size of the grid that is in view.
     lines: usize,
@@ -63,7 +66,7 @@ impl Scrollback {
     /// Create a new grid with the given number of lines of scrollback
     /// storage, and the given size window in view.
     pub fn new(scrollback_lines: usize) -> Self {
-        Scrollback { buf: VecDeque::new(), lines: scrollback_lines }
+        Scrollback { buf: VecDeque::new(), scroll_offset: 0, lines: scrollback_lines }
     }
 
     /// Get the max number of scrollback lines this grid
@@ -162,36 +165,35 @@ impl Scrollback {
     }
 
     pub fn get_line_mut(&mut self, size: crate::Size, row: usize) -> Option<&mut Line> {
-        let in_view_len = self.in_view_len(size);
-        if row >= in_view_len {
+        let grid_start = self.lines_below_grid_start(size);
+        if row >= grid_start {
             return None;
         }
 
-        let idx_from_bottom = (in_view_len - 1) - row;
+        let idx_from_bottom = (grid_start - 1) - row;
         Some(&mut self.buf[idx_from_bottom])
+    }
+
+    #[allow(dead_code)]
+    pub fn get_line(&self, size: crate::Size, row: usize) -> Option<&Line> {
+        let grid_start = self.lines_below_grid_start(size);
+        if row >= grid_start {
+            return None;
+        }
+
+        let idx_from_bottom = (grid_start - 1) - row;
+        Some(&self.buf[idx_from_bottom])
     }
 
     /// The number of lines at the front of the scrollback queue that
     /// are actually in view and are not just in the hidden scrollback
     /// region.
-    pub fn in_view_len(&self, size: crate::Size) -> usize {
-        if self.buf.len() < size.height {
+    pub fn lines_below_grid_start(&self, size: crate::Size) -> usize {
+        let grid_start = size.height + self.scroll_offset;
+        if self.buf.len() < grid_start {
             self.buf.len()
         } else {
-            size.height
-        }
-    }
-
-    /// Translate a row index to an index into the actual backing dequeue.
-    ///
-    /// Returns None if self.buf is not large enough to contain an actual
-    /// line for that row.
-    pub fn line_idx_from_bottom(&self, size: crate::Size, row: usize) -> Option<usize> {
-        let in_view = self.in_view_len(size);
-        if in_view > row {
-            Some((in_view - 1) - row)
-        } else {
-            None
+            grid_start
         }
     }
 
@@ -253,7 +255,7 @@ impl Scrollback {
             }
         }
 
-        let mut npad = if cell.width() > 1 { cell.width() - 1 } else { 0 };
+        let mut npad = cell.width().saturating_sub(1);
         self.set(size, cursor, cell).context("setting main cell")?;
         cursor.col += 1;
         while npad > 0 {
@@ -268,29 +270,25 @@ impl Scrollback {
     }
 
     pub fn erase_to_end(&mut self, size: crate::Size, cursor: Pos) {
-        if let Some(snip_line) = self.line_idx_from_bottom(size, cursor.row) {
-            self.buf[snip_line].truncate(cursor.col);
-            for _ in 0..snip_line {
-                self.buf.pop_front();
-            }
+        if let Some(snip_line) = self.get_line_mut(size, cursor.row) {
+            snip_line.erase(line::Section::ToEnd(cursor.col));
         }
 
-        // If we already don't have any lines at the given row, there is
-        // nothing to do. The data is already clear.
+        for i in cursor.row + 1..size.height {
+            if let Some(snip_line) = self.get_line_mut(size, i) {
+                snip_line.erase(line::Section::Whole);
+            }
+        }
     }
 
     pub fn erase_from_start(&mut self, size: crate::Size, cursor: Pos) {
-        let lines_in_view = self.in_view_len(size);
-
-        if let Some(snip_line) = self.line_idx_from_bottom(size, cursor.row) {
-            for i in (snip_line + 1)..lines_in_view {
-                self.buf[i].truncate(0);
+        for i in 0..cursor.row {
+            if let Some(snip_line) = self.get_line_mut(size, i) {
+                snip_line.erase(line::Section::Whole);
             }
-            self.buf[snip_line].erase(line::Section::StartTo(cursor.col));
-        } else {
-            for i in 0..lines_in_view {
-                self.buf[i].truncate(0);
-            }
+        }
+        if let Some(snip_line) = self.get_line_mut(size, cursor.row) {
+            snip_line.erase(line::Section::StartTo(cursor.col));
         }
     }
 
@@ -300,8 +298,10 @@ impl Scrollback {
             return;
         }
 
-        for i in 0..self.in_view_len(size) {
-            self.buf[i].truncate(0);
+        for i in 0..size.height {
+            if let Some(snip_line) = self.get_line_mut(size, i) {
+                snip_line.erase(line::Section::Whole);
+            }
         }
     }
 }

@@ -132,8 +132,14 @@ impl Line {
                     self.cells[i] = Cell::empty();
                 }
             }
-            Section::ToEnd(col) => self.truncate(col),
-            Section::Whole => self.truncate(0),
+            Section::ToEnd(col) => {
+                self.truncate(col);
+                self.is_wrapped = false;
+            }
+            Section::Whole => {
+                self.truncate(0);
+                self.is_wrapped = false;
+            }
         }
     }
 }

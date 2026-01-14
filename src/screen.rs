@@ -309,18 +309,10 @@ mod tests {
 
     fn get_screen_cell(screen: &Screen, row: usize, col: usize) -> Option<Cell> {
         match &screen.grid {
-            Grid::Scrollback(sb) => {
-                let in_view_len = if sb.buf.len() < screen.size.height {
-                    sb.buf.len()
-                } else {
-                    screen.size.height
-                };
-                if row >= in_view_len {
-                    return None;
-                }
-                let idx = (in_view_len - 1) - row;
-                sb.buf[idx].get_cell(screen.size.width, col).cloned()
-            }
+            Grid::Scrollback(sb) => sb
+                .get_line(screen.size, row)
+                .and_then(|l| l.get_cell(screen.size.width, col))
+                .cloned(),
             _ => None,
         }
     }

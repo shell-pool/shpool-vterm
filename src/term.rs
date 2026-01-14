@@ -634,7 +634,11 @@ pub fn control_codes() -> &'static ControlCodes {
             action: 'K',
         },
         erase_line: ControlCode::CSI { params: vec![vec![2]], intermediates: vec![], action: 'K' },
-        device_status_report: ControlCode::CSI { params: vec![vec![6]], intermediates: vec![], action: 'n' },
+        device_status_report: ControlCode::CSI {
+            params: vec![vec![6]],
+            intermediates: vec![],
+            action: 'n',
+        },
     })
 }
 
