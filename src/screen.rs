@@ -102,6 +102,10 @@ impl Screen {
         self.cursor.clamp_to(self.size);
     }
 
+    //
+    // Control Code Handlers
+    //
+
     pub fn write_at_cursor(&mut self, cell: Cell) -> anyhow::Result<()> {
         self.cursor = match &mut self.grid {
             Grid::Scrollback(scrollback) => {
@@ -177,6 +181,20 @@ impl Screen {
                 }
             }
             Grid::AltScreen(alt) => alt.get_line_mut(self.cursor.row).erase(line::Section::Whole),
+        }
+    }
+
+    pub fn scroll_up(&mut self, n: usize) {
+        match &mut self.grid {
+            Grid::Scrollback(s) => s.scroll_up(n),
+            _ => {},
+        }
+    }
+
+    pub fn scroll_down(&mut self, n: usize) {
+        match &mut self.grid {
+            Grid::Scrollback(s) => s.scroll_down(n),
+            _ => {},
         }
     }
 }

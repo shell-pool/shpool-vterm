@@ -275,3 +275,34 @@ frag! {
        term::ControlCodes::cursor_position(1, 2),
        term::control_codes().clear_attrs
 }
+
+frag! {
+    scroll_up { scrollback_lines: 100, width: 10, height: 10 }
+    <= term::Raw::from("A"),
+       term::ControlCodes::scroll_up(1),
+       term::Raw::from("B")
+    => term::control_codes().clear_attrs,
+       term::ControlCodes::cursor_position(1, 1),
+       term::control_codes().clear_screen,
+       term::Raw::from("A"),
+       term::Raw::from("B"),
+       term::ControlCodes::scroll_up(1),
+       term::ControlCodes::cursor_position(1, 3),
+       term::control_codes().clear_attrs
+}
+
+frag! {
+    scroll_down { scrollback_lines: 100, width: 10, height: 10 }
+    <= term::Raw::from("A"),
+       term::ControlCodes::scroll_up(2),
+       term::ControlCodes::scroll_down(1),
+       term::Raw::from("B")
+    => term::control_codes().clear_attrs,
+       term::ControlCodes::cursor_position(1, 1),
+       term::control_codes().clear_screen,
+       term::Raw::from("A"),
+       term::Raw::from("B"),
+       term::ControlCodes::scroll_up(1),
+       term::ControlCodes::cursor_position(1, 3),
+       term::control_codes().clear_attrs
+}

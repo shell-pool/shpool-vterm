@@ -259,33 +259,33 @@ impl vte::Perform for State {
         match action {
             // CUU (Cursor Up)
             'A' => {
-                let n = p1_or(params, 1) as usize;
+                let n = param_or(&mut params_iter, 1) as usize;
                 let screen = self.screen_mut();
                 screen.cursor.row = screen.cursor.row.saturating_sub(n);
             }
             // CUD (Cursor Down)
             'B' => {
-                let n = p1_or(params, 1) as usize;
+                let n = param_or(&mut params_iter, 1) as usize;
                 let screen = self.screen_mut();
                 screen.cursor.row += n;
                 screen.clamp();
             }
             // CUF (Cursor Forward)
             'C' => {
-                let n = p1_or(params, 1) as usize;
+                let n = param_or(&mut params_iter, 1) as usize;
                 let screen = self.screen_mut();
                 screen.cursor.col += n;
                 screen.clamp();
             }
             // CUF (Cursor Backwards)
             'D' => {
-                let n = p1_or(params, 1) as usize;
+                let n = param_or(&mut params_iter, 1) as usize;
                 let screen = self.screen_mut();
                 screen.cursor.col = screen.cursor.col.saturating_sub(n);
             }
             // CNL (Cursor Next Line)
             'E' => {
-                let n = p1_or(params, 1) as usize;
+                let n = param_or(&mut params_iter, 1) as usize;
                 let screen = self.screen_mut();
                 screen.cursor.row += n;
                 screen.cursor.col = 0;
@@ -293,14 +293,14 @@ impl vte::Perform for State {
             }
             // CPL (Cursor Prev Line)
             'F' => {
-                let n = p1_or(params, 1) as usize;
+                let n = param_or(&mut params_iter, 1) as usize;
                 let screen = self.screen_mut();
                 screen.cursor.row = screen.cursor.row.saturating_sub(n);
                 screen.cursor.col = 0;
             }
             // CHA (Cursor Horizontal Absolute)
             'G' => {
-                let n = p1_or(params, 1) as usize;
+                let n = param_or(&mut params_iter, 1) as usize;
                 let n = n - 1; // translate to 0 indexing
 
                 let screen = self.screen_mut();
@@ -310,19 +310,8 @@ impl vte::Perform for State {
             // CUP (Cursor Set Position)
             'H' => {
                 // parse the params and adjust 1 indexing to 0 indexing
-                let default = [1];
-                let row = *params_iter
-                    .next()
-                    .unwrap_or(&default)
-                    .iter()
-                    .next()
-                    .unwrap_or(&default[0]);
-                let col = *params_iter
-                    .next()
-                    .unwrap_or(&default)
-                    .iter()
-                    .next()
-                    .unwrap_or(&default[0]);
+                let row = param_or(&mut params_iter, 1) as usize;
+                let col = param_or(&mut params_iter, 1) as usize;
                 let row = row.saturating_sub(1) as usize;
                 let col = col.saturating_sub(1) as usize;
 
@@ -349,6 +338,16 @@ impl vte::Perform for State {
                     [2] => self.screen_mut().erase_line(),
                     _ => warn!("unhandled 'CSI {code:?} K'"),
                 }
+            }
+            // SU (Scroll Up)
+            'S' => {
+                let n = param_or(&mut params_iter, 1) as usize;
+                self.screen_mut().scroll_up(n as usize);
+            }
+            // SD (Scroll Down)
+            'T' => {
+                let n = param_or(&mut params_iter, 1) as usize;
+                self.screen_mut().scroll_down(n as usize);
             }
 
             // SCP (Save Cursor Position)
@@ -513,11 +512,10 @@ impl vte::Perform for State {
     }
 }
 
-fn p1_or(params: &vte::Params, default: u16) -> u16 {
-    let n = params.iter().flatten().next().map(|x| *x).unwrap_or(0);
-    if n == 0 {
-        default
-    } else {
-        n
+fn param_or<'params>(params: &mut vte::ParamsIter<'params>, default: u16) -> u16 {
+    match params.next() {
+        Some([0]) => default,
+        Some([p]) => *p,
+        _ => default,
     }
 }

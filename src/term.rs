@@ -751,6 +751,22 @@ impl ControlCodes {
             ControlCode::CSI { params: vec![vec![n]], intermediates: vec![], action }
         }
     }
+
+    pub fn scroll_up(n: u16) -> ControlCode {
+        if n == 1 {
+            ControlCode::CSI { params: vec![], intermediates: vec![], action: 'S' }
+        } else {
+            ControlCode::CSI { params: vec![vec![n]], intermediates: vec![], action: 'S' }
+        }
+    }
+
+    pub fn scroll_down(n: u16) -> ControlCode {
+        if n == 1 {
+            ControlCode::CSI { params: vec![], intermediates: vec![], action: 'T' }
+        } else {
+            ControlCode::CSI { params: vec![vec![n]], intermediates: vec![], action: 'T' }
+        }
+    }
 }
 
 /// Represents a foreground or background color for cells.

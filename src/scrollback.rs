@@ -59,6 +59,9 @@ impl AsTermInput for Scrollback {
                 term::Crlf::default().term_input_into(buf);
             }
         }
+        if self.scroll_offset > 0 {
+            term::ControlCodes::scroll_up(self.scroll_offset as u16).term_input_into(buf);
+        }
     }
 }
 
@@ -303,5 +306,16 @@ impl Scrollback {
                 snip_line.erase(line::Section::Whole);
             }
         }
+    }
+
+    pub fn scroll_up(&mut self, n: usize) {
+        self.scroll_offset += n;
+        if self.scroll_offset > self.lines {
+            self.scroll_offset = self.lines;
+        }
+    }
+
+    pub fn scroll_down(&mut self, n: usize) {
+        self.scroll_offset = self.scroll_offset.saturating_sub(n);
     }
 }
