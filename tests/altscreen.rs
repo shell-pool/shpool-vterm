@@ -2,20 +2,21 @@
 #[path = "support/mod.rs"]
 mod support;
 
-use shpool_vterm::term;
+use shpool_vterm::{term, ContentRegion};
 
 frag! {
     alt_screen_basic { scrollback_lines: 100, width: 2, height: 2 }
     <= term::Raw::from("A"),
        term::control_codes().enable_alt_screen,
        term::Raw::from("B")
-    => term::control_codes().clear_attrs,
-       term::ControlCodes::cursor_position(1, 1),
-       term::control_codes().clear_screen,
-       term::Raw::from("B"),
-       term::Crlf::default(),
-       term::ControlCodes::cursor_position(1, 2),
-       term::control_codes().clear_attrs
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::Raw::from("B"),
+            term::Crlf::default(),
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().clear_attrs
 }
 
 frag! {
@@ -24,12 +25,13 @@ frag! {
        term::control_codes().enable_alt_screen,
        term::Raw::from("B"),
        term::control_codes().disable_alt_screen
-    => term::control_codes().clear_attrs,
-       term::ControlCodes::cursor_position(1, 1),
-       term::control_codes().clear_screen,
-       term::Raw::from("A"),
-       term::ControlCodes::cursor_position(1, 2),
-       term::control_codes().clear_attrs
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::Raw::from("A"),
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().clear_attrs
 }
 
 frag! {
@@ -38,12 +40,13 @@ frag! {
        term::Raw::from("JUNK"),
        term::control_codes().disable_alt_screen,
        term::control_codes().enable_alt_screen
-    => term::control_codes().clear_attrs,
-       term::ControlCodes::cursor_position(1, 1),
-       term::control_codes().clear_screen,
-       term::Crlf::default(),
-       term::ControlCodes::cursor_position(1, 1),
-       term::control_codes().clear_attrs
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::Crlf::default(),
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs
 }
 
 frag! {
@@ -55,11 +58,12 @@ frag! {
            action: 'h',
        },
        term::Raw::from("B")
-    => term::control_codes().clear_attrs,
-       term::ControlCodes::cursor_position(1, 1),
-       term::control_codes().clear_screen,
-       term::Raw::from("B"),
-       term::Crlf::default(),
-       term::ControlCodes::cursor_position(1, 2),
-       term::control_codes().clear_attrs
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::Raw::from("B"),
+            term::Crlf::default(),
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().clear_attrs
 }

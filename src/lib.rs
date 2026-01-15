@@ -97,15 +97,26 @@ impl Term {
     /// escape sequences. The contents buffer will be prefixed with
     /// a reset code, so inputing this to any terminal emulator will
     /// reset the emulator to the contents of this Term instance.
-    pub fn contents(&self) -> Vec<u8> {
+    pub fn contents(&self, dump_region: ContentRegion) -> Vec<u8> {
         let mut buf = vec![];
         term::control_codes().clear_attrs.term_input_into(&mut buf);
         term::ControlCodes::cursor_position(1, 1).term_input_into(&mut buf);
         term::control_codes().clear_screen.term_input_into(&mut buf);
-        self.state.term_input_into(&mut buf);
+        self.state.dump_contents_into(&mut buf, dump_region);
 
         buf
     }
+}
+
+/// A section of the screen to dump.
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub enum ContentRegion {
+    /// The whole terminal state, including all scrollback data.
+    All,
+    /// Only the visible lines.
+    Screen,
+    /// The bottom N lines, including (N - height) lines of scrollback.
+    BottomLines(usize),
 }
 
 impl std::fmt::Display for Term {
@@ -175,13 +186,11 @@ impl State {
             ScreenMode::Alt => &self.altscreen,
         }
     }
-}
 
-impl AsTermInput for State {
-    fn term_input_into(&self, buf: &mut Vec<u8>) {
+    fn dump_contents_into(&self, buf: &mut Vec<u8>, dump_region: ContentRegion) {
         match self.screen_mode {
-            ScreenMode::Scrollback => self.scrollback.term_input_into(buf),
-            ScreenMode::Alt => self.altscreen.term_input_into(buf),
+            ScreenMode::Scrollback => self.scrollback.dump_contents_into(buf, dump_region),
+            ScreenMode::Alt => self.altscreen.dump_contents_into(buf, dump_region),
         }
 
         // restore cursor attributes (the screen will have already restored our
@@ -204,6 +213,7 @@ impl vte::Perform for State {
     fn print(&mut self, c: char) {
         let attrs = self.cursor_attrs.clone();
         let screen = self.screen_mut();
+        screen.snap_to_bottom();
         if let Err(e) = screen.write_at_cursor(Cell::new(c, attrs)) {
             warn!("writing char at cursor: {e:?}");
         }

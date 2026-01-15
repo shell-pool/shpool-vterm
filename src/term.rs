@@ -442,6 +442,13 @@ impl std::fmt::Display for ControlCode {
                 }
                 write!(f, "{}", action)?;
             }
+            ControlCode::ESC { intermediates, byte } => {
+                write!(f, "ESC ")?;
+                for intermediate in intermediates {
+                    write!(f, "{} ", *intermediate as char)?;
+                }
+                write!(f, "{}", byte)?;
+            }
             _ => write!(f, "<display unimpl>")?,
         }
 

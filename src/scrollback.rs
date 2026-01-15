@@ -20,6 +20,7 @@ use crate::{
     cell::Cell,
     line::{self, Line},
     term::{self, AsTermInput, Pos},
+    ContentRegion,
 };
 use std::collections::VecDeque;
 
@@ -48,20 +49,6 @@ impl std::fmt::Display for Scrollback {
             write!(f, "{}", line)?;
         }
         Ok(())
-    }
-}
-
-impl AsTermInput for Scrollback {
-    fn term_input_into(&self, buf: &mut Vec<u8>) {
-        for (i, line) in self.buf.iter().enumerate().rev() {
-            line.term_input_into(buf);
-            if i != 0 {
-                term::Crlf::default().term_input_into(buf);
-            }
-        }
-        if self.scroll_offset > 0 {
-            term::ControlCodes::scroll_up(self.scroll_offset as u16).term_input_into(buf);
-        }
     }
 }
 
@@ -108,8 +95,46 @@ impl Scrollback {
         }
     }
 
+    pub fn snap_to_bottom(&mut self) {
+        self.scroll_offset = 0;
+    }
+
+    pub fn dump_contents_into(
+        &self,
+        buf: &mut Vec<u8>,
+        size: crate::Size,
+        dump_region: ContentRegion,
+    ) {
+        let lines_iter: Box<dyn Iterator<Item = (usize, &Line)>> = match dump_region {
+            ContentRegion::All => Box::new(self.buf.iter().enumerate().rev()),
+            ContentRegion::Screen => Box::new(
+                self.buf.iter().skip(self.scroll_offset).take(size.height).enumerate().rev(),
+            ),
+            ContentRegion::BottomLines(nlines) => {
+                Box::new(self.buf.iter().take(nlines).enumerate().rev())
+            }
+        };
+
+        for (i, line) in lines_iter {
+            line.term_input_into(buf);
+            if i != 0 {
+                term::Crlf::default().term_input_into(buf);
+            }
+        }
+
+        let generate_scroll = self.scroll_offset > 0
+            && match dump_region {
+                ContentRegion::All => true,
+                ContentRegion::Screen => false,
+                ContentRegion::BottomLines(n) => n >= size.height + self.scroll_offset,
+            };
+        if generate_scroll {
+            term::ControlCodes::scroll_up(self.scroll_offset as u16).term_input_into(buf);
+        }
+    }
+
     pub fn reflow(&mut self, new_width: usize) {
-        // TODO: this needs to move the cursor and saved cursor to have them
+        // TODO: this needs to move the<Icursor and saved cursor to have them
         // point to the same cell that they did at the start of the reflow
         // process. We currently don't do that, so reflow is broken.
 

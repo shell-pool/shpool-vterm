@@ -87,6 +87,21 @@ impl Screen {
         }
     }
 
+    pub fn dump_contents_into(&self, buf: &mut Vec<u8>, dump_region: crate::ContentRegion) {
+        match &self.grid {
+            Grid::Scrollback(scrollback) => {
+                scrollback.dump_contents_into(buf, self.size, dump_region)
+            }
+            Grid::AltScreen(altscreen) => altscreen.term_input_into(buf),
+        }
+
+        term::ControlCodes::cursor_position(
+            (self.cursor.row + 1) as u16,
+            (self.cursor.col + 1) as u16,
+        )
+        .term_input_into(buf);
+    }
+
     pub fn resize(&mut self, new_size: crate::Size) {
         match &mut self.grid {
             Grid::Scrollback(scrollback) => scrollback.reflow(new_size.width),
@@ -100,6 +115,12 @@ impl Screen {
 
     pub fn clamp(&mut self) {
         self.cursor.clamp_to(self.size);
+    }
+
+    pub fn snap_to_bottom(&mut self) {
+        if let Grid::Scrollback(scrollback) = &mut self.grid {
+            scrollback.snap_to_bottom();
+        }
     }
 
     //
@@ -187,14 +208,14 @@ impl Screen {
     pub fn scroll_up(&mut self, n: usize) {
         match &mut self.grid {
             Grid::Scrollback(s) => s.scroll_up(n),
-            _ => {},
+            _ => {}
         }
     }
 
     pub fn scroll_down(&mut self, n: usize) {
         match &mut self.grid {
             Grid::Scrollback(s) => s.scroll_down(n),
-            _ => {},
+            _ => {}
         }
     }
 }
@@ -216,21 +237,6 @@ impl std::fmt::Display for Screen {
         }
 
         Ok(())
-    }
-}
-
-impl AsTermInput for Screen {
-    fn term_input_into(&self, buf: &mut Vec<u8>) {
-        match &self.grid {
-            Grid::Scrollback(scrollback) => scrollback.term_input_into(buf),
-            Grid::AltScreen(altscreen) => altscreen.term_input_into(buf),
-        }
-
-        term::ControlCodes::cursor_position(
-            (self.cursor.row + 1) as u16,
-            (self.cursor.col + 1) as u16,
-        )
-        .term_input_into(buf);
     }
 }
 
