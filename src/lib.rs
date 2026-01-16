@@ -272,6 +272,7 @@ impl vte::Perform for State {
                 let n = param_or(&mut params_iter, 1) as usize;
                 let screen = self.screen_mut();
                 screen.cursor.row = screen.cursor.row.saturating_sub(n);
+                screen.clamp();
             }
             // CUD (Cursor Down)
             'B' => {
@@ -292,6 +293,7 @@ impl vte::Perform for State {
                 let n = param_or(&mut params_iter, 1) as usize;
                 let screen = self.screen_mut();
                 screen.cursor.col = screen.cursor.col.saturating_sub(n);
+                screen.clamp();
             }
             // CNL (Cursor Next Line)
             'E' => {
@@ -307,6 +309,7 @@ impl vte::Perform for State {
                 let screen = self.screen_mut();
                 screen.cursor.row = screen.cursor.row.saturating_sub(n);
                 screen.cursor.col = 0;
+                screen.clamp();
             }
             // CHA (Cursor Horizontal Absolute)
             'G' => {
@@ -485,6 +488,29 @@ impl vte::Perform for State {
                     _ => warn!("unhandled 'CSI {param:?} m'"),
                 }
             }
+            // DECSTBM (Set Scroll Region)
+            'r' => {
+                let top = maybe_param(&mut params_iter);
+                let bottom = maybe_param(&mut params_iter);
+
+                let screen = self.screen_mut();
+                screen.set_scroll_region(match (top, bottom) {
+                    (None, None) => term::ScrollRegion::TrackSize,
+                    (Some(t), None) => term::ScrollRegion::Window {
+                        top: t.saturating_sub(1) as usize,
+                        bottom: screen.size.height,
+                    },
+                    (None, Some(b)) => term::ScrollRegion::Window {
+                        top: 0,
+                        bottom: b as usize,
+                    },
+                    (Some(t), Some(b)) => term::ScrollRegion::Window {
+                        top: t.saturating_sub(1) as usize,
+                        bottom: b as usize,
+                    }
+                });
+            }
+
             _ => {
                 warn!("unhandled action {}", action);
             }
@@ -523,9 +549,13 @@ impl vte::Perform for State {
 }
 
 fn param_or<'params>(params: &mut vte::ParamsIter<'params>, default: u16) -> u16 {
+    maybe_param(params).unwrap_or(default)
+}
+
+fn maybe_param<'params>(params: &mut vte::ParamsIter<'params>) -> Option<u16> {
     match params.next() {
-        Some([0]) => default,
-        Some([p]) => *p,
-        _ => default,
+        Some([0]) => None,
+        Some([p]) => Some(*p),
+        _ => None,
     }
 }

@@ -19,7 +19,7 @@
 use crate::{
     cell::Cell,
     line::{self, Line},
-    term::{self, AsTermInput, Pos},
+    term::{self, AsTermInput, Pos, ScrollRegion},
     ContentRegion,
 };
 use std::collections::VecDeque;
@@ -41,6 +41,9 @@ pub struct Scrollback {
     /// The number of lines of scrollback to store, independent of the
     /// size of the grid that is in view.
     lines: usize,
+    /// The region of the screen in which scrolling happens.
+    /// This is set by DECSTBM (CSI n ; n r).
+    pub scroll_region: ScrollRegion,
 }
 
 impl std::fmt::Display for Scrollback {
@@ -56,7 +59,12 @@ impl Scrollback {
     /// Create a new grid with the given number of lines of scrollback
     /// storage, and the given size window in view.
     pub fn new(scrollback_lines: usize) -> Self {
-        Scrollback { buf: VecDeque::new(), scroll_offset: 0, lines: scrollback_lines }
+        Scrollback {
+            buf: VecDeque::new(),
+            scroll_offset: 0,
+            lines: scrollback_lines,
+            scroll_region: ScrollRegion::TrackSize,
+        }
     }
 
     /// Get the max number of scrollback lines this grid
@@ -122,7 +130,16 @@ impl Scrollback {
             }
         }
 
+        if let ScrollRegion::Window { top, bottom } = self.scroll_region {
+            // We have a zero index [) (clopen) range and we need a 1 indexed
+            // [] (fully closed) range, so we need to shift top up, but bottom
+            // is already right.
+            term::ControlCodes::set_scroll_region((top + 1) as u16, bottom as u16)
+                .term_input_into(buf);
+        }
+
         let generate_scroll = self.scroll_offset > 0
+            && matches!(self.scroll_region, ScrollRegion::TrackSize)
             && match dump_region {
                 ContentRegion::All => true,
                 ContentRegion::Screen => false,

@@ -19,7 +19,7 @@ use std::collections::VecDeque;
 use crate::{
     cell::Cell,
     line::{self, Line},
-    term::{self, AsTermInput, Pos},
+    term::{self, AsTermInput, Pos, ScrollRegion},
 };
 
 use anyhow::{anyhow, Context};
@@ -32,6 +32,9 @@ pub struct AltScreen {
     /// buf[0] is at the top of the screen and buf[buf.len()-1] is at the
     /// bottom.
     pub buf: VecDeque<Line>,
+    /// The region of the screen in which scrolling happens.
+    /// This is set by DECSTBM (CSI n ; n r).
+    pub scroll_region: ScrollRegion,
 }
 
 impl AltScreen {
@@ -40,7 +43,7 @@ impl AltScreen {
         for _ in 0..size.height {
             buf.push_back(Line::new());
         }
-        AltScreen { buf }
+        AltScreen { buf, scroll_region: ScrollRegion::TrackSize }
     }
 
     /// Write the given cell to the given cursor position, returning the next
@@ -143,6 +146,14 @@ impl AsTermInput for AltScreen {
             if i != self.buf.len() - 1 {
                 term::Crlf::default().term_input_into(buf);
             }
+        }
+
+        if let ScrollRegion::Window { top, bottom } = self.scroll_region {
+            // We have a zero index [) (clopen) range and we need a 1 indexed
+            // [] (fully closed) range, so we need to shift top up, but bottom
+            // is already right.
+            term::ControlCodes::set_scroll_region((top + 1) as u16, bottom as u16)
+                .term_input_into(buf);
         }
     }
 }

@@ -379,3 +379,41 @@ frag! {
             term::ControlCodes::cursor_position(2, 2),
             term::control_codes().clear_attrs
 }
+
+frag! {
+    scroll_region { scrollback_lines: 100, width: 10, height: 10 }
+    <= term::ControlCodes::set_scroll_region(2, 5)
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::ControlCodes::set_scroll_region(2, 5),
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    scroll_region_with_content { scrollback_lines: 100, width: 10, height: 10 }
+    <= term::Raw::from("A"),
+       term::ControlCodes::set_scroll_region(2, 5)
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::Raw::from("A"),
+            term::ControlCodes::set_scroll_region(2, 5),
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    scroll_region_unset { scrollback_lines: 100, width: 10, height: 10 }
+    <= term::ControlCodes::set_scroll_region(2, 5),
+       term::control_codes().unset_scroll_region
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs
+}

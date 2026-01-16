@@ -20,7 +20,7 @@ use crate::{
     cell::Cell,
     line,
     scrollback::Scrollback,
-    term::{self, AsTermInput, Pos},
+    term::{self, AsTermInput, Pos, ScrollRegion},
 };
 
 use tracing::warn;
@@ -87,6 +87,13 @@ impl Screen {
         }
     }
 
+    pub fn set_scroll_region(&mut self, scroll_region: ScrollRegion) {
+        match &mut self.grid {
+            Grid::Scrollback(scrollback) => scrollback.scroll_region = scroll_region,
+            Grid::AltScreen(altscreen) => altscreen.scroll_region = scroll_region,
+        }
+    }
+
     pub fn dump_contents_into(&self, buf: &mut Vec<u8>, dump_region: crate::ContentRegion) {
         match &self.grid {
             Grid::Scrollback(scrollback) => {
@@ -116,6 +123,15 @@ impl Screen {
     pub fn clamp(&mut self) {
         self.cursor.clamp_to(self.size);
     }
+
+    /*
+    pub fn clamp_to_scroll_region(&mut self) {
+        self.cursor.clamp_to(match &self.grid {
+            Grid::Scrollback(scrollback) => scrollback.scroll_region.as_region(&self.size),
+            Grid::AltScreen(altscreen) => altscreen.scroll_region.as_region(&self.size),
+        })
+    }
+    */
 
     pub fn snap_to_bottom(&mut self) {
         if let Grid::Scrollback(scrollback) = &mut self.grid {

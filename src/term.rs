@@ -78,6 +78,40 @@ impl Region for crate::Size {
     }
 }
 
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub enum ScrollRegion {
+    TrackSize,
+    Window {
+        // The start of the scroll region (inclusive).
+        top: usize,
+        // The end of the scroll region (exclusive). We use a closed open
+        // range so this is 1 higher than the actual bottom line included
+        // in the scroll region window.
+        bottom: usize,
+    },
+}
+
+impl ScrollRegion {
+    pub fn as_region<'a, 'b>(
+        &'a self,
+        size: &'b crate::Size,
+    ) -> (&'a ScrollRegion, &'b crate::Size) {
+        (self, size)
+    }
+}
+
+impl Region for (&ScrollRegion, &crate::Size) {
+    fn row_bounds(&self) -> (usize, usize) {
+        match self.0 {
+            ScrollRegion::TrackSize => (0, self.1.height),
+            ScrollRegion::Window { top, bottom } => (*top, *bottom),
+        }
+    }
+    fn col_bounds(&self) -> (usize, usize) {
+        (0, self.1.width)
+    }
+}
+
 pub trait AsTermInput {
     fn term_input_into(&self, buf: &mut Vec<u8>);
 }
@@ -379,6 +413,7 @@ pub struct ControlCodes {
     pub erase_to_start_of_line: ControlCode,
     pub erase_line: ControlCode,
     pub device_status_report: ControlCode,
+    pub unset_scroll_region: ControlCode,
 }
 
 #[derive(Clone, Debug)]
@@ -727,6 +762,11 @@ pub fn control_codes() -> &'static ControlCodes {
             intermediates: smallvec![],
             action: 'n',
         },
+        unset_scroll_region: ControlCode::CSI {
+            params: smallvec![],
+            intermediates: smallvec![],
+            action: 'r',
+        },
     })
 }
 
@@ -877,6 +917,14 @@ impl ControlCodes {
                 intermediates: smallvec![],
                 action: 'T',
             }
+        }
+    }
+
+    pub fn set_scroll_region(top: u16, bottom: u16) -> ControlCode {
+        ControlCode::CSI {
+            params: smallvec![smallvec![top], smallvec![bottom]],
+            intermediates: smallvec![],
+            action: 'r',
         }
     }
 }
