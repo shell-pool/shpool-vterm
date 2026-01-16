@@ -3,6 +3,7 @@
 mod support;
 
 use shpool_vterm::{term, ContentRegion};
+use smallvec::smallvec;
 
 frag! {
     cursor_left { scrollback_lines: 100, width: 10, height: 10 }
@@ -278,8 +279,8 @@ frag! {
     <= term::Raw::from("123"),
        // cursor position with no params (should be the same as (1,1)).
        term::ControlCode::CSI {
-           params: vec![],
-           intermediates: vec![],
+           params: smallvec![],
+           intermediates: smallvec![],
            action: 'H',
        },
        term::Raw::from("X")

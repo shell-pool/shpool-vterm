@@ -1,6 +1,7 @@
 use std::fmt::Write;
 
 use shpool_vterm::{term, ContentRegion};
+use smallvec::{smallvec, ToSmallVec};
 
 macro_rules! frag {
     {
@@ -122,10 +123,18 @@ impl vte::Perform for PrettyTerm {
         action: char,
     ) {
         let code = term::ControlCode::CSI {
-            params: params.iter()
-                .map(|p| p.iter().map(|x| *x).collect::<Vec<u16>>())
-                .collect::<Vec<Vec<u16>>>(),
-            intermediates: intermediates.to_vec(),
+            params: {
+                let mut param_v = smallvec![];
+                for p in params.iter() {
+                    let mut inner_v = smallvec![];
+                    for i in p.iter() {
+                        inner_v.push(*i);
+                    }
+                    param_v.push(inner_v);
+                }
+                param_v
+            },
+            intermediates: intermediates.to_smallvec(),
             action,
         };
         if ignore {
@@ -136,7 +145,7 @@ impl vte::Perform for PrettyTerm {
     }
 
     fn esc_dispatch(&mut self, intermediates: &[u8], ignore: bool, byte: u8) {
-        let code = term::ControlCode::ESC { intermediates: intermediates.to_vec(), byte };
+        let code = term::ControlCode::ESC { intermediates: intermediates.to_smallvec(), byte };
         if ignore {
             write!(self.into, "<ignored {}>", code).unwrap();
         } else {

@@ -3,6 +3,7 @@
 mod support;
 
 use shpool_vterm::{term, ContentRegion};
+use smallvec::smallvec;
 
 frag! {
     alt_screen_basic { scrollback_lines: 100, width: 2, height: 2 }
@@ -53,8 +54,8 @@ frag! {
     fused_alt_screen_enable { scrollback_lines: 100, width: 2, height: 2 }
     <= term::Raw::from("A"),
        term::ControlCode::CSI {
-           params: vec![vec![1049], vec![1049]],
-           intermediates: vec![b'?'],
+           params: smallvec![smallvec![1049], smallvec![1049]],
+           intermediates: smallvec![b'?'],
            action: 'h',
        },
        term::Raw::from("B")

@@ -20,6 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+use smallvec::{smallvec, SmallVec};
 use std::sync::OnceLock;
 
 // TODO: read all of this from terminfo.
@@ -383,10 +384,30 @@ pub struct ControlCodes {
 #[derive(Clone, Debug)]
 #[non_exhaustive]
 pub enum ControlCode {
-    CSI { params: Vec<Vec<u16>>, intermediates: Vec<u8>, action: char },
-    ESC { intermediates: Vec<u8>, byte: u8 },
+    CSI {
+        params: SmallVec<[SmallVec<[u16; 4]>; 2]>,
+        intermediates: SmallVec<[u8; 8]>,
+        action: char,
+    },
+    ESC {
+        intermediates: SmallVec<[u8; 8]>,
+        byte: u8,
+    },
     __NonExhaustive,
 }
+
+// Assertions proving that we are using no more memory than needed with the
+// capacity. A smallvec is internally a discriminated union, so there is a
+// minimum size from the variant where the vector is boxed (which takes at least
+// a machine word in the enum part).
+static_assertions::const_assert!(
+    (std::mem::size_of::<SmallVec<[u8; 8]>>() == std::mem::size_of::<SmallVec<[u8; 1]>>())
+        || std::mem::size_of::<usize>() != 8
+);
+static_assertions::const_assert!(
+    (std::mem::size_of::<SmallVec<[u16; 4]>>() == std::mem::size_of::<SmallVec<[u16; 1]>>())
+        || std::mem::size_of::<usize>() != 8
+);
 
 impl AsTermInput for ControlCode {
     fn term_input_into(&self, buf: &mut Vec<u8>) {
@@ -462,8 +483,8 @@ impl ControlCode {
         I: IntoIterator<Item = Self>,
     {
         let mut fused_codes = vec![];
-        let mut current_params = vec![];
-        let mut current_intermediates = vec![];
+        let mut current_params = smallvec![];
+        let mut current_intermediates = smallvec![];
         let mut current_action = None;
         for code in control_codes.into_iter() {
             if let ControlCode::CSI { params, intermediates, action } = code {
@@ -514,136 +535,196 @@ static CONTROL_CODES: OnceLock<ControlCodes> = OnceLock::new();
 
 pub fn control_codes() -> &'static ControlCodes {
     CONTROL_CODES.get_or_init(|| ControlCodes {
-        clear_screen: ControlCode::CSI { params: vec![], intermediates: vec![], action: 'J' },
-        clear_attrs: ControlCode::CSI { params: vec![], intermediates: vec![], action: 'm' },
+        clear_screen: ControlCode::CSI {
+            params: smallvec![],
+            intermediates: smallvec![],
+            action: 'J',
+        },
+        clear_attrs: ControlCode::CSI {
+            params: smallvec![],
+            intermediates: smallvec![],
+            action: 'm',
+        },
         fgcolor_default: ControlCode::CSI {
-            params: vec![vec![39]],
-            intermediates: vec![],
+            params: smallvec![smallvec![39]],
+            intermediates: smallvec![],
             action: 'm',
         },
         bgcolor_default: ControlCode::CSI {
-            params: vec![vec![49]],
-            intermediates: vec![],
+            params: smallvec![smallvec![49]],
+            intermediates: smallvec![],
             action: 'm',
         },
-        underline: ControlCode::CSI { params: vec![vec![4]], intermediates: vec![], action: 'm' },
+        underline: ControlCode::CSI {
+            params: smallvec![smallvec![4]],
+            intermediates: smallvec![],
+            action: 'm',
+        },
         double_underline: ControlCode::CSI {
-            params: vec![vec![21]],
-            intermediates: vec![],
+            params: smallvec![smallvec![21]],
+            intermediates: smallvec![],
             action: 'm',
         },
         undo_underline: ControlCode::CSI {
-            params: vec![vec![24]],
-            intermediates: vec![],
+            params: smallvec![smallvec![24]],
+            intermediates: smallvec![],
             action: 'm',
         },
-        bold: ControlCode::CSI { params: vec![vec![1]], intermediates: vec![], action: 'm' },
-        faint: ControlCode::CSI { params: vec![vec![2]], intermediates: vec![], action: 'm' },
+        bold: ControlCode::CSI {
+            params: smallvec![smallvec![1]],
+            intermediates: smallvec![],
+            action: 'm',
+        },
+        faint: ControlCode::CSI {
+            params: smallvec![smallvec![2]],
+            intermediates: smallvec![],
+            action: 'm',
+        },
         reset_font_weight: ControlCode::CSI {
-            params: vec![vec![22]],
-            intermediates: vec![],
+            params: smallvec![smallvec![22]],
+            intermediates: smallvec![],
             action: 'm',
         },
-        italic: ControlCode::CSI { params: vec![vec![3]], intermediates: vec![], action: 'm' },
+        italic: ControlCode::CSI {
+            params: smallvec![smallvec![3]],
+            intermediates: smallvec![],
+            action: 'm',
+        },
         undo_italic: ControlCode::CSI {
-            params: vec![vec![23]],
-            intermediates: vec![],
+            params: smallvec![smallvec![23]],
+            intermediates: smallvec![],
             action: 'm',
         },
-        inverse: ControlCode::CSI { params: vec![vec![7]], intermediates: vec![], action: 'm' },
+        inverse: ControlCode::CSI {
+            params: smallvec![smallvec![7]],
+            intermediates: smallvec![],
+            action: 'm',
+        },
         undo_inverse: ControlCode::CSI {
-            params: vec![vec![27]],
-            intermediates: vec![],
+            params: smallvec![smallvec![27]],
+            intermediates: smallvec![],
             action: 'm',
         },
-        slow_blink: ControlCode::CSI { params: vec![vec![5]], intermediates: vec![], action: 'm' },
-        rapid_blink: ControlCode::CSI { params: vec![vec![6]], intermediates: vec![], action: 'm' },
-        undo_blink: ControlCode::CSI { params: vec![vec![25]], intermediates: vec![], action: 'm' },
-        conceal: ControlCode::CSI { params: vec![vec![8]], intermediates: vec![], action: 'm' },
+        slow_blink: ControlCode::CSI {
+            params: smallvec![smallvec![5]],
+            intermediates: smallvec![],
+            action: 'm',
+        },
+        rapid_blink: ControlCode::CSI {
+            params: smallvec![smallvec![6]],
+            intermediates: smallvec![],
+            action: 'm',
+        },
+        undo_blink: ControlCode::CSI {
+            params: smallvec![smallvec![25]],
+            intermediates: smallvec![],
+            action: 'm',
+        },
+        conceal: ControlCode::CSI {
+            params: smallvec![smallvec![8]],
+            intermediates: smallvec![],
+            action: 'm',
+        },
         undo_conceal: ControlCode::CSI {
-            params: vec![vec![28]],
-            intermediates: vec![],
+            params: smallvec![smallvec![28]],
+            intermediates: smallvec![],
             action: 'm',
         },
         strikethrough: ControlCode::CSI {
-            params: vec![vec![9]],
-            intermediates: vec![],
+            params: smallvec![smallvec![9]],
+            intermediates: smallvec![],
             action: 'm',
         },
         undo_strikethrough: ControlCode::CSI {
-            params: vec![vec![29]],
-            intermediates: vec![],
+            params: smallvec![smallvec![29]],
+            intermediates: smallvec![],
             action: 'm',
         },
-        framed: ControlCode::CSI { params: vec![vec![51]], intermediates: vec![], action: 'm' },
-        encircled: ControlCode::CSI { params: vec![vec![52]], intermediates: vec![], action: 'm' },
+        framed: ControlCode::CSI {
+            params: smallvec![smallvec![51]],
+            intermediates: smallvec![],
+            action: 'm',
+        },
+        encircled: ControlCode::CSI {
+            params: smallvec![smallvec![52]],
+            intermediates: smallvec![],
+            action: 'm',
+        },
         undo_framed: ControlCode::CSI {
-            params: vec![vec![54]],
-            intermediates: vec![],
+            params: smallvec![smallvec![54]],
+            intermediates: smallvec![],
             action: 'm',
         },
-        overline: ControlCode::CSI { params: vec![vec![53]], intermediates: vec![], action: 'm' },
+        overline: ControlCode::CSI {
+            params: smallvec![smallvec![53]],
+            intermediates: smallvec![],
+            action: 'm',
+        },
         undo_overline: ControlCode::CSI {
-            params: vec![vec![55]],
-            intermediates: vec![],
+            params: smallvec![smallvec![55]],
+            intermediates: smallvec![],
             action: 'm',
         },
         save_cursor_position: ControlCode::CSI {
-            params: vec![],
-            intermediates: vec![],
+            params: smallvec![],
+            intermediates: smallvec![],
             action: 's',
         },
         restore_cursor_position: ControlCode::CSI {
-            params: vec![],
-            intermediates: vec![],
+            params: smallvec![],
+            intermediates: smallvec![],
             action: 'u',
         },
-        save_cursor: ControlCode::ESC { intermediates: vec![], byte: b'7' },
-        restore_cursor: ControlCode::ESC { intermediates: vec![], byte: b'8' },
+        save_cursor: ControlCode::ESC { intermediates: smallvec![], byte: b'7' },
+        restore_cursor: ControlCode::ESC { intermediates: smallvec![], byte: b'8' },
         enable_alt_screen: ControlCode::CSI {
-            params: vec![vec![1049]],
-            intermediates: vec![b'?'],
+            params: smallvec![smallvec![1049]],
+            intermediates: smallvec![b'?'],
             action: 'h',
         },
         disable_alt_screen: ControlCode::CSI {
-            params: vec![vec![1049]],
-            intermediates: vec![b'?'],
+            params: smallvec![smallvec![1049]],
+            intermediates: smallvec![b'?'],
             action: 'l',
         },
         erase_to_end: ControlCode::CSI {
-            params: vec![vec![0]],
-            intermediates: vec![],
+            params: smallvec![smallvec![0]],
+            intermediates: smallvec![],
             action: 'J',
         },
         erase_from_start: ControlCode::CSI {
-            params: vec![vec![1]],
-            intermediates: vec![],
+            params: smallvec![smallvec![1]],
+            intermediates: smallvec![],
             action: 'J',
         },
         erase_screen: ControlCode::CSI {
-            params: vec![vec![2]],
-            intermediates: vec![],
+            params: smallvec![smallvec![2]],
+            intermediates: smallvec![],
             action: 'J',
         },
         erase_scrollback: ControlCode::CSI {
-            params: vec![vec![3]],
-            intermediates: vec![],
+            params: smallvec![smallvec![3]],
+            intermediates: smallvec![],
             action: 'J',
         },
         erase_to_end_of_line: ControlCode::CSI {
-            params: vec![vec![0]],
-            intermediates: vec![],
+            params: smallvec![smallvec![0]],
+            intermediates: smallvec![],
             action: 'K',
         },
         erase_to_start_of_line: ControlCode::CSI {
-            params: vec![vec![1]],
-            intermediates: vec![],
+            params: smallvec![smallvec![1]],
+            intermediates: smallvec![],
             action: 'K',
         },
-        erase_line: ControlCode::CSI { params: vec![vec![2]], intermediates: vec![], action: 'K' },
+        erase_line: ControlCode::CSI {
+            params: smallvec![smallvec![2]],
+            intermediates: smallvec![],
+            action: 'K',
+        },
         device_status_report: ControlCode::CSI {
-            params: vec![vec![6]],
-            intermediates: vec![],
+            params: smallvec![smallvec![6]],
+            intermediates: smallvec![],
             action: 'n',
         },
     })
@@ -654,20 +735,20 @@ impl ControlCodes {
     pub fn fgcolor_idx(i: u8) -> ControlCode {
         if i < 8 {
             ControlCode::CSI {
-                params: vec![vec![(i + 30) as u16]],
-                intermediates: vec![],
+                params: smallvec![smallvec![(i + 30) as u16]],
+                intermediates: smallvec![],
                 action: 'm',
             }
         } else if i < 16 {
             ControlCode::CSI {
-                params: vec![vec![(i + 82) as u16]],
-                intermediates: vec![],
+                params: smallvec![smallvec![(i + 82) as u16]],
+                intermediates: smallvec![],
                 action: 'm',
             }
         } else {
             ControlCode::CSI {
-                params: vec![vec![38], vec![5], vec![i as u16]],
-                intermediates: vec![],
+                params: smallvec![smallvec![38], smallvec![5], smallvec![i as u16]],
+                intermediates: smallvec![],
                 action: 'm',
             }
         }
@@ -675,8 +756,14 @@ impl ControlCodes {
 
     pub fn fgcolor_rgb(r: u8, g: u8, b: u8) -> ControlCode {
         ControlCode::CSI {
-            params: vec![vec![38], vec![2], vec![r as u16], vec![g as u16], vec![b as u16]],
-            intermediates: vec![],
+            params: smallvec![
+                smallvec![38],
+                smallvec![2],
+                smallvec![r as u16],
+                smallvec![g as u16],
+                smallvec![b as u16]
+            ],
+            intermediates: smallvec![],
             action: 'm',
         }
     }
@@ -684,20 +771,20 @@ impl ControlCodes {
     pub fn bgcolor_idx(i: u8) -> ControlCode {
         if i < 8 {
             ControlCode::CSI {
-                params: vec![vec![(i + 40) as u16]],
-                intermediates: vec![],
+                params: smallvec![smallvec![(i + 40) as u16]],
+                intermediates: smallvec![],
                 action: 'm',
             }
         } else if i < 16 {
             ControlCode::CSI {
-                params: vec![vec![(i + 92) as u16]],
-                intermediates: vec![],
+                params: smallvec![smallvec![(i + 92) as u16]],
+                intermediates: smallvec![],
                 action: 'm',
             }
         } else {
             ControlCode::CSI {
-                params: vec![vec![48], vec![5], vec![i as u16]],
-                intermediates: vec![],
+                params: smallvec![smallvec![48], smallvec![5], smallvec![i as u16]],
+                intermediates: smallvec![],
                 action: 'm',
             }
         }
@@ -705,8 +792,14 @@ impl ControlCodes {
 
     pub fn bgcolor_rgb(r: u8, g: u8, b: u8) -> ControlCode {
         ControlCode::CSI {
-            params: vec![vec![48], vec![2], vec![r as u16], vec![g as u16], vec![b as u16]],
-            intermediates: vec![],
+            params: smallvec![
+                smallvec![48],
+                smallvec![2],
+                smallvec![r as u16],
+                smallvec![g as u16],
+                smallvec![b as u16]
+            ],
+            intermediates: smallvec![],
             action: 'm',
         }
     }
@@ -737,41 +830,53 @@ impl ControlCodes {
 
     pub fn cursor_position(row: u16, col: u16) -> ControlCode {
         if row == 1 && col == 1 {
-            ControlCode::CSI { params: vec![], intermediates: vec![], action: 'H' }
+            ControlCode::CSI { params: smallvec![], intermediates: smallvec![], action: 'H' }
         } else {
             ControlCode::CSI {
-                params: vec![vec![row], vec![col]],
-                intermediates: vec![],
+                params: smallvec![smallvec![row], smallvec![col]],
+                intermediates: smallvec![],
                 action: 'H',
             }
         }
     }
 
     pub fn cursor_horizontal_absolute(col: u16) -> ControlCode {
-        ControlCode::CSI { params: vec![vec![col]], intermediates: vec![], action: 'G' }
+        ControlCode::CSI {
+            params: smallvec![smallvec![col]],
+            intermediates: smallvec![],
+            action: 'G',
+        }
     }
 
     fn move_cursor(n: u16, action: char) -> ControlCode {
         if n == 1 {
-            ControlCode::CSI { params: vec![], intermediates: vec![], action }
+            ControlCode::CSI { params: smallvec![], intermediates: smallvec![], action }
         } else {
-            ControlCode::CSI { params: vec![vec![n]], intermediates: vec![], action }
+            ControlCode::CSI { params: smallvec![smallvec![n]], intermediates: smallvec![], action }
         }
     }
 
     pub fn scroll_up(n: u16) -> ControlCode {
         if n == 1 {
-            ControlCode::CSI { params: vec![], intermediates: vec![], action: 'S' }
+            ControlCode::CSI { params: smallvec![], intermediates: smallvec![], action: 'S' }
         } else {
-            ControlCode::CSI { params: vec![vec![n]], intermediates: vec![], action: 'S' }
+            ControlCode::CSI {
+                params: smallvec![smallvec![n]],
+                intermediates: smallvec![],
+                action: 'S',
+            }
         }
     }
 
     pub fn scroll_down(n: u16) -> ControlCode {
         if n == 1 {
-            ControlCode::CSI { params: vec![], intermediates: vec![], action: 'T' }
+            ControlCode::CSI { params: smallvec![], intermediates: smallvec![], action: 'T' }
         } else {
-            ControlCode::CSI { params: vec![vec![n]], intermediates: vec![], action: 'T' }
+            ControlCode::CSI {
+                params: smallvec![smallvec![n]],
+                intermediates: smallvec![],
+                action: 'T',
+            }
         }
     }
 }
