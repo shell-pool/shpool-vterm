@@ -425,6 +425,14 @@ impl vte::Perform for State {
             // DSR (Device Status Report)
             'n' => while let Some(param) = params_iter.next() {
                 match param {
+                    // TODO: We might want to store this to assert against the
+                    // terminal output stream once we start scanning that.
+                    // We'll need to implement terminal output stream scanning
+                    // in order to properly handle kitty extensions at some
+                    // point (since we need to know if the real terminal
+                    // responded with a code indicating that it supported the
+                    // extensions in order to determine how we should interpret
+                    // control codes).
                     [6] => debug!("ignoring DSR (CSI 6 n), that's the real terminal's job"),
                     _ => {}
                 }
