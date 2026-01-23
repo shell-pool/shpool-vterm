@@ -322,7 +322,11 @@ impl Scrollback {
             snip_line.erase(line::Section::ToEnd(cursor.col));
         }
 
-        for i in cursor.row + 1..size.height {
+        let end = match (self.origin_mode, &self.scroll_region) {
+            (OriginMode::ScrollRegion, ScrollRegion::Window { bottom, .. }) => *bottom,
+            _ => size.height,
+        };
+        for i in cursor.row + 1..end {
             if let Some(snip_line) = self.get_line_mut(size, i) {
                 snip_line.erase(line::Section::Whole);
             }
@@ -330,7 +334,12 @@ impl Scrollback {
     }
 
     pub fn erase_from_start(&mut self, size: crate::Size, cursor: Pos) {
-        for i in 0..cursor.row {
+        let start = match (self.origin_mode, &self.scroll_region) {
+            (OriginMode::ScrollRegion, ScrollRegion::Window { top, .. }) => *top,
+            _ => 0,
+        };
+
+        for i in start..cursor.row {
             if let Some(snip_line) = self.get_line_mut(size, i) {
                 snip_line.erase(line::Section::Whole);
             }
@@ -346,7 +355,12 @@ impl Scrollback {
             return;
         }
 
-        for i in 0..size.height {
+        let (start, end) = match (self.origin_mode, &self.scroll_region) {
+            (OriginMode::ScrollRegion, ScrollRegion::Window { top, bottom }) => (*top, *bottom),
+            _ => (0, size.height),
+        };
+
+        for i in start..end {
             if let Some(snip_line) = self.get_line_mut(size, i) {
                 snip_line.erase(line::Section::Whole);
             }

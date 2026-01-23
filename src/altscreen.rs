@@ -123,21 +123,36 @@ impl AltScreen {
     pub fn erase_to_end(&mut self, cursor: Pos) {
         self.buf[cursor.row].truncate(cursor.col);
 
-        for i in (cursor.row + 1)..self.buf.len() {
+        let end = match (self.origin_mode, &self.scroll_region) {
+            (OriginMode::ScrollRegion, ScrollRegion::Window { bottom, .. }) => *bottom,
+            _ => self.buf.len(),
+        };
+
+        for i in (cursor.row + 1)..end {
             self.buf[i].truncate(0);
         }
     }
 
     pub fn erase_from_start(&mut self, cursor: Pos) {
-        for i in 0..cursor.row {
+        let start = match (self.origin_mode, &self.scroll_region) {
+            (OriginMode::ScrollRegion, ScrollRegion::Window { top, .. }) => *top,
+            _ => 0,
+        };
+
+        for i in start..cursor.row {
             self.buf[i].truncate(0);
         }
         self.buf[cursor.row].erase(line::Section::StartTo(cursor.col));
     }
 
     pub fn erase(&mut self) {
-        for line in self.buf.iter_mut() {
-            line.truncate(0);
+        let (start, end) = match (self.origin_mode, &self.scroll_region) {
+            (OriginMode::ScrollRegion, ScrollRegion::Window { top, bottom }) => (*top, *bottom),
+            _ => (0, self.buf.len()),
+        };
+
+        for i in start..end {
+            self.buf[i].truncate(0);
         }
     }
 }

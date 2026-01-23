@@ -239,3 +239,88 @@ frag! {
             term::ControlCodes::cursor_position(1, 3),
             term::control_codes().clear_attrs
 }
+
+frag! {
+    erase_display_to_end_with_decom { scrollback_lines: 100, width: 5, height: 5 }
+    <= term::Raw::from("11111"), term::Crlf::default(),
+       term::Raw::from("22222"), term::Crlf::default(),
+       term::Raw::from("33333"), term::Crlf::default(),
+       term::Raw::from("44444"), term::Crlf::default(),
+       term::Raw::from("55555"),
+       term::ControlCodes::set_scroll_region(2, 4),
+       term::control_codes().enable_scroll_region_origin_mode,
+       term::ControlCodes::cursor_position(2, 3),
+       term::control_codes().erase_to_end
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::Raw::from("11111"),
+            term::Crlf::default(),
+            term::Raw::from("22222"),
+            term::Crlf::default(),
+            term::Raw::from("33"),
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::Raw::from("55555"),
+            term::ControlCodes::set_scroll_region(2, 4),
+            term::ControlCodes::cursor_position(3, 3),
+            term::control_codes().enable_scroll_region_origin_mode,
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    erase_display_from_start_with_decom { scrollback_lines: 100, width: 5, height: 5 }
+    <= term::Raw::from("11111"), term::Crlf::default(),
+       term::Raw::from("22222"), term::Crlf::default(),
+       term::Raw::from("33333"), term::Crlf::default(),
+       term::Raw::from("44444"), term::Crlf::default(),
+       term::Raw::from("55555"),
+       term::ControlCodes::set_scroll_region(2, 4),
+       term::control_codes().enable_scroll_region_origin_mode,
+       term::ControlCodes::cursor_position(2, 3),
+       term::control_codes().erase_from_start
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::Raw::from("11111"),
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::Raw::from("   33"),
+            term::Crlf::default(),
+            term::Raw::from("44444"),
+            term::Crlf::default(),
+            term::Raw::from("55555"),
+            term::ControlCodes::set_scroll_region(2, 4),
+            term::ControlCodes::cursor_position(3, 3),
+            term::control_codes().enable_scroll_region_origin_mode,
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    erase_screen_with_decom { scrollback_lines: 100, width: 5, height: 5 }
+    <= term::Raw::from("11111"), term::Crlf::default(),
+       term::Raw::from("22222"), term::Crlf::default(),
+       term::Raw::from("33333"), term::Crlf::default(),
+       term::Raw::from("44444"), term::Crlf::default(),
+       term::Raw::from("55555"),
+       term::ControlCodes::set_scroll_region(2, 4),
+       term::control_codes().enable_scroll_region_origin_mode,
+       term::ControlCodes::cursor_position(2, 3),
+       term::control_codes().erase_screen
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::Raw::from("11111"),
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::Raw::from("55555"),
+            term::ControlCodes::set_scroll_region(2, 4),
+            term::ControlCodes::cursor_position(3, 3),
+            term::control_codes().enable_scroll_region_origin_mode,
+            term::control_codes().clear_attrs
+}
