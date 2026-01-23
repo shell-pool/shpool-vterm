@@ -444,7 +444,6 @@ impl vte::Perform for State {
                     //      CSI 4 : 2 m => double
                     //
                     // Other:
-                    //      CSI 21 m => double
                     //      CSI 58 ; 2 ; r ; g ; b m => RGB colored underline
                     [4] => self.cursor_attrs.underline = Some(UnderlineStyle::Single),
                     [21] => self.cursor_attrs.underline = Some(UnderlineStyle::Double),
