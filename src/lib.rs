@@ -27,7 +27,7 @@ pub mod term;
 use crate::{
     cell::Cell,
     screen::Screen,
-    term::{AsTermInput, BlinkStyle, FontWeight, FrameStyle, UnderlineStyle},
+    term::{AsTermInput, BlinkStyle, FontWeight, FrameStyle, OriginMode, UnderlineStyle},
 };
 
 use tracing::{debug, warn};
@@ -314,7 +314,7 @@ impl vte::Perform for State {
             // CHA (Cursor Horizontal Absolute)
             'G' => {
                 let n = param_or(&mut params_iter, 1) as usize;
-                let n = n - 1; // translate to 0 indexing
+                let n = n.saturating_sub(1); // translate to 0 indexing
 
                 let screen = self.screen_mut();
                 screen.cursor.col = n;
@@ -325,12 +325,8 @@ impl vte::Perform for State {
                 // parse the params and adjust 1 indexing to 0 indexing
                 let row = param_or(&mut params_iter, 1) as usize;
                 let col = param_or(&mut params_iter, 1) as usize;
-                let row = row.saturating_sub(1) as usize;
-                let col = col.saturating_sub(1) as usize;
-
                 let screen = self.screen_mut();
-                screen.cursor.row = row;
-                screen.cursor.col = col;
+                screen.set_cursor(term::Pos { row, col });
                 screen.clamp();
             }
             // ED (Erase in Display)
@@ -373,39 +369,43 @@ impl vte::Perform for State {
             'u' => {
                 let screen = self.screen_mut();
                 screen.cursor = screen.saved_cursor.pos;
+                screen.clamp();
             }
 
-            'h' => {
-                match intermediates {
-                    [b'?'] => while let Some(code) = params_iter.next() {
-                        match code {
-                            [1049] => {
-                                // The alt-screen gets reset upon entry, so we need to
-                                // clobber it here.
-                                self.altscreen = Screen::alt(self.altscreen.size);
-                                self.screen_mode = ScreenMode::Alt;
-                            }
-                            _ => {
-                                warn!(
-                                    "Unhandled CSI l command: CSI {:?} {:?} l",
-                                    intermediates,
-                                    params.iter().collect::<Vec<&[u16]>>()
-                                );
-                                return;
-                            }
+            'h' => match intermediates {
+                [b'?'] => while let Some(code) = params_iter.next() {
+                    match code {
+                        // enable alt scree
+                        [1049] => {
+                            // The alt-screen gets reset upon entry, so we need to
+                            // clobber it here.
+                            self.altscreen = Screen::alt(self.altscreen.size);
+                            self.screen_mode = ScreenMode::Alt;
+                        }
+                        // enable origin mode
+                        [6] => self.screen_mut().set_origin_mode(OriginMode::ScrollRegion),
+                        _ => {
+                            warn!(
+                                "Unhandled CSI l command: CSI {:?} {:?} l",
+                                intermediates,
+                                params.iter().collect::<Vec<&[u16]>>()
+                            );
+                            return;
                         }
                     }
-                    _ => warn!(
-                        "Unhandled CSI h command: CSI {:?} {:?} h",
-                        intermediates,
-                        params.iter().collect::<Vec<&[u16]>>()
-                    ),
                 }
+                _ => warn!(
+                    "Unhandled CSI h command: CSI {:?} {:?} h",
+                    intermediates,
+                    params.iter().collect::<Vec<&[u16]>>()
+                ),
             }
             'l' => match intermediates {
                 [b'?'] => while let Some(code) = params_iter.next() {
                     match code {
                         [1049] => self.screen_mode = ScreenMode::Scrollback,
+                        // disable origin mode
+                        [6] => self.screen_mut().set_origin_mode(OriginMode::Term),
                         _ => {
                             warn!(
                                 "Unhandled CSI l command: CSI {:?} {:?} l",

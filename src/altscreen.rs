@@ -35,7 +35,7 @@ pub struct AltScreen {
     /// The region of the screen in which scrolling happens.
     /// This is set by DECSTBM (CSI n ; n r).
     pub scroll_region: ScrollRegion,
-    origin_mode: OriginMode,
+    pub origin_mode: OriginMode,
 }
 
 impl AltScreen {
@@ -160,12 +160,6 @@ impl AsTermInput for AltScreen {
             }
         }
 
-        if let ScrollRegion::Window { top, bottom } = self.scroll_region {
-            // We have a zero index [) (clopen) range and we need a 1 indexed
-            // [] (fully closed) range, so we need to shift top up, but bottom
-            // is already right.
-            term::ControlCodes::set_scroll_region((top + 1) as u16, bottom as u16)
-                .term_input_into(buf);
-        }
+        self.scroll_region.term_input_into(buf);
     }
 }

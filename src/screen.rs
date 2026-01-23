@@ -20,7 +20,7 @@ use crate::{
     cell::Cell,
     line,
     scrollback::Scrollback,
-    term::{self, AsTermInput, Pos, ScrollRegion},
+    term::{self, AsTermInput, OriginMode, Pos, ScrollRegion},
 };
 
 use tracing::warn;
@@ -94,6 +94,35 @@ impl Screen {
         }
     }
 
+    pub fn set_origin_mode(&mut self, origin_mode: OriginMode) {
+        match &mut self.grid {
+            Grid::Scrollback(s) => s.origin_mode = origin_mode,
+            Grid::AltScreen(alt) => alt.origin_mode = origin_mode,
+        }
+    }
+
+    /// Given a 1-indexed position as the user would directly provide in
+    /// a CUP command, update the cursor position, taking the current origin
+    /// mode and scroll region into account.
+    pub fn set_cursor(&mut self, pos: Pos) {
+        match self.grid.origin_mode() {
+            OriginMode::Term => {
+                self.cursor.row = pos.row.saturating_sub(1);
+                self.cursor.col = pos.col.saturating_sub(1);
+            }
+            OriginMode::ScrollRegion => match self.grid.scroll_region() {
+                ScrollRegion::TrackSize => {
+                    self.cursor.row = pos.row.saturating_sub(1);
+                    self.cursor.col = pos.col.saturating_sub(1);
+                }
+                ScrollRegion::Window { top, .. } => {
+                    self.cursor.row = pos.row.saturating_sub(1) + top;
+                    self.cursor.col = pos.col.saturating_sub(1);
+                }
+            },
+        }
+    }
+
     pub fn dump_contents_into(&self, buf: &mut Vec<u8>, dump_region: crate::ContentRegion) {
         match &self.grid {
             Grid::Scrollback(scrollback) => {
@@ -107,6 +136,10 @@ impl Screen {
             (self.cursor.col + 1) as u16,
         )
         .term_input_into(buf);
+
+        if matches!(self.grid.origin_mode(), OriginMode::ScrollRegion) {
+            term::control_codes().enable_scroll_region_origin_mode.term_input_into(buf);
+        }
     }
 
     pub fn resize(&mut self, new_size: crate::Size) {
@@ -272,6 +305,22 @@ impl SavedCursor {
 enum Grid {
     Scrollback(Scrollback),
     AltScreen(AltScreen),
+}
+
+impl Grid {
+    fn origin_mode(&self) -> OriginMode {
+        match self {
+            Grid::Scrollback(s) => s.origin_mode,
+            Grid::AltScreen(alt) => alt.origin_mode,
+        }
+    }
+
+    fn scroll_region(&self) -> &ScrollRegion {
+        match self {
+            Grid::Scrollback(s) => &s.scroll_region,
+            Grid::AltScreen(alt) => &alt.scroll_region,
+        }
+    }
 }
 
 #[cfg(test)]

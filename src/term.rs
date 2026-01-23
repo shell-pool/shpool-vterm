@@ -92,11 +92,11 @@ pub enum ScrollRegion {
     #[default]
     TrackSize,
     Window {
-        // The start of the scroll region (inclusive).
+        // The start of the scroll region (inclusive, zero indexed).
         top: usize,
-        // The end of the scroll region (exclusive). We use a closed open
-        // range so this is 1 higher than the actual bottom line included
-        // in the scroll region window.
+        // The end of the scroll region (exclusive, zero indexed). We use
+        // a closed open range so this is 1 higher than the actual bottom
+        // line included in the scroll region window.
         bottom: usize,
     },
 }
@@ -122,6 +122,17 @@ impl Region for (&ScrollRegion, &crate::Size) {
     }
 }
 
+impl AsTermInput for ScrollRegion {
+    fn term_input_into(&self, buf: &mut Vec<u8>) {
+        if let ScrollRegion::Window { top, bottom } = self {
+            // We have a zero index [) (clopen) range and we need a 1 indexed
+            // [] (fully closed) range, so we need to shift top up, but bottom
+            // is already right.
+            ControlCodes::set_scroll_region((top + 1) as u16, *bottom as u16).term_input_into(buf);
+        }
+    }
+}
+
 /// OriginMode indicates the origin position for the terminal's
 /// coordinate system. OriginMode::Term is the "normal" behavior
 /// for the terminal. (1, 1) refers to the upper leftmost cell in
@@ -131,7 +142,7 @@ impl Region for (&ScrollRegion, &crate::Size) {
 /// cell in the terminal overall if there is no current scroll region.
 ///
 /// This construct is often referred to as the "DECOM bit."
-#[derive(Debug, Eq, PartialEq, Clone, Default)]
+#[derive(Debug, Eq, PartialEq, Clone, Default, Copy)]
 pub enum OriginMode {
     /// (physical_row, physical_col) = (logical_row, logical_col)
     #[default]
@@ -443,6 +454,8 @@ pub struct ControlCodes {
     pub erase_line: ControlCode,
     pub device_status_report: ControlCode,
     pub unset_scroll_region: ControlCode,
+    pub enable_scroll_region_origin_mode: ControlCode,
+    pub disable_scroll_region_origin_mode: ControlCode,
 }
 
 #[derive(Clone, Debug)]
@@ -796,6 +809,16 @@ pub fn control_codes() -> &'static ControlCodes {
             intermediates: smallvec![],
             action: 'r',
         },
+        enable_scroll_region_origin_mode: ControlCode::CSI {
+            params: smallvec![smallvec![6]],
+            intermediates: smallvec![b'?'],
+            action: 'h',
+        },
+        disable_scroll_region_origin_mode: ControlCode::CSI {
+            params: smallvec![smallvec![6]],
+            intermediates: smallvec![b'?'],
+            action: 'l',
+        },
     })
 }
 
@@ -949,6 +972,7 @@ impl ControlCodes {
         }
     }
 
+    /// 1-indexed, inclusive on both ends (closed, closed).
     pub fn set_scroll_region(top: u16, bottom: u16) -> ControlCode {
         ControlCode::CSI {
             params: smallvec![smallvec![top], smallvec![bottom]],
