@@ -121,17 +121,15 @@ impl Screen {
     }
 
     pub fn clamp(&mut self) {
-        self.cursor.clamp_to(self.size);
+        match &self.grid {
+            Grid::Scrollback(scrollback) => {
+                scrollback.clamp_to_scroll_region(&mut self.cursor, &self.size)
+            }
+            Grid::AltScreen(altscreen) => {
+                altscreen.clamp_to_scroll_region(&mut self.cursor, &self.size)
+            }
+        }
     }
-
-    /*
-    pub fn clamp_to_scroll_region(&mut self) {
-        self.cursor.clamp_to(match &self.grid {
-            Grid::Scrollback(scrollback) => scrollback.scroll_region.as_region(&self.size),
-            Grid::AltScreen(altscreen) => altscreen.scroll_region.as_region(&self.size),
-        })
-    }
-    */
 
     pub fn snap_to_bottom(&mut self) {
         if let Grid::Scrollback(scrollback) = &mut self.grid {

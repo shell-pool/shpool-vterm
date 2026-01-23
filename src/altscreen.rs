@@ -19,7 +19,7 @@ use std::collections::VecDeque;
 use crate::{
     cell::Cell,
     line::{self, Line},
-    term::{self, AsTermInput, Pos, ScrollRegion},
+    term::{self, AsTermInput, OriginMode, Pos, ScrollRegion},
 };
 
 use anyhow::{anyhow, Context};
@@ -35,6 +35,7 @@ pub struct AltScreen {
     /// The region of the screen in which scrolling happens.
     /// This is set by DECSTBM (CSI n ; n r).
     pub scroll_region: ScrollRegion,
+    origin_mode: OriginMode,
 }
 
 impl AltScreen {
@@ -43,7 +44,11 @@ impl AltScreen {
         for _ in 0..size.height {
             buf.push_back(Line::new());
         }
-        AltScreen { buf, scroll_region: ScrollRegion::TrackSize }
+        AltScreen {
+            buf,
+            scroll_region: ScrollRegion::default(),
+            origin_mode: OriginMode::default(),
+        }
     }
 
     /// Write the given cell to the given cursor position, returning the next
@@ -80,6 +85,13 @@ impl AltScreen {
         cursor.clamp_to(size);
 
         Ok(cursor)
+    }
+
+    pub fn clamp_to_scroll_region(&self, cursor: &mut Pos, size: &crate::Size) {
+        match self.origin_mode {
+            OriginMode::Term => cursor.clamp_to(size),
+            OriginMode::ScrollRegion => cursor.clamp_to(self.scroll_region.as_region(size)),
+        }
     }
 
     /// Resize the alt screen. This does not perform any reflow logic,

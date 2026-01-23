@@ -78,8 +78,18 @@ impl Region for crate::Size {
     }
 }
 
-#[derive(Debug, Eq, PartialEq, Clone)]
+impl Region for &crate::Size {
+    fn row_bounds(&self) -> (usize, usize) {
+        (0, self.height)
+    }
+    fn col_bounds(&self) -> (usize, usize) {
+        (0, self.width)
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Clone, Default)]
 pub enum ScrollRegion {
+    #[default]
     TrackSize,
     Window {
         // The start of the scroll region (inclusive).
@@ -110,6 +120,25 @@ impl Region for (&ScrollRegion, &crate::Size) {
     fn col_bounds(&self) -> (usize, usize) {
         (0, self.1.width)
     }
+}
+
+/// OriginMode indicates the origin position for the terminal's
+/// coordinate system. OriginMode::Term is the "normal" behavior
+/// for the terminal. (1, 1) refers to the upper leftmost cell in
+/// the terminal's visible window. In OriginMode::ScrollRegion,
+/// (1, 1) referrs to the upper leftmost cell in the currently
+/// configured scoll region, if there is one, and the upper leftmost
+/// cell in the terminal overall if there is no current scroll region.
+///
+/// This construct is often referred to as the "DECOM bit."
+#[derive(Debug, Eq, PartialEq, Clone, Default)]
+pub enum OriginMode {
+    /// (physical_row, physical_col) = (logical_row, logical_col)
+    #[default]
+    Term,
+    /// (physical_row, physical_col) =
+    ///     (logical_row + (top_margin - 1), logical_col)
+    ScrollRegion,
 }
 
 pub trait AsTermInput {

@@ -19,7 +19,7 @@
 use crate::{
     cell::Cell,
     line::{self, Line},
-    term::{self, AsTermInput, Pos, ScrollRegion},
+    term::{self, AsTermInput, OriginMode, Pos, ScrollRegion},
     ContentRegion,
 };
 use std::collections::VecDeque;
@@ -44,6 +44,7 @@ pub struct Scrollback {
     /// The region of the screen in which scrolling happens.
     /// This is set by DECSTBM (CSI n ; n r).
     pub scroll_region: ScrollRegion,
+    origin_mode: OriginMode,
 }
 
 impl std::fmt::Display for Scrollback {
@@ -63,7 +64,8 @@ impl Scrollback {
             buf: VecDeque::new(),
             scroll_offset: 0,
             lines: scrollback_lines,
-            scroll_region: ScrollRegion::TrackSize,
+            scroll_region: ScrollRegion::default(),
+            origin_mode: OriginMode::default(),
         }
     }
 
@@ -105,6 +107,13 @@ impl Scrollback {
 
     pub fn snap_to_bottom(&mut self) {
         self.scroll_offset = 0;
+    }
+
+    pub fn clamp_to_scroll_region(&self, cursor: &mut Pos, size: &crate::Size) {
+        match self.origin_mode {
+            OriginMode::Term => cursor.clamp_to(*size),
+            OriginMode::ScrollRegion => cursor.clamp_to(self.scroll_region.as_region(size)),
+        }
     }
 
     pub fn dump_contents_into(
