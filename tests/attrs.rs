@@ -258,3 +258,67 @@ frag! {
             term::control_codes().clear_attrs,
             term::control_codes().bold
 }
+
+frag! {
+    fg_colors { scrollback_lines: 20, width: 20, height: 20 }
+    <= term::Raw::from("a"),
+       term::ControlCodes::fgcolor_idx(1),
+       term::Raw::from("b"),
+       term::ControlCodes::fgcolor_idx(9),
+       term::Raw::from("c"),
+       term::ControlCodes::fgcolor_idx(100),
+       term::Raw::from("d"),
+       term::ControlCodes::fgcolor_rgb(10, 20, 30),
+       term::Raw::from("e"),
+       term::control_codes().fgcolor_default,
+       term::Raw::from("f")
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::Raw::from("a"),
+            term::ControlCodes::fgcolor_idx(1),
+            term::Raw::from("b"),
+            term::ControlCodes::fgcolor_idx(9),
+            term::Raw::from("c"),
+            term::ControlCodes::fgcolor_idx(100),
+            term::Raw::from("d"),
+            term::ControlCodes::fgcolor_rgb(10, 20, 30),
+            term::Raw::from("e"),
+            term::control_codes().fgcolor_default,
+            term::Raw::from("f"),
+            term::ControlCodes::cursor_position(1, 7),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    bg_colors { scrollback_lines: 20, width: 20, height: 20 }
+    <= term::Raw::from("a"),
+       term::ControlCodes::bgcolor_idx(2),
+       term::Raw::from("b"),
+       term::ControlCodes::bgcolor_idx(10),
+       term::Raw::from("c"),
+       term::ControlCodes::bgcolor_idx(200),
+       term::Raw::from("d"),
+       term::ControlCodes::bgcolor_rgb(40, 50, 60),
+       term::Raw::from("e"),
+       term::control_codes().bgcolor_default,
+       term::Raw::from("f")
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::Raw::from("a"),
+            term::ControlCodes::bgcolor_idx(2),
+            term::Raw::from("b"),
+            term::ControlCodes::bgcolor_idx(10),
+            term::Raw::from("c"),
+            term::ControlCodes::bgcolor_idx(200),
+            term::Raw::from("d"),
+            term::ControlCodes::bgcolor_rgb(40, 50, 60),
+            term::Raw::from("e"),
+            term::control_codes().bgcolor_default,
+            term::Raw::from("f"),
+            term::ControlCodes::cursor_position(1, 7),
+            term::control_codes().clear_attrs
+}

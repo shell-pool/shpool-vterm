@@ -295,11 +295,11 @@ impl Attrs {
         let controls = control_codes();
 
         if self.fgcolor != next.fgcolor {
-            codes.push(self.fgcolor.fgcode());
+            codes.push(next.fgcolor.fgcode());
         }
 
         if self.bgcolor != next.bgcolor {
-            codes.push(self.bgcolor.bgcode());
+            codes.push(next.bgcolor.bgcode());
         }
 
         if self.italic && !next.italic {
