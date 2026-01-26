@@ -184,8 +184,8 @@ impl AsTermInput for Raw {
 #[derive(Default, Debug, Eq, PartialEq, Clone)]
 #[must_use = "this struct does nothing unless you call term_input_into"]
 pub struct Attrs {
-    pub fgcolor: Option<Color>,
-    pub bgcolor: Option<Color>,
+    pub fgcolor: Color,
+    pub bgcolor: Color,
     pub font_weight: Option<FontWeight>,
     pub italic: bool,
     pub underline: Option<UnderlineStyle>,
@@ -223,12 +223,12 @@ pub enum FrameStyle {
 
 impl std::fmt::Display for Attrs {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if let Some(c) = &self.fgcolor {
-            write!(f, "<FG {c:?}>")?;
+        if !matches!(self.fgcolor, Color::Default) {
+            write!(f, "<FG {:?}>", self.fgcolor)?;
         }
 
-        if let Some(c) = &self.bgcolor {
-            write!(f, "<BG {c:?}>")?;
+        if !matches!(self.bgcolor, Color::Default) {
+            write!(f, "<BG {:?}>", self.bgcolor)?;
         }
 
         match self.font_weight {
@@ -273,8 +273,8 @@ impl std::fmt::Display for Attrs {
 
 impl Attrs {
     pub fn has_attrs(&self) -> bool {
-        self.fgcolor.is_some()
-            || self.bgcolor.is_some()
+        !matches!(self.fgcolor, Color::Default)
+            || !matches!(self.bgcolor, Color::Default)
             || self.font_weight.is_some()
             || self.italic
             || self.underline.is_some()
@@ -295,19 +295,11 @@ impl Attrs {
         let controls = control_codes();
 
         if self.fgcolor != next.fgcolor {
-            if let Some(fgcolor) = next.fgcolor {
-                codes.push(fgcolor.fgcode());
-            } else {
-                codes.push(controls.fgcolor_default.clone());
-            }
+            codes.push(self.fgcolor.fgcode());
         }
 
         if self.bgcolor != next.bgcolor {
-            if let Some(bgcolor) = next.bgcolor {
-                codes.push(bgcolor.bgcode());
-            } else {
-                codes.push(controls.bgcolor_default.clone());
-            }
+            codes.push(self.bgcolor.bgcode());
         }
 
         if self.italic && !next.italic {
@@ -983,10 +975,11 @@ impl ControlCodes {
 }
 
 /// Represents a foreground or background color for cells.
-#[derive(Eq, PartialEq, Debug, Copy, Clone)]
+#[derive(Eq, PartialEq, Debug, Copy, Clone, Default)]
 #[allow(dead_code)]
 pub enum Color {
     /// The default terminal color.
+    #[default]
     Default,
 
     /// An indexed terminal color.
@@ -994,12 +987,6 @@ pub enum Color {
 
     /// An RGB terminal color. The parameters are (red, green, blue).
     Rgb(u8, u8, u8),
-}
-
-impl Default for Color {
-    fn default() -> Self {
-        Self::Default
-    }
 }
 
 impl Color {
