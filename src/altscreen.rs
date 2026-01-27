@@ -120,6 +120,10 @@ impl AltScreen {
         &mut self.buf[row]
     }
 
+    //
+    // Command handlers
+    //
+
     pub fn erase_to_end(&mut self, cursor: Pos) {
         self.buf[cursor.row].truncate(cursor.col);
 
@@ -153,6 +157,41 @@ impl AltScreen {
 
         for i in start..end {
             self.buf[i].truncate(0);
+        }
+    }
+
+    pub fn insert_lines(&mut self, cursor: &Pos, n: usize) {
+        let (top, bottom) = match self.scroll_region {
+            ScrollRegion::TrackSize => (0, self.buf.len()),
+            ScrollRegion::Window { top, bottom } => {
+                if cursor.row < top || bottom <= cursor.row {
+                    // Insert Line does nothing when the cursor is outside
+                    // the scroll region.
+                    return;
+                }
+                (top, bottom)
+            }
+        };
+
+        // We want to solve for `shuffle_lines` in:
+        //
+        // ```
+        // (cursor.row - top) + min(n, bottom - cursor.row) + shuffle_lines =
+        //    (bottom - top)
+        // ```
+        let lines_to_insert = std::cmp::min(n, bottom - cursor.row);
+        let shuffle_lines = (bottom - top) - lines_to_insert - (cursor.row - top);
+        for i in 0..shuffle_lines {
+            // By using std::mem::replace rather than cloning we can avoid a little
+            // work on the second pass.
+            let bottom_offset = bottom - 1 - i;
+            self.buf[bottom_offset] =
+                std::mem::replace(&mut self.buf[bottom_offset - lines_to_insert], Line::new());
+        }
+
+        // clober any lines that are not handled by the initial pass.
+        for i in shuffle_lines..lines_to_insert {
+            self.buf[cursor.row + i] = Line::new();
         }
     }
 }

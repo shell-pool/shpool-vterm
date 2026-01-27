@@ -25,6 +25,7 @@ use crate::{
 use std::collections::VecDeque;
 
 use anyhow::{anyhow, Context};
+use tracing::error;
 
 // A scrollback stores the termianal state for the main screen.
 // Alt screen state is stored seperately.
@@ -213,24 +214,20 @@ impl Scrollback {
     }
 
     pub fn get_line_mut(&mut self, size: crate::Size, row: usize) -> Option<&mut Line> {
-        let grid_start = self.lines_below_grid_start(size);
-        if row >= grid_start {
-            return None;
+        if let Some(i) = self.idx_from_bottom(size, row) {
+            Some(&mut self.buf[i])
+        } else {
+            None
         }
-
-        let idx_from_bottom = (grid_start - 1) - row;
-        Some(&mut self.buf[idx_from_bottom])
     }
 
     #[allow(dead_code)]
     pub fn get_line(&self, size: crate::Size, row: usize) -> Option<&Line> {
-        let grid_start = self.lines_below_grid_start(size);
-        if row >= grid_start {
-            return None;
+        if let Some(i) = self.idx_from_bottom(size, row) {
+            Some(&self.buf[i])
+        } else {
+            None
         }
-
-        let idx_from_bottom = (grid_start - 1) - row;
-        Some(&self.buf[idx_from_bottom])
     }
 
     /// The number of lines at the front of the scrollback queue that
@@ -243,6 +240,18 @@ impl Scrollback {
         } else {
             grid_start
         }
+    }
+
+    /// Return the index from the bottom of the scrollback buffer (the
+    /// front of self.buf) for the given logical row index. Returns None
+    /// if there is currently no line for that index (row points below
+    /// the portion of the screen for which we actually have data).
+    fn idx_from_bottom(&self, size: crate::Size, row: usize) -> Option<usize> {
+        let grid_start = self.lines_below_grid_start(size);
+        if row >= grid_start {
+            return None;
+        }
+        Some(grid_start - 1 - row)
     }
 
     /// Write the given cell at the given cursor position, returning the next
@@ -317,6 +326,10 @@ impl Scrollback {
         Ok(cursor)
     }
 
+    //
+    // Command Handlers
+    //
+
     pub fn erase_to_end(&mut self, size: crate::Size, cursor: Pos) {
         if let Some(snip_line) = self.get_line_mut(size, cursor.row) {
             snip_line.erase(line::Section::ToEnd(cursor.col));
@@ -376,5 +389,59 @@ impl Scrollback {
 
     pub fn scroll_down(&mut self, n: usize) {
         self.scroll_offset = self.scroll_offset.saturating_sub(n);
+    }
+
+    pub fn insert_lines(&mut self, cursor: &Pos, size: &crate::Size, n: usize) {
+        let bottom = match self.scroll_region {
+            ScrollRegion::TrackSize => size.height,
+            ScrollRegion::Window { top, bottom } => {
+                if cursor.row < top || bottom <= cursor.row {
+                    // Insert Line does nothing when the cursor is outside
+                    // the scroll region.
+                    return;
+                }
+                bottom
+            }
+        };
+
+        let row_idx = match self.idx_from_bottom(*size, cursor.row) {
+            Some(r) => r,
+            // If the cursor is pointing past the point where we have
+            // data, inserting blanks below the current line is a no-op,
+            // no matter how many we are inserting.
+            None => return,
+        };
+
+        // The lines below the cursor. N.B. this is stored in
+        // reverse order from how you normally visualize it.
+        let mut lines_below_cursor = Vec::with_capacity(row_idx);
+        for _ in 0..=row_idx {
+            if let Some(l) = self.buf.pop_front() {
+                lines_below_cursor.push(l);
+            } else {
+                error!("internal error: row idx computed incorrectly");
+            }
+        }
+
+        let lines_to_insert = std::cmp::min(n, bottom - cursor.row);
+        for _ in 0..lines_to_insert {
+            self.buf.push_front(Line::new());
+        }
+
+        // Up until the bottom of the scroll region, backfill
+        // from the end of the lines_below_cursor vec.
+        let backfill_to_bottom = (bottom - cursor.row) - lines_to_insert;
+        for i in 0..backfill_to_bottom {
+            let take_idx = lines_below_cursor.len() - 1 - i;
+            self.buf.push_front(std::mem::replace(&mut lines_below_cursor[take_idx], Line::new()));
+        }
+
+        // Past the scroll region, backfill from the start of the
+        // lines_below_cursor vec.
+        let backfill_past_scroll_region = size.height - bottom;
+        for i in 0..backfill_past_scroll_region {
+            let take_idx = backfill_past_scroll_region - 1 - i;
+            self.buf.push_front(std::mem::replace(&mut lines_below_cursor[take_idx], Line::new()));
+        }
     }
 }

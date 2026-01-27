@@ -348,6 +348,11 @@ impl vte::Perform for State {
                     _ => warn!("unhandled 'CSI {code:?} K'"),
                 }
             }
+            // IL (Insert Line)
+            'L' => {
+                let n = param_or(&mut params_iter, 1) as usize;
+                self.screen_mut().insert_lines(n);
+            }
             // SU (Scroll Up)
             'S' => {
                 let n = param_or(&mut params_iter, 1) as usize;

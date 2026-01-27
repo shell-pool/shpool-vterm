@@ -265,6 +265,17 @@ impl Screen {
             _ => {}
         }
     }
+
+    /// Handler for the Insert Line command (CSI n L).
+    ///
+    /// n lines are inserted above the current line, dropping any lines that
+    /// get pushed out of the current scroll region.
+    pub fn insert_lines(&mut self, n: usize) {
+        match &mut self.grid {
+            Grid::Scrollback(s) => s.insert_lines(&self.cursor, &self.size, n),
+            Grid::AltScreen(alt) => alt.insert_lines(&self.cursor, n),
+        }
+    }
 }
 
 impl std::fmt::Display for Screen {

@@ -964,6 +964,18 @@ impl ControlCodes {
         }
     }
 
+    pub fn insert_lines(n: u16) -> ControlCode {
+        if n == 1 {
+            ControlCode::CSI { params: smallvec![], intermediates: smallvec![], action: 'L' }
+        } else {
+            ControlCode::CSI {
+                params: smallvec![smallvec![n]],
+                intermediates: smallvec![],
+                action: 'L',
+            }
+        }
+    }
+
     /// 1-indexed, inclusive on both ends (closed, closed).
     pub fn set_scroll_region(top: u16, bottom: u16) -> ControlCode {
         ControlCode::CSI {
