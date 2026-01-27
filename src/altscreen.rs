@@ -194,6 +194,31 @@ impl AltScreen {
             self.buf[cursor.row + i] = Line::new();
         }
     }
+
+    pub fn delete_lines(&mut self, cursor: &Pos, n: usize) {
+        let (top, bottom) = match self.scroll_region {
+            ScrollRegion::TrackSize => (0, self.buf.len()),
+            ScrollRegion::Window { top, bottom } => {
+                if cursor.row < top || bottom <= cursor.row {
+                    // Delete Line does nothing when the cursor is outside
+                    // the scroll region.
+                    return;
+                }
+                (top, bottom)
+            }
+        };
+
+        let lines_to_delete = std::cmp::min(n, bottom - cursor.row);
+        let shuffle_lines = (bottom - top) - lines_to_delete - (cursor.row - top);
+
+        for i in 0..shuffle_lines {
+            self.buf[cursor.row + i] =
+                std::mem::replace(&mut self.buf[cursor.row + lines_to_delete + i], Line::new());
+        }
+        for i in shuffle_lines..lines_to_delete {
+            self.buf[cursor.row + i] = Line::new();
+        }
+    }
 }
 
 impl std::fmt::Display for AltScreen {

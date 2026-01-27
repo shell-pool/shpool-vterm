@@ -276,6 +276,18 @@ impl Screen {
             Grid::AltScreen(alt) => alt.insert_lines(&self.cursor, n),
         }
     }
+
+    /// Handler for the Delete Line command (CSI n M).
+    ///
+    /// n lines below the current line are deleted (including the current line),
+    /// sucking any lines below the current line up. New blank lines are
+    /// inserted at the bottom of the scroll region.
+    pub fn delete_lines(&mut self, n: usize) {
+        match &mut self.grid {
+            Grid::Scrollback(s) => s.delete_lines(&self.cursor, &self.size, n),
+            Grid::AltScreen(alt) => alt.delete_lines(&self.cursor, n),
+        }
+    }
 }
 
 impl std::fmt::Display for Screen {

@@ -353,6 +353,11 @@ impl vte::Perform for State {
                 let n = param_or(&mut params_iter, 1) as usize;
                 self.screen_mut().insert_lines(n);
             }
+            // DL (Delete Line)
+            'M' => {
+                let n = param_or(&mut params_iter, 1) as usize;
+                self.screen_mut().delete_lines(n);
+            }
             // SU (Scroll Up)
             'S' => {
                 let n = param_or(&mut params_iter, 1) as usize;

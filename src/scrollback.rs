@@ -444,4 +444,60 @@ impl Scrollback {
             self.buf.push_front(std::mem::replace(&mut lines_below_cursor[take_idx], Line::new()));
         }
     }
+
+    pub fn delete_lines(&mut self, cursor: &Pos, size: &crate::Size, n: usize) {
+        let bottom = match self.scroll_region {
+            ScrollRegion::TrackSize => size.height,
+            ScrollRegion::Window { top, bottom } => {
+                if cursor.row < top || bottom <= cursor.row {
+                    // Insert Line does nothing when the cursor is outside
+                    // the scroll region.
+                    return;
+                }
+                bottom
+            }
+        };
+
+        let row_idx = match self.idx_from_bottom(*size, cursor.row) {
+            Some(r) => r,
+            // If the cursor is pointing past the point where we have
+            // data, inserting blanks below the current line is a no-op,
+            // no matter how many we are inserting.
+            None => return,
+        };
+
+        // The lines below the cursor. N.B. this is stored in
+        // reverse order from how you normally visualize it.
+        let mut lines_below_cursor = Vec::with_capacity(row_idx);
+        for _ in 0..=row_idx {
+            if let Some(l) = self.buf.pop_front() {
+                lines_below_cursor.push(l);
+            } else {
+                error!("internal error: row idx computed incorrectly");
+            }
+        }
+
+        let lines_to_delete = std::cmp::min(n, bottom - cursor.row);
+
+        // Replace the undeleted lines from the scrollback region.
+        let undeleted_lines_in_scrollback_buf = (bottom - cursor.row) - lines_to_delete;
+        for i in 0..undeleted_lines_in_scrollback_buf {
+            let take_idx = lines_below_cursor.len() - lines_to_delete - 1 - i;
+            self.buf.push_front(std::mem::replace(&mut lines_below_cursor[take_idx], Line::new()));
+        }
+
+        // Inject the blank lines we need to put in at the bottom of the scrollback
+        // region.
+        for _ in 0..lines_to_delete {
+            self.buf.push_front(Line::new());
+        }
+
+        // Past the scroll region, backfill from the start of the
+        // lines_below_cursor vec.
+        let backfill_past_scroll_region = size.height - bottom;
+        for i in 0..backfill_past_scroll_region {
+            let take_idx = backfill_past_scroll_region - 1 - i;
+            self.buf.push_front(std::mem::replace(&mut lines_below_cursor[take_idx], Line::new()));
+        }
+    }
 }
