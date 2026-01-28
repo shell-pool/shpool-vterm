@@ -342,9 +342,23 @@ impl vte::Perform for State {
             // EL (Erase in Line)
             'K' => while let Some(code) = params_iter.next() {
                 match code {
-                    [] | [0] => self.screen_mut().erase_to_end_of_line(),
-                    [1] => self.screen_mut().erase_to_start_of_line(),
-                    [2] => self.screen_mut().erase_line(),
+                    [] | [0] => {
+                        let screen = self.screen_mut();
+                        let col = screen.cursor.col;
+                        if let Some(l) = screen.get_line_mut() {
+                            l.erase(line::Section::ToEnd(col));
+                        }
+                    }
+                    [1] => {
+                        let screen = self.screen_mut();
+                        let col = screen.cursor.col;
+                        if let Some(l) = screen.get_line_mut() {
+                            l.erase(line::Section::StartTo(col));
+                        }
+                    }
+                    [2] => if let Some(l) = self.screen_mut().get_line_mut() {
+                        l.erase(line::Section::Whole);
+                    }
                     _ => warn!("unhandled 'CSI {code:?} K'"),
                 }
             }
