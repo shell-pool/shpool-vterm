@@ -383,6 +383,18 @@ impl vte::Perform for State {
                 self.screen_mut().scroll_down(n as usize);
             }
 
+            // ICH (Insert Character)
+            '@' => {
+                let n = param_or(&mut params_iter, 1) as usize;
+
+                let screen = self.screen_mut();
+                let width = screen.size.width;
+                let col = screen.cursor.col;
+                if let Some(l) = screen.get_line_mut() {
+                    l.insert_character(width, col, n);
+                }
+            }
+
             // SCP (Save Cursor Position)
             's' => {
                 let screen = self.screen_mut();

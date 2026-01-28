@@ -142,6 +142,14 @@ impl Line {
             }
         }
     }
+
+    /// Insert n new blank cells at the current position, dropping
+    /// any cells which spill over width.
+    pub fn insert_character(&mut self, width: usize, col: usize, n: usize) {
+        let empties = vec![Cell::empty(); n];
+        self.cells.splice(col..col, empties);
+        self.cells.truncate(width);
+    }
 }
 
 /// Specify a region of the line.

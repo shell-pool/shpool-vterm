@@ -18,7 +18,7 @@
 use crate::{
     altscreen::AltScreen,
     cell::Cell,
-    line::{self, Line},
+    line::Line,
     scrollback::Scrollback,
     term::{self, AsTermInput, OriginMode, Pos, ScrollRegion},
 };

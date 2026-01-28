@@ -537,3 +537,57 @@ frag! {
             term::ControlCodes::cursor_position(1, 1),
             term::control_codes().clear_attrs
 }
+
+frag! {
+    alt_screen_insert_char_basic { scrollback_lines: 100, width: 5, height: 4 }
+    <= term::control_codes().enable_alt_screen,
+       term::Raw::from("123"),
+       term::ControlCodes::cursor_position(1, 2),
+       term::ControlCodes::insert_character(1)
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::Raw::from("1 23"),
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    alt_screen_insert_char_shift_off { scrollback_lines: 100, width: 3, height: 4 }
+    <= term::control_codes().enable_alt_screen,
+       term::Raw::from("123"),
+       term::ControlCodes::cursor_position(1, 1),
+       term::ControlCodes::insert_character(1)
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::Raw::from(" 12"),
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    alt_screen_insert_many_chars { scrollback_lines: 100, width: 5, height: 4 }
+    <= term::control_codes().enable_alt_screen,
+       term::Raw::from("123"),
+       term::ControlCodes::cursor_position(1, 1),
+       term::ControlCodes::insert_character(2)
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::Raw::from("  123"),
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs
+}
