@@ -591,3 +591,80 @@ frag! {
             term::ControlCodes::cursor_position(1, 1),
             term::control_codes().clear_attrs
 }
+
+frag! {
+    alt_screen_delete_char_basic { scrollback_lines: 100, width: 5, height: 4 }
+    <= term::control_codes().enable_alt_screen,
+       term::Raw::from("123"),
+       term::ControlCodes::cursor_position(1, 2),
+       term::ControlCodes::delete_character(1)
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::Raw::from("13   "),
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    alt_screen_delete_many_chars { scrollback_lines: 100, width: 5, height: 4 }
+    <= term::control_codes().enable_alt_screen,
+       term::Raw::from("123"),
+       term::ControlCodes::cursor_position(1, 1),
+       term::ControlCodes::delete_character(2)
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::Raw::from("3    "),
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    alt_screen_delete_char_at_end_of_line { scrollback_lines: 100, width: 5, height: 4 }
+    <= term::control_codes().enable_alt_screen,
+       term::Raw::from("123"),
+       term::ControlCodes::cursor_position(1, 3),
+       term::ControlCodes::delete_character(1)
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::Raw::from("12   "),
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::ControlCodes::cursor_position(1, 3),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    alt_screen_delete_char_with_backfill_attrs { scrollback_lines: 100, width: 5, height: 4 }
+    <= term::control_codes().enable_alt_screen,
+       term::Raw::from("123"),
+       term::ControlCodes::cursor_position(1, 2),
+       term::ControlCodes::fgcolor_idx(1),
+       term::ControlCodes::delete_character(1)
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::Raw::from("13  "),
+            term::ControlCodes::fgcolor_idx(1),
+            term::Raw::from(" "),
+            term::control_codes().fgcolor_default,
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().clear_attrs,
+            term::ControlCodes::fgcolor_idx(1)
+}

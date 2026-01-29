@@ -436,6 +436,7 @@ pub struct ControlCodes {
     pub save_cursor: ControlCode,
     pub restore_cursor: ControlCode,
     pub insert_character: ControlCode,
+    pub delete_character: ControlCode,
     pub enable_alt_screen: ControlCode,
     pub disable_alt_screen: ControlCode,
     pub erase_to_end: ControlCode,
@@ -752,6 +753,11 @@ pub fn control_codes() -> &'static ControlCodes {
             intermediates: smallvec![],
             action: '@',
         },
+        delete_character: ControlCode::CSI {
+            params: smallvec![smallvec![1]],
+            intermediates: smallvec![],
+            action: 'P',
+        },
         enable_alt_screen: ControlCode::CSI {
             params: smallvec![smallvec![1049]],
             intermediates: smallvec![b'?'],
@@ -1002,6 +1008,18 @@ impl ControlCodes {
                 params: smallvec![smallvec![n]],
                 intermediates: smallvec![],
                 action: '@',
+            }
+        }
+    }
+
+    pub fn delete_character(n: u16) -> ControlCode {
+        if n == 1 {
+            ControlCode::CSI { params: smallvec![], intermediates: smallvec![], action: 'P' }
+        } else {
+            ControlCode::CSI {
+                params: smallvec![smallvec![n]],
+                intermediates: smallvec![],
+                action: 'P',
             }
         }
     }

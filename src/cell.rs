@@ -87,6 +87,10 @@ impl Cell {
         }
     }
 
+    pub fn empty_with_attrs(attrs: term::Attrs) -> Self {
+        Cell { grapheme_cluster: smallvec![], width: 0, empty: true, wide_padding: false, attrs }
+    }
+
     pub fn wide_pad() -> Self {
         Cell {
             grapheme_cluster: smallvec![],

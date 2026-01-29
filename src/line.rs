@@ -150,6 +150,31 @@ impl Line {
         self.cells.splice(col..col, empties);
         self.cells.truncate(width);
     }
+
+    /// Delete n cells at the current position, sucking cells to the
+    /// right towards the cursor, and backfilling their old position
+    /// with empty cells that have the current background attributes
+    /// set.
+    ///
+    /// This implements DCH (Delete Character).
+    pub fn delete_character(&mut self, width: usize, col: usize, attrs: &term::Attrs, n: usize) {
+        let delete_to = std::cmp::min(self.cells.len(), col + n);
+        let num_to_delete = delete_to - col;
+
+        self.cells.drain(col..delete_to);
+
+        // Inject the empty cells that were logically already present
+        // when the cells buffer was short.
+        while self.cells.len() < width - num_to_delete {
+            self.cells.push(Cell::empty());
+        }
+
+        // Inject the "backfill" cells that the semantics of DCH call
+        // for. These are empty cells with the current attributes set.
+        while self.cells.len() < width {
+            self.cells.push(Cell::empty_with_attrs(attrs.clone()));
+        }
+    }
 }
 
 /// Specify a region of the line.

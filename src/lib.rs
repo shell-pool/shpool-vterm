@@ -394,6 +394,18 @@ impl vte::Perform for State {
                     l.insert_character(width, col, n);
                 }
             }
+            // DCH (Delete Character)
+            'P' => {
+                let n = param_or(&mut params_iter, 1) as usize;
+
+                let attrs = self.cursor_attrs.clone();
+                let screen = self.screen_mut();
+                let width = screen.size.width;
+                let col = screen.cursor.col;
+                if let Some(l) = screen.get_line_mut() {
+                    l.delete_character(width, col, &attrs, n);
+                }
+            }
 
             // SCP (Save Cursor Position)
             's' => {
