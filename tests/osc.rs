@@ -54,3 +54,15 @@ frag! {
             term::ControlCodes::set_title(smallvec![b'B']),
             term::ControlCodes::set_icon_name(smallvec![b'A'])
 }
+
+frag! {
+    osc_working_dir { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::ControlCodes::set_working_dir(smallvec![b'h', b'o', b's', b't'], smallvec![b'/', b't', b'm', b'p'])
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs,
+            term::ControlCodes::set_working_dir(smallvec![b'h', b'o', b's', b't'], smallvec![b'/', b't', b'm', b'p'])
+}

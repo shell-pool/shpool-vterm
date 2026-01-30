@@ -1075,6 +1075,10 @@ impl ControlCodes {
     pub fn set_title(title: SmallVec<[u8; 8]>) -> ControlCode {
         ControlCode::OSC { params: smallvec![smallvec![b'2'], title], term: OSCTerm::default() }
     }
+
+    pub fn set_working_dir(host: SmallVec<[u8; 8]>, dir: SmallVec<[u8; 8]>) -> ControlCode {
+        ControlCode::OSC { params: smallvec![smallvec![b'7'], host, dir], term: OSCTerm::default() }
+    }
 }
 
 /// Represents a foreground or background color for cells.

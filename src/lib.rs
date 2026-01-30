@@ -149,6 +149,14 @@ struct State {
     title: Option<SmallVec<[u8; 8]>>,
     /// The terminal icon name, as set by `OSC 0` and `OSC 1`.
     icon_name: Option<SmallVec<[u8; 8]>>,
+    /// The terminal working directory (some terminal emulators use this
+    /// to know what directory to start new shells in).
+    working_dir: Option<WorkingDir>,
+}
+
+struct WorkingDir {
+    host: SmallVec<[u8; 8]>,
+    dir: SmallVec<[u8; 8]>,
 }
 
 impl std::fmt::Display for State {
@@ -177,6 +185,7 @@ impl State {
             cursor_attrs: term::Attrs::default(),
             title: None,
             icon_name: None,
+            working_dir: None,
         }
     }
 
@@ -227,6 +236,11 @@ impl State {
                 ControlCodes::set_icon_name(icon_name.clone()).term_input_into(buf);
             }
             (None, None) => {}
+        }
+
+        if let Some(working_dir) = &self.working_dir {
+            ControlCodes::set_working_dir(working_dir.host.clone(), working_dir.dir.clone())
+                .term_input_into(buf);
         }
     }
 }
@@ -281,6 +295,7 @@ impl vte::Perform for State {
     fn osc_dispatch(&mut self, params: &[&[u8]], bell_terminated: bool) {
         let mut params_iter = params.iter();
         match params_iter.next() {
+            // Title manipulation
             Some([b'0']) => if let Some(title) = params_iter.next() {
                 self.title = Some(title.to_vec().into());
                 self.icon_name = Some(title.to_vec().into());
@@ -290,13 +305,24 @@ impl vte::Perform for State {
             Some([b'1']) => if let Some(icon_name) = params_iter.next() {
                 self.icon_name = Some(icon_name.to_vec().into());
             } else {
-                warn!("OSC 0 with no icon_name param");
+                warn!("OSC 1 with no icon_name param");
             },
             Some([b'2']) => if let Some(title) = params_iter.next() {
                 self.title = Some(title.to_vec().into());
             } else {
-                warn!("OSC 0 with no icon_name param");
+                warn!("OSC 2 with no title param");
             },
+
+            // Working dir
+            Some([b'7']) => if let (Some(host), Some(dir)) = (params_iter.next(), params_iter.next()) {
+                self.working_dir = Some(WorkingDir {
+                    host: host.to_vec().into(),
+                    dir: dir.to_vec().into(),
+                });
+            } else {
+                warn!("OSC 7 with fewer than 2 params");
+            },
+
             _ => warn!("unhandled 'OSC {:?} {}'", params, if bell_terminated {
                 "BEL"
             } else {
