@@ -455,6 +455,10 @@ pub struct ControlCodes {
 #[derive(Clone, Debug)]
 #[non_exhaustive]
 pub enum ControlCode {
+    OSC {
+        params: SmallVec<[SmallVec<[u8; 8]>; 2]>,
+        term: OSCTerm,
+    },
     CSI {
         params: SmallVec<[SmallVec<[u16; 4]>; 2]>,
         intermediates: SmallVec<[u8; 8]>,
@@ -465,6 +469,14 @@ pub enum ControlCode {
         byte: u8,
     },
     __NonExhaustive,
+}
+
+#[derive(Clone, Debug, Default)]
+#[allow(dead_code)]
+pub enum OSCTerm {
+    #[default]
+    St,
+    Bel,
 }
 
 // Assertions proving that we are using no more memory than needed with the
@@ -483,6 +495,16 @@ static_assertions::const_assert!(
 impl AsTermInput for ControlCode {
     fn term_input_into(&self, buf: &mut Vec<u8>) {
         match self {
+            ControlCode::OSC { params, term } => {
+                buf.extend_from_slice(b"\x1b]"); // OSC
+                for (i, param) in params.iter().enumerate() {
+                    if i != 0 {
+                        buf.push(b';');
+                    }
+                    buf.extend_from_slice(param);
+                }
+                term.term_input_into(buf);
+            }
             ControlCode::CSI { params, intermediates, action } => {
                 buf.extend_from_slice(b"\x1b["); // CSI
                 buf.extend_from_slice(intermediates);
@@ -509,6 +531,15 @@ impl AsTermInput for ControlCode {
                 buf.push(*byte);
             }
             _ => {}
+        }
+    }
+}
+
+impl AsTermInput for OSCTerm {
+    fn term_input_into(&self, buf: &mut Vec<u8>) {
+        match self {
+            OSCTerm::St => buf.extend_from_slice(b"\x1b\\"),
+            OSCTerm::Bel => buf.push(b'\x07'),
         }
     }
 }
@@ -1031,6 +1062,18 @@ impl ControlCodes {
             intermediates: smallvec![],
             action: 'r',
         }
+    }
+
+    pub fn set_title_and_icon_name(title: SmallVec<[u8; 8]>) -> ControlCode {
+        ControlCode::OSC { params: smallvec![smallvec![b'0'], title], term: OSCTerm::default() }
+    }
+
+    pub fn set_icon_name(icon_name: SmallVec<[u8; 8]>) -> ControlCode {
+        ControlCode::OSC { params: smallvec![smallvec![b'1'], icon_name], term: OSCTerm::default() }
+    }
+
+    pub fn set_title(title: SmallVec<[u8; 8]>) -> ControlCode {
+        ControlCode::OSC { params: smallvec![smallvec![b'2'], title], term: OSCTerm::default() }
     }
 }
 

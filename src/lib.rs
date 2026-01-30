@@ -12,6 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::{
+    cell::Cell,
+    screen::{SavedCursor, Screen},
+    term::{
+        AsTermInput, BlinkStyle, ControlCodes, FontWeight, FrameStyle, OriginMode, UnderlineStyle,
+    },
+};
+
+use smallvec::SmallVec;
+use tracing::{debug, warn};
+
 mod altscreen;
 mod cell;
 mod line;
@@ -23,16 +34,6 @@ mod term;
 
 #[cfg(feature = "internal-test")]
 pub mod term;
-
-use crate::{
-    cell::Cell,
-    screen::Screen,
-    term::{AsTermInput, BlinkStyle, FontWeight, FrameStyle, OriginMode, UnderlineStyle},
-};
-
-use tracing::{debug, warn};
-
-use crate::screen::SavedCursor;
 
 /// A representation of a terminal.
 pub struct Term {
@@ -144,6 +145,10 @@ struct State {
     /// and alt screens, which is why they are stored here rather than
     /// with the curors themsevles.
     cursor_attrs: term::Attrs,
+    /// The terminal title, as set by `OSC 0` and `OSC 2`.
+    title: Option<SmallVec<[u8; 8]>>,
+    /// The terminal icon name, as set by `OSC 0` and `OSC 1`.
+    icon_name: Option<SmallVec<[u8; 8]>>,
 }
 
 impl std::fmt::Display for State {
@@ -170,6 +175,8 @@ impl State {
             altscreen: Screen::alt(size),
             screen_mode: ScreenMode::Scrollback,
             cursor_attrs: term::Attrs::default(),
+            title: None,
+            icon_name: None,
         }
     }
 
@@ -199,6 +206,27 @@ impl State {
         let codes = term::Attrs::default().transition_to(&self.cursor_attrs);
         for c in codes.into_iter() {
             c.term_input_into(buf);
+        }
+
+        // Restore the title / icon name. Most terminals treat theses as the
+        // same thing these days, but we'll go the extra mile and differentiate
+        // rather than just always sending `OSC 0 ; <title> ST` in case there is
+        // a terminal that actually makes a distinction.
+        match (&self.title, &self.icon_name) {
+            (Some(title), Some(icon_name)) if title == icon_name => {
+                ControlCodes::set_title_and_icon_name(title.clone()).term_input_into(buf)
+            }
+            (Some(title), Some(icon_name)) => {
+                ControlCodes::set_title(title.clone()).term_input_into(buf);
+                ControlCodes::set_icon_name(icon_name.clone()).term_input_into(buf);
+            }
+            (Some(title), None) => {
+                ControlCodes::set_title(title.clone()).term_input_into(buf);
+            }
+            (None, Some(icon_name)) => {
+                ControlCodes::set_icon_name(icon_name.clone()).term_input_into(buf);
+            }
+            (None, None) => {}
         }
     }
 }
@@ -241,8 +269,40 @@ impl vte::Perform for State {
         // TODO: stub
     }
 
-    fn osc_dispatch(&mut self, _params: &[&[u8]], _bell_terminated: bool) {
-        // TODO: stub
+    // OSC commands are of the form
+    // `OSC <p1> ; <p2> ... <pn> <terminator>` where
+    // `OSC` is always `ESC]`, the params are byte sequences seperated by
+    // semicolons, and the terminator is either `BEL` (0x7) or
+    // `ST` (`ESC\`, 0x1b 0x5c). Modern applications use ST for the most
+    // part, but some older applications will send BEL. We should be able
+    // to just ignore the _bell_terminated flag and treat commands the
+    // same regardless of the terminator they have.
+    #[rustfmt::skip]
+    fn osc_dispatch(&mut self, params: &[&[u8]], bell_terminated: bool) {
+        let mut params_iter = params.iter();
+        match params_iter.next() {
+            Some([b'0']) => if let Some(title) = params_iter.next() {
+                self.title = Some(title.to_vec().into());
+                self.icon_name = Some(title.to_vec().into());
+            } else {
+                warn!("OSC 0 with no title param");
+            },
+            Some([b'1']) => if let Some(icon_name) = params_iter.next() {
+                self.icon_name = Some(icon_name.to_vec().into());
+            } else {
+                warn!("OSC 0 with no icon_name param");
+            },
+            Some([b'2']) => if let Some(title) = params_iter.next() {
+                self.title = Some(title.to_vec().into());
+            } else {
+                warn!("OSC 0 with no icon_name param");
+            },
+            _ => warn!("unhandled 'OSC {:?} {}'", params, if bell_terminated {
+                "BEL"
+            } else {
+                "ST"
+            }),
+        }
     }
 
     // Handle escape codes beginning with the CSI indicator ('\x1b[').
@@ -399,6 +459,7 @@ impl vte::Perform for State {
                 let n = param_or(&mut params_iter, 1) as usize;
 
                 let attrs = self.cursor_attrs.clone();
+
                 let screen = self.screen_mut();
                 let width = screen.size.width;
                 let col = screen.cursor.col;
