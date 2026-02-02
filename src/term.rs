@@ -195,6 +195,14 @@ pub struct Attrs {
     pub strikethrough: bool,
     pub framed: Option<FrameStyle>,
     pub overline: bool,
+    // The link this cell points to, if any. Set by OSC 8.
+    pub link_target: Option<LinkTarget>
+}
+
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub struct LinkTarget {
+    pub params: SmallVec<[u8; 8]>,
+    pub url: SmallVec<[u8; 8]>,
 }
 
 #[derive(Debug, Eq, PartialEq, Clone)]
@@ -267,6 +275,12 @@ impl std::fmt::Display for Attrs {
             write!(f, "‾")?;
         }
 
+        if let Some(link_target) = &self.link_target {
+            write!(f, "href({})={}",
+                String::from_utf8_lossy(link_target.params.as_slice()),
+                String::from_utf8_lossy(&link_target.url))?;
+        }
+
         Ok(())
     }
 }
@@ -284,6 +298,7 @@ impl Attrs {
             || self.strikethrough
             || self.framed.is_some()
             || self.overline
+            || self.link_target.is_some()
     }
 
     /// Given another set of attributes, generate the minimal control codes
@@ -315,6 +330,7 @@ impl Attrs {
                 UnderlineStyle::Single => codes.push(controls.underline.clone()),
                 UnderlineStyle::Double => codes.push(controls.double_underline.clone()),
             },
+            (Some(old), Some(new)) if old == new => {},
             (Some(_), Some(style)) => {
                 codes.push(controls.undo_underline.clone());
                 match style {
@@ -337,6 +353,7 @@ impl Attrs {
                 FontWeight::Bold => codes.push(controls.bold.clone()),
                 FontWeight::Faint => codes.push(controls.faint.clone()),
             },
+            (Some(old), Some(new)) if old == new => {},
             (Some(_), Some(style)) => {
                 codes.push(controls.reset_font_weight.clone());
                 match style {
@@ -353,6 +370,7 @@ impl Attrs {
                 BlinkStyle::Slow => codes.push(controls.slow_blink.clone()),
                 BlinkStyle::Rapid => codes.push(controls.rapid_blink.clone()),
             },
+            (Some(old), Some(new)) if old == new => {},
             (Some(_), Some(style)) => {
                 codes.push(controls.undo_blink.clone());
                 match style {
@@ -381,6 +399,7 @@ impl Attrs {
                 FrameStyle::Frame => codes.push(controls.framed.clone()),
                 FrameStyle::Circle => codes.push(controls.encircled.clone()),
             },
+            (Some(old), Some(new)) if old == new => {},
             (Some(_), Some(style)) => {
                 codes.push(controls.undo_framed.clone());
                 match style {
@@ -394,6 +413,17 @@ impl Attrs {
             codes.push(controls.undo_overline.clone());
         } else if !self.overline && next.overline {
             codes.push(controls.overline.clone());
+        }
+
+        match (&self.link_target, &next.link_target) {
+            (None, None) => {},
+            (Some(_), None) => codes.push(controls.end_link.clone()),
+            (None, Some(target)) => codes.push(ControlCodes::start_link(target.params.clone(), target.url.clone())),
+            (Some(old), Some(new)) if old == new => {},
+            (Some(_), Some(new)) => {
+                codes.push(controls.end_link.clone());
+                codes.push(ControlCodes::start_link(new.params.clone(), new.url.clone()));
+            }
         }
 
         ControlCode::fuse_csi(codes)
@@ -450,9 +480,10 @@ pub struct ControlCodes {
     pub unset_scroll_region: ControlCode,
     pub enable_scroll_region_origin_mode: ControlCode,
     pub disable_scroll_region_origin_mode: ControlCode,
+    pub end_link: ControlCode,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ControlCode {
     OSC {
@@ -471,7 +502,7 @@ pub enum ControlCode {
     __NonExhaustive,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[allow(dead_code)]
 pub enum OSCTerm {
     #[default]
@@ -854,6 +885,10 @@ pub fn control_codes() -> &'static ControlCodes {
             intermediates: smallvec![b'?'],
             action: 'l',
         },
+        end_link: ControlCode::OSC {
+            params: smallvec![smallvec![b'8']],
+            term: OSCTerm::default(),
+        },
     })
 }
 
@@ -1078,6 +1113,17 @@ impl ControlCodes {
 
     pub fn set_working_dir(host: SmallVec<[u8; 8]>, dir: SmallVec<[u8; 8]>) -> ControlCode {
         ControlCode::OSC { params: smallvec![smallvec![b'7'], host, dir], term: OSCTerm::default() }
+    }
+
+    pub fn start_link(params: SmallVec<[u8; 8]>, url: SmallVec<[u8; 8]>) -> ControlCode {
+        ControlCode::OSC {
+            params: smallvec![
+                smallvec![b'8'],
+                params,
+                url,
+            ],
+            term: OSCTerm::default(),
+        }
     }
 }
 

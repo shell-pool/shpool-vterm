@@ -16,7 +16,7 @@ use crate::{
     cell::Cell,
     screen::{SavedCursor, Screen},
     term::{
-        AsTermInput, BlinkStyle, ControlCodes, FontWeight, FrameStyle, OriginMode, UnderlineStyle,
+        AsTermInput, BlinkStyle, ControlCodes, FontWeight, FrameStyle, OriginMode, UnderlineStyle, LinkTarget,
     },
 };
 
@@ -322,6 +322,22 @@ impl vte::Perform for State {
             } else {
                 warn!("OSC 7 with fewer than 2 params");
             },
+
+            // Links. Depending on params, OSC 8 both starts and ends links.
+            Some([b'8']) => {
+                if let (Some(params), Some(url)) = (params_iter.next(), params_iter.next()) {
+                    if params.is_empty() && url.is_empty() {
+                        self.cursor_attrs.link_target = None;
+                    } else {
+                        self.cursor_attrs.link_target = Some(LinkTarget {
+                            params: SmallVec::from_slice(params),
+                            url: SmallVec::from_slice(url),
+                        });
+                    }
+                } else {
+                    self.cursor_attrs.link_target = None;
+                }
+            }
 
             _ => warn!("unhandled 'OSC {:?} {}'", params, if bell_terminated {
                 "BEL"

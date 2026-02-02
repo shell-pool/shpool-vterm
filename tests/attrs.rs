@@ -3,6 +3,102 @@
 mod support;
 
 use shpool_vterm::{term, ContentRegion};
+use smallvec::smallvec;
+
+frag! {
+    link_basic { scrollback_lines: 10, width: 20, height: 10 }
+    <= term::ControlCodes::start_link(smallvec![], smallvec![b'h', b't', b't', b'p', b':', b'/', b'/', b'a', b'.', b'c']),
+       term::Raw::from("link"),
+       term::control_codes().end_link
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::ControlCodes::start_link(smallvec![], smallvec![b'h', b't', b't', b'p', b':', b'/', b'/', b'a', b'.', b'c']),
+            term::Raw::from("link"),
+            term::control_codes().end_link,
+            term::ControlCodes::cursor_position(1, 5),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    link_wrap { scrollback_lines: 10, width: 5, height: 10 }
+    <= term::ControlCodes::start_link(smallvec![], smallvec![b'h', b't', b't', b'p']),
+       term::Raw::from("abcdef")
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::ControlCodes::start_link(smallvec![], smallvec![b'h', b't', b't', b'p']),
+            term::Raw::from("abcde"),
+            term::control_codes().end_link,
+            term::Crlf::default(),
+            term::ControlCodes::start_link(smallvec![], smallvec![b'h', b't', b't', b'p']),
+            term::Raw::from("f"),
+            term::control_codes().end_link,
+            term::ControlCodes::cursor_position(2, 2),
+            term::control_codes().clear_attrs,
+            term::ControlCodes::start_link(smallvec![], smallvec![b'h', b't', b't', b'p'])
+}
+
+frag! {
+    link_jump { scrollback_lines: 10, width: 20, height: 10 }
+    <= term::ControlCodes::start_link(smallvec![], smallvec![b'h', b't', b't', b'p']),
+       term::Raw::from("a"),
+       term::ControlCodes::cursor_position(2, 2),
+       term::Raw::from("b")
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::ControlCodes::start_link(smallvec![], smallvec![b'h', b't', b't', b'p']),
+            term::Raw::from("a"),
+            term::control_codes().end_link,
+            term::Crlf::default(),
+            term::Raw::from(" "),
+            term::ControlCodes::start_link(smallvec![], smallvec![b'h', b't', b't', b'p']),
+            term::Raw::from("b"),
+            term::control_codes().end_link,
+            term::ControlCodes::cursor_position(2, 3),
+            term::control_codes().clear_attrs,
+            term::ControlCodes::start_link(smallvec![], smallvec![b'h', b't', b't', b'p'])
+}
+
+frag! {
+    redundant_bold { scrollback_lines: 100, width: 100, height: 100 }
+    <= term::control_codes().bold,
+       term::Raw::from("a"),
+       term::control_codes().bold,
+       term::Raw::from("b")
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::control_codes().bold,
+            term::Raw::from("ab"),
+            term::control_codes().reset_font_weight,
+            term::ControlCodes::cursor_position(1, 3),
+            term::control_codes().clear_attrs,
+            term::control_codes().bold
+}
+
+frag! {
+    redundant_link { scrollback_lines: 10, width: 20, height: 10 }
+    <= term::ControlCodes::start_link(smallvec![], smallvec![b'h', b't', b't', b'p']),
+       term::Raw::from("a"),
+       term::ControlCodes::start_link(smallvec![], smallvec![b'h', b't', b't', b'p']),
+       term::Raw::from("b")
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::ControlCodes::start_link(smallvec![], smallvec![b'h', b't', b't', b'p']),
+            term::Raw::from("ab"),
+            term::control_codes().end_link,
+            term::ControlCodes::cursor_position(1, 3),
+            term::control_codes().clear_attrs,
+            term::ControlCodes::start_link(smallvec![], smallvec![b'h', b't', b't', b'p'])
+}
 
 frag! {
     underline { scrollback_lines: 100, width: 100, height: 100 }
