@@ -1125,6 +1125,29 @@ impl ControlCodes {
             term: OSCTerm::default(),
         }
     }
+
+    pub fn set_color_indices<I>(indices: I) -> ControlCode
+    where
+        I: IntoIterator<Item = (usize, SmallVec<[u8; 8]>)>,
+    {
+        let mut params = smallvec![smallvec![b'4']];
+        for (idx, spec) in indices {
+            params.push(SmallVec::from(format!("{idx}").as_bytes()));
+            params.push(spec);
+        }
+        ControlCode::OSC { params, term: OSCTerm::default() }
+    }
+
+    pub fn reset_color_indices<I>(indices: I) -> ControlCode
+    where
+        I: IntoIterator<Item = usize>,
+    {
+        let mut params = smallvec![smallvec![b'1', b'0', b'4']];
+        for idx in indices {
+            params.push(SmallVec::from(format!("{idx}").as_bytes()));
+        }
+        ControlCode::OSC { params, term: OSCTerm::default() }
+    }
 }
 
 /// Represents a foreground or background color for cells.

@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeMap;
+
 use crate::{
     cell::Cell,
     screen::{SavedCursor, Screen},
@@ -152,6 +154,10 @@ struct State {
     /// The terminal working directory (some terminal emulators use this
     /// to know what directory to start new shells in).
     working_dir: Option<WorkingDir>,
+    /// A table mapping color index to a particular color spec.
+    /// This is set by OSC 4. We use a tree for deterministic output
+    /// to make testing easier. A hash would work just as well.
+    palette_overrides: BTreeMap<usize, Vec<u8>>,
 }
 
 struct WorkingDir {
@@ -186,6 +192,7 @@ impl State {
             title: None,
             icon_name: None,
             working_dir: None,
+            palette_overrides: BTreeMap::new(),
         }
     }
 
@@ -241,6 +248,14 @@ impl State {
         if let Some(working_dir) = &self.working_dir {
             ControlCodes::set_working_dir(working_dir.host.clone(), working_dir.dir.clone())
                 .term_input_into(buf);
+        }
+
+        if !self.palette_overrides.is_empty() {
+            ControlCodes::set_color_indices(
+                self.palette_overrides.iter().map(|(idx, color_spec)| {
+                    (*idx, SmallVec::from(color_spec.as_slice()))
+                })
+            ).term_input_into(buf);
         }
     }
 }
@@ -313,6 +328,37 @@ impl vte::Perform for State {
                 warn!("OSC 2 with no title param");
             },
 
+            // Color Palette
+            Some([b'4']) => while let (Some(idx), Some(color_spec)) = (params_iter.next(), params_iter.next()) {
+                if *color_spec == [b'?'] {
+                    // If the program is querying for a color, we just ignore
+                    // that control code. The real terminal is responsible for
+                    // responding.
+                    continue;
+                }
+
+                match std::str::from_utf8(idx) {
+                    Ok(s) => match s.parse::<usize>() {
+                        Ok(i) => {
+                            self.palette_overrides.insert(i, color_spec.to_vec());
+                        },
+                        Err(e) => warn!("OSC 4: idx is an invalid number '{s}': {e}"),
+                    },
+                    Err(e) => warn!("OSC 4: invalid idx '{idx:?}': {e}"),
+                }
+            },
+            Some([b'1', b'0', b'4']) => while let Some(idx) = params_iter.next() {
+                match std::str::from_utf8(idx) {
+                    Ok(s) => match s.parse::<usize>() {
+                        Ok(i) => {
+                            self.palette_overrides.remove(&i);
+                        },
+                        Err(e) => warn!("OSC 104: idx is an invalid number '{s}': {e}"),
+                    },
+                    Err(e) => warn!("OSC 104: invalid idx '{idx:?}': {e}"),
+                }
+            },
+
             // Working dir
             Some([b'7']) => if let (Some(host), Some(dir)) = (params_iter.next(), params_iter.next()) {
                 self.working_dir = Some(WorkingDir {
@@ -324,19 +370,17 @@ impl vte::Perform for State {
             },
 
             // Links. Depending on params, OSC 8 both starts and ends links.
-            Some([b'8']) => {
-                if let (Some(params), Some(url)) = (params_iter.next(), params_iter.next()) {
-                    if params.is_empty() && url.is_empty() {
-                        self.cursor_attrs.link_target = None;
-                    } else {
-                        self.cursor_attrs.link_target = Some(LinkTarget {
-                            params: SmallVec::from_slice(params),
-                            url: SmallVec::from_slice(url),
-                        });
-                    }
-                } else {
+            Some([b'8']) => if let (Some(params), Some(url)) = (params_iter.next(), params_iter.next()) {
+                if params.is_empty() && url.is_empty() {
                     self.cursor_attrs.link_target = None;
+                } else {
+                    self.cursor_attrs.link_target = Some(LinkTarget {
+                        params: SmallVec::from_slice(params),
+                        url: SmallVec::from_slice(url),
+                    });
                 }
+            } else {
+                self.cursor_attrs.link_target = None;
             }
 
             _ => warn!("unhandled 'OSC {:?} {}'", params, if bell_terminated {

@@ -66,3 +66,62 @@ frag! {
             term::control_codes().clear_attrs,
             term::ControlCodes::set_working_dir(smallvec![b'h', b'o', b's', b't'], smallvec![b'/', b't', b'm', b'p'])
 }
+
+frag! {
+    osc_set_color { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::ControlCodes::set_color_indices(std::iter::once((1, smallvec![b'r', b'e', b'd'])))
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs,
+            term::ControlCodes::set_color_indices(std::iter::once((1, smallvec![b'r', b'e', b'd'])))
+}
+
+frag! {
+    osc_reset_color { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::ControlCodes::set_color_indices(std::iter::once((1, smallvec![b'r', b'e', b'd']))),
+       term::ControlCodes::reset_color_indices(std::iter::once(1))
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    osc_set_multiple_colors { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::ControlCodes::set_color_indices(vec![
+           (1, smallvec![b'r', b'e', b'd']),
+           (2, smallvec![b'g', b'r', b'e', b'e', b'n']),
+       ])
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs,
+            term::ControlCodes::set_color_indices(vec![
+                (1, smallvec![b'r', b'e', b'd']),
+                (2, smallvec![b'g', b'r', b'e', b'e', b'n']),
+            ])
+}
+
+frag! {
+    osc_reset_multiple_colors { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::ControlCodes::set_color_indices(vec![
+           (1, smallvec![b'r', b'e', b'd']),
+           (2, smallvec![b'g', b'r', b'e', b'e', b'n']),
+           (3, smallvec![b'b', b'l', b'u', b'e']),
+       ]),
+       term::ControlCodes::reset_color_indices(vec![1, 3])
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs,
+            term::ControlCodes::set_color_indices(std::iter::once((2, smallvec![b'g', b'r', b'e', b'e', b'n'])))
+}
