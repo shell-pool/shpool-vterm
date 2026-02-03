@@ -18,7 +18,8 @@ use crate::{
     cell::Cell,
     screen::{SavedCursor, Screen},
     term::{
-        AsTermInput, BlinkStyle, ControlCodes, FontWeight, FrameStyle, OriginMode, UnderlineStyle, LinkTarget,
+        AsTermInput, BlinkStyle, ControlCodes, FontWeight, FrameStyle, LinkTarget, OriginMode,
+        UnderlineStyle,
     },
 };
 
@@ -158,6 +159,9 @@ struct State {
     /// This is set by OSC 4. We use a tree for deterministic output
     /// to make testing easier. A hash would work just as well.
     palette_overrides: BTreeMap<usize, Vec<u8>>,
+    /// Color overrides for things like foreground and background.
+    /// These slots extend from OSC 10 to OSC 19.
+    functional_colors: [Option<Vec<u8>>; 10],
 }
 
 struct WorkingDir {
@@ -193,6 +197,7 @@ impl State {
             icon_name: None,
             working_dir: None,
             palette_overrides: BTreeMap::new(),
+            functional_colors: [const { None }; 10],
         }
     }
 
@@ -252,10 +257,54 @@ impl State {
 
         if !self.palette_overrides.is_empty() {
             ControlCodes::set_color_indices(
-                self.palette_overrides.iter().map(|(idx, color_spec)| {
-                    (*idx, SmallVec::from(color_spec.as_slice()))
-                })
-            ).term_input_into(buf);
+                self.palette_overrides
+                    .iter()
+                    .map(|(idx, color_spec)| (*idx, SmallVec::from(color_spec.as_slice()))),
+            )
+            .term_input_into(buf);
+        }
+
+        // Generate fused functional color commands from any runs in the
+        // functional colors table.
+        let mut functional_color_idx = 0;
+        while functional_color_idx < self.functional_colors.len() {
+            if let Some(color_spec) = &self.functional_colors[functional_color_idx] {
+                let start_idx = functional_color_idx;
+                let mut color_specs = vec![color_spec.as_slice()];
+
+                functional_color_idx += 1;
+                while functional_color_idx < self.functional_colors.len() {
+                    if let Some(s) = &self.functional_colors[functional_color_idx] {
+                        color_specs.push(s.as_slice());
+                    } else {
+                        break;
+                    }
+                    functional_color_idx += 1;
+                }
+
+                ControlCodes::set_functional_color(start_idx, color_specs).term_input_into(buf);
+            }
+
+            functional_color_idx += 1;
+        }
+    }
+
+    /// Set a run within the functional colors table starting at the given
+    /// index. This implements OSC 10 through OSC 19.
+    fn set_functional_color<'a, I>(&mut self, mut idx: usize, mut params_iter: I)
+    where
+        I: Iterator<Item = &'a &'a [u8]>,
+    {
+        while let Some(color_spec) = params_iter.next() {
+            if idx >= self.functional_colors.len() {
+                return;
+            }
+
+            if *color_spec != [b'?'] {
+                self.functional_colors[idx] = Some(Vec::from(*color_spec));
+            }
+
+            idx += 1;
         }
     }
 }
@@ -381,7 +430,11 @@ impl vte::Perform for State {
                 }
             } else {
                 self.cursor_attrs.link_target = None;
-            }
+            },
+
+            // Functional colors (foreground, background and whatnot).
+            Some([b'1', x]) if b'0' <= *x && *x <= b'9' =>
+                self.set_functional_color((*x - b'0') as usize, params_iter),
 
             _ => warn!("unhandled 'OSC {:?} {}'", params, if bell_terminated {
                 "BEL"

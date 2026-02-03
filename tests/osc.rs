@@ -125,3 +125,64 @@ frag! {
             term::control_codes().clear_attrs,
             term::ControlCodes::set_color_indices(std::iter::once((2, smallvec![b'g', b'r', b'e', b'e', b'n'])))
 }
+
+frag! {
+    osc_functional_colors { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::ControlCodes::set_functional_color(0, vec![b"red".as_slice(), b"blue".as_slice()])
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs,
+            term::ControlCodes::set_functional_color(0, vec![b"red".as_slice(), b"blue".as_slice()])
+}
+
+frag! {
+    osc_functional_colors_gaps { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::ControlCodes::set_functional_color(0, vec![b"red".as_slice()]),
+       term::ControlCodes::set_functional_color(2, vec![b"blue".as_slice()])
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs,
+            term::ControlCodes::set_functional_color(0, vec![b"red".as_slice()]),
+            term::ControlCodes::set_functional_color(2, vec![b"blue".as_slice()])
+}
+
+frag! {
+    osc_functional_colors_empty_param { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::ControlCodes::set_functional_color(0, vec![b"".as_slice()])
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs,
+            term::ControlCodes::set_functional_color(0, vec![b"".as_slice()])
+}
+
+frag! {
+    osc_functional_colors_overflow { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::ControlCodes::set_functional_color(9, vec![b"red".as_slice(), b"blue".as_slice()])
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs,
+            term::ControlCodes::set_functional_color(9, vec![b"red".as_slice()])
+}
+
+frag! {
+    osc_functional_colors_query { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::ControlCodes::set_functional_color(0, vec![b"?".as_slice()])
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs
+}
