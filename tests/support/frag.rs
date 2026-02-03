@@ -104,8 +104,22 @@ impl vte::Perform for PrettyTerm {
         // TODO: stub
     }
 
-    fn osc_dispatch(&mut self, _params: &[&[u8]], _bell_terminated: bool) {
-        // TODO: stub
+    fn osc_dispatch(&mut self, params: &[&[u8]], bell_terminated: bool) {
+        let code = term::ControlCode::OSC {
+            params: {
+                let mut param_v = smallvec![];
+                for p in params.iter() {
+                    let mut inner_v = smallvec![];
+                    for i in p.iter() {
+                        inner_v.push(*i);
+                    }
+                    param_v.push(inner_v);
+                }
+                param_v
+            },
+            term: if bell_terminated { term::OSCTerm::Bel } else { term::OSCTerm::St },
+        };
+        write!(self.into, "<{}>", code).unwrap();
     }
 
     // Handle escape codes beginning with the CSI indicator ('\x1b[').
