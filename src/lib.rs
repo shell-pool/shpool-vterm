@@ -436,6 +436,11 @@ impl vte::Perform for State {
             Some([b'1', x]) if b'0' <= *x && *x <= b'9' =>
                 self.set_functional_color((*x - b'0') as usize, params_iter),
 
+            Some([b'5', b'2']) => debug!("ignoring OSC 52 (clipboard)"),
+            Some([b'9']) => debug!("ignoring OSC 9 (desktop notification)"),
+            Some([b'7', b'7', b'7']) => debug!("ignoring OSC 777"),
+            Some([b'1', b'3', b'3']) => debug!("ignoring OSC 133 (iterm2 marks)"),
+
             _ => warn!("unhandled 'OSC {:?} {}'", params, if bell_terminated {
                 "BEL"
             } else {
