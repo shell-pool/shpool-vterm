@@ -486,6 +486,8 @@ pub struct ControlCodes {
     pub enable_scroll_region_origin_mode: ControlCode,
     pub disable_scroll_region_origin_mode: ControlCode,
     pub end_link: ControlCode,
+    pub show_cursor: ControlCode,
+    pub hide_cursor: ControlCode,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -891,6 +893,16 @@ pub fn control_codes() -> &'static ControlCodes {
             action: 'l',
         },
         end_link: ControlCode::OSC { params: smallvec![smallvec![b'8']], term: OSCTerm::default() },
+        show_cursor: ControlCode::CSI {
+            params: smallvec![smallvec![25]],
+            intermediates: smallvec![b'?'],
+            action: 'h',
+        },
+        hide_cursor: ControlCode::CSI {
+            params: smallvec![smallvec![25]],
+            intermediates: smallvec![b'?'],
+            action: 'l',
+        },
     })
 }
 

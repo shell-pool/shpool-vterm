@@ -162,6 +162,9 @@ struct State {
     /// Color overrides for things like foreground and background.
     /// These slots extend from OSC 10 to OSC 19.
     functional_colors: [Option<Vec<u8>>; 10],
+    /// Tracks if the cursor is currently hidden. Controlled
+    /// via the `CSI ? 25 {h,l}` codes.
+    cursor_hidden: bool,
 }
 
 struct WorkingDir {
@@ -198,6 +201,7 @@ impl State {
             working_dir: None,
             palette_overrides: BTreeMap::new(),
             functional_colors: [const { None }; 10],
+            cursor_hidden: false,
         }
     }
 
@@ -221,9 +225,11 @@ impl State {
             ScreenMode::Alt => self.altscreen.dump_contents_into(buf, dump_region),
         }
 
+        let controls = term::control_codes();
+
         // restore cursor attributes (the screen will have already restored our
         // position).
-        term::control_codes().clear_attrs.term_input_into(buf);
+        controls.clear_attrs.term_input_into(buf);
         let codes = term::Attrs::default().transition_to(&self.cursor_attrs);
         for c in codes.into_iter() {
             c.term_input_into(buf);
@@ -262,6 +268,10 @@ impl State {
                     .map(|(idx, color_spec)| (*idx, SmallVec::from(color_spec.as_slice()))),
             )
             .term_input_into(buf);
+        }
+
+        if self.cursor_hidden {
+            controls.hide_cursor.term_input_into(buf);
         }
 
         // Generate fused functional color commands from any runs in the
@@ -628,7 +638,7 @@ impl vte::Perform for State {
             'h' => match intermediates {
                 [b'?'] => while let Some(code) = params_iter.next() {
                     match code {
-                        // enable alt scree
+                        // enable alt screen
                         [1049] => {
                             // The alt-screen gets reset upon entry, so we need to
                             // clobber it here.
@@ -637,6 +647,9 @@ impl vte::Perform for State {
                         }
                         // enable origin mode
                         [6] => self.screen_mut().set_origin_mode(OriginMode::ScrollRegion),
+                        // show cursor
+                        [25] => self.cursor_hidden = false,
+
                         _ => {
                             warn!(
                                 "Unhandled CSI l command: CSI {:?} {:?} l",
@@ -659,6 +672,8 @@ impl vte::Perform for State {
                         [1049] => self.screen_mode = ScreenMode::Scrollback,
                         // disable origin mode
                         [6] => self.screen_mut().set_origin_mode(OriginMode::Term),
+                        // hide cursor
+                        [25] => self.cursor_hidden = true,
                         _ => {
                             warn!(
                                 "Unhandled CSI l command: CSI {:?} {:?} l",

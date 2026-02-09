@@ -418,3 +418,41 @@ frag! {
             term::ControlCodes::cursor_position(1, 7),
             term::control_codes().clear_attrs
 }
+
+frag! {
+    hide_cursor { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::control_codes().hide_cursor
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs,
+            term::control_codes().hide_cursor
+}
+
+frag! {
+    show_cursor { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::control_codes().hide_cursor,
+       term::control_codes().show_cursor
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    hide_cursor_with_text { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::control_codes().hide_cursor,
+       term::Raw::from("abc")
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::Raw::from("abc"),
+            term::ControlCodes::cursor_position(1, 4),
+            term::control_codes().clear_attrs,
+            term::control_codes().hide_cursor
+}
