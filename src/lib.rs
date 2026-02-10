@@ -24,7 +24,7 @@ use crate::{
 };
 
 use smallvec::SmallVec;
-use tracing::{debug, warn};
+use tracing::{debug, warn, trace};
 
 mod altscreen;
 mod cell;
@@ -168,6 +168,8 @@ struct State {
     /// Tracks application keypad mode state. Controlled via
     /// `CSI ? 1 {h,l}`.
     application_keypad_mode_enabled: bool,
+    /// Tracks paste mode. Controlled via `CSI ? 2004 {h,l}`.
+    in_paste_mode: bool,
 }
 
 struct WorkingDir {
@@ -206,6 +208,7 @@ impl State {
             functional_colors: [const { None }; 10],
             cursor_hidden: false,
             application_keypad_mode_enabled: false,
+            in_paste_mode: false,
         }
     }
 
@@ -280,6 +283,9 @@ impl State {
         if self.application_keypad_mode_enabled {
             controls.enable_application_keypad_mode.term_input_into(buf);
         }
+        if self.in_paste_mode {
+            controls.enable_paste_mode.term_input_into(buf);
+        }
 
         // Generate fused functional color commands from any runs in the
         // functional colors table.
@@ -352,16 +358,17 @@ impl vte::Perform for State {
         }
     }
 
-    fn hook(&mut self, _params: &vte::Params, _intermediates: &[u8], _ignore: bool, _action: char) {
-        // TODO: stub
+    fn hook(&mut self, _params: &vte::Params, intermediates: &[u8], ignore: bool, action: char) {
+        debug!("unhandled hook{}: {intermediates:?} {action}",
+            if ignore { " (ignored)" } else { "" });
     }
 
-    fn put(&mut self, _byte: u8) {
-        // TODO: stub
+    fn put(&mut self, byte: u8) {
+        trace!("unhandled put: {byte}");
     }
 
     fn unhook(&mut self) {
-        // TODO: stub
+        debug!("unhandled unhook");
     }
 
     // OSC commands are of the form
@@ -645,14 +652,9 @@ impl vte::Perform for State {
             'h' => match intermediates {
                 [b'?'] => while let Some(code) = params_iter.next() {
                     match code {
-                        // enable application keypad mode
                         [1] => self.application_keypad_mode_enabled = true,
-
-                        // enable origin mode
                         [6] => self.screen_mut().set_origin_mode(OriginMode::ScrollRegion),
-                        // show cursor
                         [25] => self.cursor_hidden = false,
-
                         // enable alt screen
                         [1049] => {
                             // The alt-screen gets reset upon entry, so we need to
@@ -660,6 +662,7 @@ impl vte::Perform for State {
                             self.altscreen = Screen::alt(self.altscreen.size);
                             self.screen_mode = ScreenMode::Alt;
                         }
+                        [2004] => self.in_paste_mode = true,
 
                         _ => {
                             warn!(
@@ -680,14 +683,11 @@ impl vte::Perform for State {
             'l' => match intermediates {
                 [b'?'] => while let Some(code) = params_iter.next() {
                     match code {
-                        // disable application keypad mode
                         [1] => self.application_keypad_mode_enabled = false,
-                        // disable origin mode
                         [6] => self.screen_mut().set_origin_mode(OriginMode::Term),
-                        // hide cursor
                         [25] => self.cursor_hidden = true,
-                        // enable regular scrollback mode
                         [1049] => self.screen_mode = ScreenMode::Scrollback,
+                        [2004] => self.in_paste_mode = false,
                         _ => {
                             warn!(
                                 "Unhandled CSI l command: CSI {:?} {:?} l",
@@ -905,7 +905,6 @@ impl vte::Perform for State {
     }
 
     fn terminated(&self) -> bool {
-        // TODO: stub
         false
     }
 }
