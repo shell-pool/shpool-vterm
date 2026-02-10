@@ -155,10 +155,6 @@ impl Scrollback {
     }
 
     pub fn reflow(&mut self, new_width: usize) {
-        // TODO: this needs to move the<Icursor and saved cursor to have them
-        // point to the same cell that they did at the start of the reflow
-        // process. We currently don't do that, so reflow is broken.
-
         let mut new_scrollback = VecDeque::with_capacity(self.buf.len());
         let mut logical_line = VecDeque::new();
         while let Some(grid_line) = self.buf.pop_back() {
@@ -205,7 +201,6 @@ impl Scrollback {
 
                 if line.cells.len() != 0 {
                     new_scrollback.push_front(line);
-                    line = Line::new();
                 }
             }
         }

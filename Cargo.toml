@@ -2,6 +2,15 @@
 name = "shpool-vterm"
 version = "0.1.0"
 edition = "2021"
+repository = "https://github.com/shell-pool/shpool-vterm"
+readme = "README.md"
+authors = ["Ethan Pailes <pailes@google.com>"]
+description = '''
+An in-memory terminal to support session restore in shpool.
+'''
+license = "Apache-2.0 AND MIT"
+keywords = ["terminal", "tty", "shpool", "tmux", "shell"]
+rust-version = "1.74"
 
 [dependencies]
 itoa = "1" # fast int -> string conversion

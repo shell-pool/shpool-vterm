@@ -205,7 +205,7 @@ impl State {
             icon_name: None,
             working_dir: None,
             palette_overrides: BTreeMap::new(),
-            functional_colors: [const { None }; 10],
+            functional_colors: [NONE_VEC; 10],
             cursor_hidden: false,
             application_keypad_mode_enabled: false,
             in_paste_mode: false,
@@ -920,3 +920,5 @@ fn maybe_param<'params>(params: &mut vte::ParamsIter<'params>) -> Option<u16> {
         _ => None,
     }
 }
+
+const NONE_VEC: Option<Vec<u8>> = None;
