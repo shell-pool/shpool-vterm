@@ -324,3 +324,18 @@ frag! {
             term::control_codes().enable_scroll_region_origin_mode,
             term::control_codes().clear_attrs
 }
+
+frag! {
+    erase_line_raw { scrollback_lines: 100, width: 10, height: 10 }
+    <= term::Raw::from("ABCDE"),
+       term::ControlCodes::cursor_backwards(2), // at D (3)
+       term::Raw::from("\x1b[2K"), // Raw CSI 2 K (erase entire line)
+       term::Raw::from("Z")
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::Raw::from("   Z"),
+            term::ControlCodes::cursor_position(1, 5),
+            term::control_codes().clear_attrs
+}
