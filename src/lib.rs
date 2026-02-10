@@ -165,6 +165,9 @@ struct State {
     /// Tracks if the cursor is currently hidden. Controlled
     /// via the `CSI ? 25 {h,l}` codes.
     cursor_hidden: bool,
+    /// Tracks application keypad mode state. Controlled via
+    /// `CSI ? 1 {h,l}`.
+    application_keypad_mode_enabled: bool,
 }
 
 struct WorkingDir {
@@ -202,6 +205,7 @@ impl State {
             palette_overrides: BTreeMap::new(),
             functional_colors: [const { None }; 10],
             cursor_hidden: false,
+            application_keypad_mode_enabled: false,
         }
     }
 
@@ -272,6 +276,9 @@ impl State {
 
         if self.cursor_hidden {
             controls.hide_cursor.term_input_into(buf);
+        }
+        if self.application_keypad_mode_enabled {
+            controls.enable_application_keypad_mode.term_input_into(buf);
         }
 
         // Generate fused functional color commands from any runs in the
@@ -638,6 +645,14 @@ impl vte::Perform for State {
             'h' => match intermediates {
                 [b'?'] => while let Some(code) = params_iter.next() {
                     match code {
+                        // enable application keypad mode
+                        [1] => self.application_keypad_mode_enabled = true,
+
+                        // enable origin mode
+                        [6] => self.screen_mut().set_origin_mode(OriginMode::ScrollRegion),
+                        // show cursor
+                        [25] => self.cursor_hidden = false,
+
                         // enable alt screen
                         [1049] => {
                             // The alt-screen gets reset upon entry, so we need to
@@ -645,10 +660,6 @@ impl vte::Perform for State {
                             self.altscreen = Screen::alt(self.altscreen.size);
                             self.screen_mode = ScreenMode::Alt;
                         }
-                        // enable origin mode
-                        [6] => self.screen_mut().set_origin_mode(OriginMode::ScrollRegion),
-                        // show cursor
-                        [25] => self.cursor_hidden = false,
 
                         _ => {
                             warn!(
@@ -669,11 +680,14 @@ impl vte::Perform for State {
             'l' => match intermediates {
                 [b'?'] => while let Some(code) = params_iter.next() {
                     match code {
-                        [1049] => self.screen_mode = ScreenMode::Scrollback,
+                        // disable application keypad mode
+                        [1] => self.application_keypad_mode_enabled = false,
                         // disable origin mode
                         [6] => self.screen_mut().set_origin_mode(OriginMode::Term),
                         // hide cursor
                         [25] => self.cursor_hidden = true,
+                        // enable regular scrollback mode
+                        [1049] => self.screen_mode = ScreenMode::Scrollback,
                         _ => {
                             warn!(
                                 "Unhandled CSI l command: CSI {:?} {:?} l",

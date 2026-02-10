@@ -456,3 +456,27 @@ frag! {
             term::control_codes().clear_attrs,
             term::control_codes().hide_cursor
 }
+
+frag! {
+    application_keypad_mode { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::control_codes().enable_application_keypad_mode
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs,
+            term::control_codes().enable_application_keypad_mode
+}
+
+frag! {
+    disable_application_keypad_mode { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::control_codes().enable_application_keypad_mode,
+       term::control_codes().disable_application_keypad_mode
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs
+}

@@ -488,6 +488,8 @@ pub struct ControlCodes {
     pub end_link: ControlCode,
     pub show_cursor: ControlCode,
     pub hide_cursor: ControlCode,
+    pub enable_application_keypad_mode: ControlCode,
+    pub disable_application_keypad_mode: ControlCode,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -900,6 +902,16 @@ pub fn control_codes() -> &'static ControlCodes {
         },
         hide_cursor: ControlCode::CSI {
             params: smallvec![smallvec![25]],
+            intermediates: smallvec![b'?'],
+            action: 'l',
+        },
+        enable_application_keypad_mode: ControlCode::CSI {
+            params: smallvec![smallvec![1]],
+            intermediates: smallvec![b'?'],
+            action: 'h',
+        },
+        disable_application_keypad_mode: ControlCode::CSI {
+            params: smallvec![smallvec![1]],
             intermediates: smallvec![b'?'],
             action: 'l',
         },
