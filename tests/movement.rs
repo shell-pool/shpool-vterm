@@ -506,3 +506,71 @@ frag! {
             term::ControlCodes::cursor_position(3, 3),
             term::control_codes().clear_attrs
 }
+
+frag! {
+    tab_stop_default { scrollback_lines: 100, width: 20, height: 10 }
+    <= term::Raw::from("A\tB")
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::Raw::from("A"),
+            term::Raw::from("       "), // 7 spaces
+            term::Raw::from("B"),
+            term::ControlCodes::cursor_position(1, 10),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    tab_stop_clamp { scrollback_lines: 100, width: 10, height: 10 }
+    <= term::Raw::from("A\tB\tC")
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::Raw::from("A"),
+            term::Raw::from("       "), // 7 spaces
+            term::Raw::from("B"),
+            term::Raw::from("C"),
+            term::ControlCodes::cursor_position(1, 11),
+            term::control_codes().clear_attrs
+}
+
+#[test]
+fn tab_stop_resize() {
+    use shpool_vterm::term::AsTermInput;
+
+    let mut term = shpool_vterm::Term::new(100, shpool_vterm::Size { width: 10, height: 10 });
+    term.process(b"A\tB");
+
+    let mut expected = vec![];
+    term::control_codes().clear_attrs.term_input_into(&mut expected);
+    term::ControlCodes::cursor_position(1, 1).term_input_into(&mut expected);
+    term::control_codes().clear_screen.term_input_into(&mut expected);
+    term::Raw::from("A").term_input_into(&mut expected);
+    term::Raw::from("       ").term_input_into(&mut expected);
+    term::Raw::from("B").term_input_into(&mut expected);
+    term::ControlCodes::cursor_position(1, 10).term_input_into(&mut expected);
+    term::control_codes().clear_attrs.term_input_into(&mut expected);
+
+    assert_eq!(term.contents(ContentRegion::All), expected);
+
+    term.resize(shpool_vterm::Size { width: 20, height: 10 });
+
+    term.process(b"C\tD");
+
+    let mut expected2 = vec![];
+    term::control_codes().clear_attrs.term_input_into(&mut expected2);
+    term::ControlCodes::cursor_position(1, 1).term_input_into(&mut expected2);
+    term::control_codes().clear_screen.term_input_into(&mut expected2);
+    term::Raw::from("A").term_input_into(&mut expected2);
+    term::Raw::from("       ").term_input_into(&mut expected2);
+    term::Raw::from("B").term_input_into(&mut expected2);
+    term::Raw::from("C").term_input_into(&mut expected2);
+    term::Raw::from("      ").term_input_into(&mut expected2);
+    term::Raw::from("D").term_input_into(&mut expected2);
+    term::ControlCodes::cursor_position(1, 18).term_input_into(&mut expected2);
+    term::control_codes().clear_attrs.term_input_into(&mut expected2);
+
+    assert_eq!(term.contents(ContentRegion::All), expected2);
+}

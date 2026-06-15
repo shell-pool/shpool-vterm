@@ -23,8 +23,9 @@ use crate::{
     },
 };
 
+use bitvec::{bitvec, vec::BitVec};
 use smallvec::SmallVec;
-use tracing::{debug, warn, trace};
+use tracing::{debug, trace, warn};
 
 mod altscreen;
 mod cell;
@@ -71,8 +72,7 @@ impl Term {
             self.set_scrollback_lines(size.height);
         }
 
-        self.state.scrollback.resize(size);
-        self.state.altscreen.resize(size);
+        self.state.resize(size);
     }
 
     /// Get the current number of lines of stored scrollback.
@@ -170,6 +170,10 @@ struct State {
     application_keypad_mode_enabled: bool,
     /// Tracks paste mode. Controlled via `CSI ? 2004 {h,l}`.
     in_paste_mode: bool,
+    /// Tab stop columns. By default, these are spaced 8 cols apart
+    /// starting at col 9, but they can be directly manipulated by certain
+    /// control codes as well.
+    tabstops: BitVec,
 }
 
 struct WorkingDir {
@@ -196,7 +200,7 @@ impl std::fmt::Display for State {
 
 impl State {
     fn new(scrollback_lines: usize, size: Size) -> Self {
-        State {
+        let mut st = State {
             scrollback: Screen::scrollback(scrollback_lines, size),
             altscreen: Screen::alt(size),
             screen_mode: ScreenMode::Scrollback,
@@ -209,7 +213,10 @@ impl State {
             cursor_hidden: false,
             application_keypad_mode_enabled: false,
             in_paste_mode: false,
-        }
+            tabstops: bitvec![0; size.width],
+        };
+        st.fill_tabstops(0, size.width);
+        st
     }
 
     fn screen_mut(&mut self) -> &mut Screen {
@@ -223,6 +230,28 @@ impl State {
         match self.screen_mode {
             ScreenMode::Scrollback => &self.scrollback,
             ScreenMode::Alt => &self.altscreen,
+        }
+    }
+
+    fn resize(&mut self, size: Size) {
+        let orig_len = self.tabstops.len();
+        self.tabstops.resize(size.width, false);
+        if size.width > orig_len {
+            self.fill_tabstops(orig_len, size.width);
+        }
+
+        self.scrollback.resize(size);
+        self.altscreen.resize(size);
+    }
+
+    /// Fill in the default tabstops within the given range.
+    fn fill_tabstops(&mut self, start: usize, end: usize) {
+        assert!(end <= self.tabstops.len());
+
+        for i in start..end {
+            if i > 0 && i % 8 == 0 {
+                self.tabstops.set(i, true);
+            }
         }
     }
 
@@ -352,6 +381,17 @@ impl vte::Perform for State {
         match byte {
             b'\n' => self.screen_mut().cursor.row += 1,
             b'\r' => self.screen_mut().cursor.col = 0,
+            b'\t' => {
+                let mut col = self.screen().cursor.col;
+                col += 1;
+                while col < self.tabstops.len() && !self.tabstops.get(col).is_some_and(|b| *b) {
+                    col += 1;
+                }
+
+                let screen = self.screen_mut();
+                screen.cursor.col = col;
+                screen.clamp();
+            }
             _ => {
                 warn!("execute: unhandled byte {}", byte);
             }
@@ -359,8 +399,10 @@ impl vte::Perform for State {
     }
 
     fn hook(&mut self, _params: &vte::Params, intermediates: &[u8], ignore: bool, action: char) {
-        debug!("unhandled hook{}: {intermediates:?} {action}",
-            if ignore { " (ignored)" } else { "" });
+        debug!(
+            "unhandled hook{}: {intermediates:?} {action}",
+            if ignore { " (ignored)" } else { "" }
+        );
     }
 
     fn put(&mut self, byte: u8) {

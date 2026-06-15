@@ -52,7 +52,7 @@ impl Screen {
 
         Screen {
             grid: Grid::Scrollback(Scrollback::new(scrollback_lines)),
-            size: size,
+            size,
             cursor: Pos { row: 0, col: 0 },
             saved_cursor: SavedCursor::new(Pos { row: 0, col: 0 }),
         }
@@ -62,7 +62,7 @@ impl Screen {
     pub fn alt(size: crate::Size) -> Self {
         Screen {
             grid: Grid::AltScreen(AltScreen::new(size)),
-            size: size,
+            size,
             cursor: Pos { row: 0, col: 0 },
             saved_cursor: SavedCursor::new(Pos { row: 0, col: 0 }),
         }
