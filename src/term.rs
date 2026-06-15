@@ -492,6 +492,9 @@ pub struct ControlCodes {
     pub disable_application_keypad_mode: ControlCode,
     pub enable_paste_mode: ControlCode,
     pub disable_paste_mode: ControlCode,
+    pub horizontal_tab_set: ControlCode,
+    pub soft_reset: ControlCode,
+    pub hard_reset: ControlCode,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -927,6 +930,13 @@ pub fn control_codes() -> &'static ControlCodes {
             intermediates: smallvec![b'?'],
             action: 'l',
         },
+        horizontal_tab_set: ControlCode::ESC { intermediates: smallvec![], byte: b'H' },
+        soft_reset: ControlCode::CSI {
+            params: smallvec![],
+            intermediates: smallvec![b'!'],
+            action: 'p',
+        },
+        hard_reset: ControlCode::ESC { intermediates: smallvec![], byte: b'c' },
     })
 }
 
@@ -1192,6 +1202,28 @@ impl ControlCodes {
             params.push(SmallVec::from(spec));
         }
         ControlCode::OSC { params, term: OSCTerm::default() }
+    }
+
+    pub fn tab_clear(code: Option<u16>) -> ControlCode {
+        let params = match code {
+            Some(c) => {
+                let inner: SmallVec<[u16; 4]> = smallvec![c];
+                smallvec![inner]
+            }
+            None => smallvec![],
+        };
+        ControlCode::CSI { params, intermediates: smallvec![], action: 'g' }
+    }
+
+    pub fn cursor_tab_control(code: Option<u16>) -> ControlCode {
+        let params = match code {
+            Some(c) => {
+                let inner: SmallVec<[u16; 4]> = smallvec![c];
+                smallvec![inner]
+            }
+            None => smallvec![],
+        };
+        ControlCode::CSI { params, intermediates: smallvec![], action: 'W' }
     }
 }
 

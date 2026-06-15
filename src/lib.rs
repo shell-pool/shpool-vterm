@@ -647,6 +647,24 @@ impl vte::Perform for State {
                 let n = param_or(&mut params_iter, 1) as usize;
                 self.screen_mut().scroll_up(n as usize);
             }
+            // CTC (Cusor Tabulation Control)
+            'W' => {
+                let code = param_or(&mut params_iter, 0) as usize;
+                match code {
+                    0 => {
+                        let col = self.screen().cursor.col;
+                        self.tabstops.set(col, true);
+                    },
+                    2 => {
+                        let col = self.screen().cursor.col;
+                        self.tabstops.set(col, false);
+                    }
+                    5 => {
+                        self.tabstops.fill(false);
+                    }
+                    _ => warn!("unhandled 'CSI {code:?} W'"),
+                }
+            }
             // SD (Scroll Down)
             'T' => {
                 let n = param_or(&mut params_iter, 1) as usize;
@@ -689,6 +707,21 @@ impl vte::Perform for State {
                 let screen = self.screen_mut();
                 screen.cursor = screen.saved_cursor.pos;
                 screen.clamp();
+            }
+
+            // TBC (Tabulation Clear, CSI 3 g, CSI 0 g, CSI g)
+            'g' => {
+                let code = param_or(&mut params_iter, 0) as usize;
+                match code {
+                    0 => {
+                        let col = self.screen().cursor.col;
+                        self.tabstops.set(col, false);
+                    },
+                    3 => {
+                        self.tabstops.fill(false);
+                    }
+                    _ => warn!("unhandled 'CSI {code:?} g'"),
+                }
             }
 
             'h' => match intermediates {
@@ -892,6 +925,21 @@ impl vte::Perform for State {
                     _ => warn!("unhandled 'CSI {param:?} m'"),
                 }
             }
+            'p' => match intermediates {
+                // DECSTR (DEC Soft Terminal Reset)
+                [b'!'] => {
+                    self.tabstops.fill(false);
+                    let width = self.screen().size.width;
+                    self.fill_tabstops(0, width);
+
+                    warn!("DECSTR only partially handled");
+                }
+                _ => warn!(
+                    "Unhandled CSI l command: CSI {:?} {:?} l",
+                    intermediates,
+                    params.iter().collect::<Vec<&[u16]>>()
+                ),
+            },
             // DECSTBM (Set Scroll Region)
             'r' => {
                 let top = maybe_param(&mut params_iter);
@@ -940,6 +988,19 @@ impl vte::Perform for State {
                 let screen = self.screen_mut();
                 screen.cursor = screen.saved_cursor.pos;
                 self.cursor_attrs = screen.saved_cursor.attrs.clone();
+            }
+            // HTS (Horizontal Tabluation Set, ESC H)
+            ([], b'H') => {
+                let col = self.screen().cursor.col;
+                self.tabstops.set(col, true);
+            }
+            // RIS (Reset to Initial State)
+            ([], b'c') => {
+                self.tabstops.fill(false);
+                let width = self.screen().size.width;
+                self.fill_tabstops(0, width);
+
+                warn!("RIS only partially handled");
             }
 
             _ => warn!("unhandled ESC seq ({intermediates:?}, {byte})"),
