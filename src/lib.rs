@@ -255,7 +255,55 @@ impl State {
         }
     }
 
+    /// Dump the current tabstop state into the given control code
+    /// vector. This is assumed to be right after a reset, so it will
+    /// elide setting tabstops in the default position. The cursor
+    /// MUST be in position (1, 1) when this routine is called.
+    fn dump_tabstops(&self, buf: &mut Vec<u8>) {
+        let controls = term::control_codes();
+        if self.tabstops.len() > 8 && self.tabstops.not_any() {
+            // If there are no tabstops, we just clobber them all as
+            // a special case to help speed things up a bit.
+            ControlCodes::tab_clear(Some(3)).term_input_into(buf);
+            return;
+        }
+
+        let mut codes = vec![];
+        for i in 0..self.tabstops.len() {
+            let bit = self.tabstops.get(i).is_some_and(|b| *b);
+            let i: u16 = match i.try_into() {
+                Ok(i) => i,
+                Err(e) => {
+                    warn!("generating tabstop codes: index out of bounds: {:?}", e);
+                    return;
+                }
+            };
+            if i > 0 && i % 8 == 0 {
+                // this is set by default
+                if !bit {
+                    codes.push(ControlCodes::cursor_position(1, i + 1));
+                    codes.push(ControlCodes::tab_clear(None));
+                }
+            } else {
+                // this is unset by default
+                if bit {
+                    codes.push(ControlCodes::cursor_position(1, i + 1));
+                    codes.push(controls.horizontal_tab_set.clone());
+                }
+            }
+        }
+
+        if !codes.is_empty() {
+            for code in codes.into_iter() {
+                code.term_input_into(buf);
+            }
+            ControlCodes::cursor_position(1, 1).term_input_into(buf);
+        }
+    }
+
     fn dump_contents_into(&self, buf: &mut Vec<u8>, dump_region: ContentRegion) {
+        self.dump_tabstops(buf);
+
         match self.screen_mode {
             ScreenMode::Scrollback => self.scrollback.dump_contents_into(buf, dump_region),
             ScreenMode::Alt => self.altscreen.dump_contents_into(buf, dump_region),
