@@ -506,3 +506,30 @@ frag! {
             term::ControlCodes::cursor_position(3, 3),
             term::control_codes().clear_attrs
 }
+
+frag! {
+    backspace { scrollback_lines: 100, width: 10, height: 10 }
+    <= term::Raw::from("A"),
+       term::Raw::from("\x08"),
+       term::Raw::from("B")
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::Raw::from("B"),
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    backspace_saturate { scrollback_lines: 100, width: 10, height: 10 }
+    <= term::Raw::from("\x08"),
+       term::Raw::from("A")
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::Raw::from("A"),
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().clear_attrs
+}

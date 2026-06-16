@@ -440,6 +440,12 @@ impl vte::Perform for State {
                 screen.cursor.col = col;
                 screen.clamp();
             }
+            b'\x08' => {
+                // backspace
+                let screen = self.screen_mut();
+                screen.cursor.col = screen.cursor.col.saturating_sub(1);
+                screen.clamp();
+            }
             _ => {
                 warn!("execute: unhandled byte {}", byte);
             }
