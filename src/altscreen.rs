@@ -78,13 +78,41 @@ impl AltScreen {
             // to disable scrolling, we should instead leave the cursor
             // where it is in this case.
             if cursor.row >= size.height {
-                self.buf.pop_front();
-                self.buf.push_back(Line::new());
+                self.scroll_down(1);
             }
         }
         cursor.clamp_to(size);
 
         Ok(cursor)
+    }
+
+    pub fn scroll_down(&mut self, rows: usize) {
+        match self.scroll_region {
+            ScrollRegion::TrackSize => {
+                for _ in 0..rows {
+                    self.buf.pop_front();
+                    self.buf.push_back(Line::new());
+                }
+                return;
+            }
+            ScrollRegion::Window { top, bottom } => {
+                if rows > bottom - top {
+                    // If we have to scroll past the whole scroll region, just
+                    // clobber everything.
+                    for i in top..bottom {
+                        self.buf[i] = Line::new();
+                    }
+                } else {
+                    let to_shuffle = (bottom - top) - rows;
+                    for i in 0..to_shuffle {
+                        self.buf[top + i] = self.buf[top + rows + i].clone();
+                    }
+                    for i in 0..rows {
+                        self.buf[top + to_shuffle + i] = Line::new();
+                    }
+                }
+            }
+        }
     }
 
     pub fn clamp_to_scroll_region(&self, cursor: &mut Pos, size: &crate::Size) {

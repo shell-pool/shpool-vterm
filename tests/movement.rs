@@ -533,3 +533,90 @@ frag! {
             term::ControlCodes::cursor_position(1, 2),
             term::control_codes().clear_attrs
 }
+
+frag! {
+    scrollback_scroll_region_on_newline { scrollback_lines: 100, width: 5, height: 5 }
+    <= term::Raw::from("0"), term::Crlf::default(),
+       term::Raw::from("1"), term::Crlf::default(),
+       term::Raw::from("2"), term::Crlf::default(),
+       term::Raw::from("3"), term::Crlf::default(),
+       term::Raw::from("4"),
+       term::ControlCodes::set_scroll_region(2, 4),
+       term::ControlCodes::cursor_position(4, 1),
+       term::Raw::from("\n"),
+       term::Raw::from("X")
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::Raw::from("0"),
+            term::Crlf::default(),
+            term::Raw::from("2"),
+            term::Crlf::default(),
+            term::Raw::from("3"),
+            term::Crlf::default(),
+            term::Raw::from("X"),
+            term::Crlf::default(),
+            term::Raw::from("4"),
+            term::ControlCodes::set_scroll_region(2, 4),
+            term::ControlCodes::cursor_position(4, 2),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    scrollback_newline_below_scroll_region { scrollback_lines: 100, width: 5, height: 5 }
+    <= term::Raw::from("0"), term::Crlf::default(),
+       term::Raw::from("1"), term::Crlf::default(),
+       term::Raw::from("2"), term::Crlf::default(),
+       term::Raw::from("3"), term::Crlf::default(),
+       term::Raw::from("4"),
+       term::ControlCodes::set_scroll_region(2, 4),
+       term::ControlCodes::cursor_position(5, 1),
+       term::Raw::from("\n"),
+       term::Raw::from("X")
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::Raw::from("0"),
+            term::Crlf::default(),
+            term::Raw::from("1"),
+            term::Crlf::default(),
+            term::Raw::from("2"),
+            term::Crlf::default(),
+            term::Raw::from("3"),
+            term::Crlf::default(),
+            term::Raw::from("X"),
+            term::ControlCodes::set_scroll_region(2, 4),
+            term::ControlCodes::cursor_position(5, 2),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    scrollback_newline_above_scroll_region { scrollback_lines: 100, width: 5, height: 5 }
+    <= term::Raw::from("0"), term::Crlf::default(),
+       term::Raw::from("1"), term::Crlf::default(),
+       term::Raw::from("2"), term::Crlf::default(),
+       term::Raw::from("3"), term::Crlf::default(),
+       term::Raw::from("4"),
+       term::ControlCodes::set_scroll_region(2, 4),
+       term::ControlCodes::cursor_position(1, 1),
+       term::Raw::from("\n"),
+       term::Raw::from("X")
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::Raw::from("0"),
+            term::Crlf::default(),
+            term::Raw::from("X"),
+            term::Crlf::default(),
+            term::Raw::from("2"),
+            term::Crlf::default(),
+            term::Raw::from("3"),
+            term::Crlf::default(),
+            term::Raw::from("4"),
+            term::ControlCodes::set_scroll_region(2, 4),
+            term::ControlCodes::cursor_position(2, 2),
+            term::control_codes().clear_attrs
+}

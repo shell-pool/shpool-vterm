@@ -28,13 +28,13 @@ frag! {
 
 frag! {
     scrollback_insert_lines_scroll_region { scrollback_lines: 100, width: 5, height: 5 }
-    <= term::ControlCodes::set_scroll_region(2, 4),
-       term::ControlCodes::cursor_position(1, 1),
+    <= term::ControlCodes::cursor_position(1, 1),
        term::Raw::from("11"), term::Crlf::default(),
        term::Raw::from("22"), term::Crlf::default(),
        term::Raw::from("33"), term::Crlf::default(),
        term::Raw::from("44"), term::Crlf::default(),
        term::Raw::from("55"),
+       term::ControlCodes::set_scroll_region(2, 4),
        term::ControlCodes::cursor_position(3, 1),
        term::ControlCodes::insert_lines(1)
     => ContentRegion::All =>
@@ -100,12 +100,12 @@ frag! {
 
 frag! {
     scrollback_insert_outside_scroll_region { scrollback_lines: 100, width: 5, height: 5 }
-    <= term::ControlCodes::set_scroll_region(2, 4),
-       term::Raw::from("11"), term::Crlf::default(),
+    <= term::Raw::from("11"), term::Crlf::default(),
        term::Raw::from("22"), term::Crlf::default(),
        term::Raw::from("33"), term::Crlf::default(),
        term::Raw::from("44"), term::Crlf::default(),
        term::Raw::from("55"),
+       term::ControlCodes::set_scroll_region(2, 4),
        term::ControlCodes::cursor_position(1, 1),
        term::ControlCodes::insert_lines(1)
     => ContentRegion::All =>
@@ -145,13 +145,13 @@ frag! {
 
 frag! {
     scrollback_insert_with_scroll_region_reassembly { scrollback_lines: 100, width: 5, height: 6 }
-    <= term::ControlCodes::set_scroll_region(2, 5),
-       term::Raw::from("11"), term::Crlf::default(),
+    <= term::Raw::from("11"), term::Crlf::default(),
        term::Raw::from("22"), term::Crlf::default(),
        term::Raw::from("33"), term::Crlf::default(),
        term::Raw::from("44"), term::Crlf::default(),
        term::Raw::from("55"), term::Crlf::default(),
        term::Raw::from("66"),
+       term::ControlCodes::set_scroll_region(2, 5),
        term::ControlCodes::cursor_position(3, 1),
        term::ControlCodes::insert_lines(1)
     => ContentRegion::All =>
@@ -197,13 +197,13 @@ frag! {
 
 frag! {
     scrollback_delete_lines_scroll_region { scrollback_lines: 100, width: 5, height: 5 }
-    <= term::ControlCodes::set_scroll_region(2, 4),
-       term::ControlCodes::cursor_position(1, 1),
+    <= term::ControlCodes::cursor_position(1, 1),
        term::Raw::from("11"), term::Crlf::default(),
        term::Raw::from("22"), term::Crlf::default(),
        term::Raw::from("33"), term::Crlf::default(),
        term::Raw::from("44"), term::Crlf::default(),
        term::Raw::from("55"),
+       term::ControlCodes::set_scroll_region(2, 4),
        term::ControlCodes::cursor_position(3, 1),
        term::ControlCodes::delete_lines(1)
     => ContentRegion::All =>
@@ -245,12 +245,12 @@ frag! {
 
 frag! {
     scrollback_delete_outside_scroll_region { scrollback_lines: 100, width: 5, height: 5 }
-    <= term::ControlCodes::set_scroll_region(2, 4),
-       term::Raw::from("11"), term::Crlf::default(),
+    <= term::Raw::from("11"), term::Crlf::default(),
        term::Raw::from("22"), term::Crlf::default(),
        term::Raw::from("33"), term::Crlf::default(),
        term::Raw::from("44"), term::Crlf::default(),
        term::Raw::from("55"),
+       term::ControlCodes::set_scroll_region(2, 4),
        term::ControlCodes::cursor_position(1, 1),
        term::ControlCodes::delete_lines(1)
     => ContentRegion::All =>

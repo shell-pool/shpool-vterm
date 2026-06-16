@@ -19,7 +19,7 @@ use crate::{
     screen::{SavedCursor, Screen},
     term::{
         AsTermInput, BlinkStyle, ControlCodes, FontWeight, FrameStyle, LinkTarget, OriginMode,
-        UnderlineStyle,
+        Region, UnderlineStyle,
     },
 };
 
@@ -417,6 +417,7 @@ enum ScreenMode {
 
 impl vte::Perform for State {
     fn print(&mut self, c: char) {
+        trace!("print: {}", c);
         let attrs = self.cursor_attrs.clone();
         let screen = self.screen_mut();
         screen.snap_to_bottom();
@@ -426,8 +427,24 @@ impl vte::Perform for State {
     }
 
     fn execute(&mut self, byte: u8) {
+        trace!("execute: byte {}", byte);
         match byte {
-            b'\n' => self.screen_mut().cursor.row += 1,
+            b'\n' => {
+                let screen = self.screen_mut();
+                let (scroll_top, scroll_bottom) =
+                    screen.scroll_region(false).as_region(&screen.size).row_bounds();
+                let within_scroll =
+                    scroll_top <= screen.cursor.row && screen.cursor.row < scroll_bottom;
+                screen.cursor.row += 1;
+                if within_scroll {
+                    if screen.cursor.row >= scroll_bottom {
+                        screen.scroll_down(1);
+                        screen.cursor.row -= 1;
+                    }
+                } else {
+                    screen.clamp();
+                }
+            }
             b'\r' => self.screen_mut().cursor.col = 0,
             b'\t' => {
                 let mut col = self.screen().cursor.col;
@@ -444,7 +461,6 @@ impl vte::Perform for State {
                 // backspace
                 let screen = self.screen_mut();
                 screen.cursor.col = screen.cursor.col.saturating_sub(1);
-                screen.clamp();
             }
             // bell, ignore
             b'\x07' => {}
@@ -479,6 +495,8 @@ impl vte::Perform for State {
     // same regardless of the terminator they have.
     #[rustfmt::skip]
     fn osc_dispatch(&mut self, params: &[&[u8]], bell_terminated: bool) {
+        trace!("osc_dispatch: {:?}", params);
+
         let mut params_iter = params.iter();
         match params_iter.next() {
             // Title manipulation
@@ -589,6 +607,10 @@ impl vte::Perform for State {
         if ignore {
             warn!("malformed CSI seq");
             return;
+        }
+        if tracing::enabled!(tracing::Level::TRACE) {
+            trace!("csi_dispatch: intermediates={:?} params={:?} {}",
+                intermediates, params.iter().collect::<Vec<_>>(), action);
         }
 
         let mut params_iter = params.iter();
@@ -1031,6 +1053,7 @@ impl vte::Perform for State {
             warn!("malformed ESC seq");
             return;
         }
+        trace!("esc_dispatch: {}", byte);
 
         match (intermediates, byte) {
             // save cursor (ESC 7)

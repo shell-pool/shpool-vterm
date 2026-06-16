@@ -25,7 +25,7 @@ use crate::{
 use std::collections::VecDeque;
 
 use anyhow::{anyhow, Context};
-use tracing::error;
+use tracing::{error, warn};
 
 // A scrollback stores the termianal state for the main screen.
 // Alt screen state is stored seperately.
@@ -208,6 +208,7 @@ impl Scrollback {
         self.buf = new_scrollback;
     }
 
+    // Resolve a logical offset in the visible grid to an actual Line.
     pub fn get_line_mut(&mut self, size: crate::Size, row: usize) -> Option<&mut Line> {
         if let Some(i) = self.idx_from_bottom(size, row) {
             Some(&mut self.buf[i])
@@ -382,8 +383,46 @@ impl Scrollback {
         }
     }
 
-    pub fn scroll_down(&mut self, n: usize) {
-        self.scroll_offset = self.scroll_offset.saturating_sub(n);
+    pub fn scroll_down(&mut self, size: &crate::Size, n: usize) {
+        match self.scroll_region {
+            ScrollRegion::TrackSize => {
+                for _ in 0..n.saturating_sub(self.scroll_offset) {
+                    self.add_line(Line::new());
+                }
+                self.scroll_offset = self.scroll_offset.saturating_sub(n);
+            }
+            ScrollRegion::Window { top, bottom } => {
+                if bottom - top < n {
+                    // just clobber everything
+                    for i in top..bottom {
+                        if let Some(line) = self.get_line_mut(*size, i) {
+                            line.erase(line::Section::Whole);
+                        }
+                    }
+                } else {
+                    let to_shuffle = (bottom - top) - n;
+                    for i in 0..to_shuffle {
+                        let from_line = self.get_line(*size, top + n + i).cloned();
+                        if let Some(to_line) = self.get_line_mut(*size, top + i) {
+                            if let Some(from_line) = from_line {
+                                *to_line = from_line;
+                            } else {
+                                to_line.erase(line::Section::Whole);
+                            }
+                        } else {
+                            warn!("scrollback::scroll_down: out of bounds shuffle");
+                        }
+                    }
+                    for i in 0..n {
+                        if let Some(line) = self.get_line_mut(*size, top + to_shuffle + i) {
+                            line.erase(line::Section::Whole);
+                        } else {
+                            warn!("scrollback::scroll_down: out of bounds backfill");
+                        }
+                    }
+                }
+            }
+        }
     }
 
     pub fn insert_lines(&mut self, cursor: &Pos, size: &crate::Size, n: usize) {

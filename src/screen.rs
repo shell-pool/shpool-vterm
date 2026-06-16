@@ -231,10 +231,23 @@ impl Screen {
         }
     }
 
+    // Scroll the screen down by the given number of rows, adding blank lines
+    // to the bottom if needed. The cursor position does not change.
     pub fn scroll_down(&mut self, n: usize) {
         match &mut self.grid {
-            Grid::Scrollback(s) => s.scroll_down(n),
-            _ => {}
+            Grid::Scrollback(s) => s.scroll_down(&self.size, n),
+            Grid::AltScreen(alt) => alt.scroll_down(n),
+        }
+    }
+
+    pub fn scroll_region(&self, by_origin_mode: bool) -> ScrollRegion {
+        if by_origin_mode {
+            match self.grid.origin_mode() {
+                OriginMode::Term => ScrollRegion::TrackSize,
+                OriginMode::ScrollRegion => self.grid.scroll_region().clone(),
+            }
+        } else {
+            self.grid.scroll_region().clone()
         }
     }
 
