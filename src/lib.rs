@@ -446,6 +446,8 @@ impl vte::Perform for State {
                 screen.cursor.col = screen.cursor.col.saturating_sub(1);
                 screen.clamp();
             }
+            // bell, ignore
+            b'\x07' => {}
             _ => {
                 warn!("execute: unhandled byte {}", byte);
             }
@@ -560,6 +562,7 @@ impl vte::Perform for State {
             Some([b'9']) => debug!("ignoring OSC 9 (desktop notification)"),
             Some([b'7', b'7', b'7']) => debug!("ignoring OSC 777"),
             Some([b'1', b'3', b'3']) => debug!("ignoring OSC 133 (iterm2 marks)"),
+            Some([b'3', b'0', b'0', b'8']) => debug!("ignoring OSC 3008 (systemd context signaling)"),
 
             _ => warn!("unhandled 'OSC {:?} {}'", params, if bell_terminated {
                 "BEL"
@@ -1056,6 +1059,9 @@ impl vte::Perform for State {
 
                 warn!("RIS only partially handled");
             }
+            // OSC terminators that get sent to the esc handler as well,
+            // we can ignore them.
+            ([], 92) => {}
 
             _ => warn!("unhandled ESC seq ({intermediates:?}, {byte})"),
         }
