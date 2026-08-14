@@ -28,13 +28,15 @@ use std::sync::OnceLock;
 // might be a good place to start (look into the terminfo-lean crate for
 // better licencing).
 
-/// A position within the terminal. Generally, this refers to a grid
-/// mode view of the terminal, not the underlying logical lines mode
-/// that we actually store the data in.
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub struct Pos {
-    pub row: usize,
-    pub col: usize,
+test_pub! {
+    /// A position within the terminal. Generally, this refers to a grid
+    /// mode view of the terminal, not the underlying logical lines mode
+    /// that we actually store the data in.
+    #[derive(Debug, Clone, Copy, Eq, PartialEq)]
+    struct Pos {
+        pub row: usize,
+        pub col: usize,
+    }
 }
 
 impl Pos {
@@ -62,11 +64,13 @@ impl Pos {
     }
 }
 
-pub trait Region {
-    /// [low, high) bounds on valid rows for this region.
-    fn row_bounds(&self) -> (usize, usize);
-    /// [low, high) bounds on valid cols for this region.
-    fn col_bounds(&self) -> (usize, usize);
+test_pub! {
+    trait Region {
+        /// [low, high) bounds on valid rows for this region.
+        fn row_bounds(&self) -> (usize, usize);
+        /// [low, high) bounds on valid cols for this region.
+        fn col_bounds(&self) -> (usize, usize);
+    }
 }
 
 impl Region for crate::Size {
@@ -87,18 +91,20 @@ impl Region for &crate::Size {
     }
 }
 
-#[derive(Debug, Eq, PartialEq, Clone, Default)]
-pub enum ScrollRegion {
-    #[default]
-    TrackSize,
-    Window {
-        // The start of the scroll region (inclusive, zero indexed).
-        top: usize,
-        // The end of the scroll region (exclusive, zero indexed). We use
-        // a closed open range so this is 1 higher than the actual bottom
-        // line included in the scroll region window.
-        bottom: usize,
-    },
+test_pub! {
+    #[derive(Debug, Eq, PartialEq, Clone, Default)]
+    enum ScrollRegion {
+        #[default]
+        TrackSize,
+        Window {
+            // The start of the scroll region (inclusive, zero indexed).
+            top: usize,
+            // The end of the scroll region (exclusive, zero indexed). We use
+            // a closed open range so this is 1 higher than the actual bottom
+            // line included in the scroll region window.
+            bottom: usize,
+        },
+    }
 }
 
 impl ScrollRegion {
@@ -133,33 +139,39 @@ impl AsTermInput for ScrollRegion {
     }
 }
 
-/// OriginMode indicates the origin position for the terminal's
-/// coordinate system. OriginMode::Term is the "normal" behavior
-/// for the terminal. (1, 1) refers to the upper leftmost cell in
-/// the terminal's visible window. In OriginMode::ScrollRegion,
-/// (1, 1) referrs to the upper leftmost cell in the currently
-/// configured scoll region, if there is one, and the upper leftmost
-/// cell in the terminal overall if there is no current scroll region.
-///
-/// This construct is often referred to as the "DECOM bit."
-#[derive(Debug, Eq, PartialEq, Clone, Default, Copy)]
-pub enum OriginMode {
-    /// (physical_row, physical_col) = (logical_row, logical_col)
-    #[default]
-    Term,
-    /// (physical_row, physical_col) =
-    ///     (logical_row + (top_margin - 1), logical_col)
-    ScrollRegion,
+test_pub! {
+    /// OriginMode indicates the origin position for the terminal's
+    /// coordinate system. OriginMode::Term is the "normal" behavior
+    /// for the terminal. (1, 1) refers to the upper leftmost cell in
+    /// the terminal's visible window. In OriginMode::ScrollRegion,
+    /// (1, 1) referrs to the upper leftmost cell in the currently
+    /// configured scoll region, if there is one, and the upper leftmost
+    /// cell in the terminal overall if there is no current scroll region.
+    ///
+    /// This construct is often referred to as the "DECOM bit."
+    #[derive(Debug, Eq, PartialEq, Clone, Default, Copy)]
+    enum OriginMode {
+        /// (physical_row, physical_col) = (logical_row, logical_col)
+        #[default]
+        Term,
+        /// (physical_row, physical_col) =
+        ///     (logical_row + (top_margin - 1), logical_col)
+        ScrollRegion,
+    }
 }
 
-pub trait AsTermInput {
-    fn term_input_into(&self, buf: &mut Vec<u8>);
+test_pub! {
+    trait AsTermInput {
+        fn term_input_into(&self, buf: &mut Vec<u8>);
+    }
 }
 
-#[derive(Debug)]
-#[must_use = "this struct does nothing unless you call term_input_into"]
-pub struct Raw {
-    inner: Vec<u8>,
+test_pub! {
+    #[derive(Debug)]
+    #[must_use = "this struct does nothing unless you call term_input_into"]
+    struct Raw {
+        inner: Vec<u8>,
+    }
 }
 
 #[allow(dead_code)]
@@ -181,52 +193,64 @@ impl AsTermInput for Raw {
     }
 }
 
-#[derive(Default, Debug, Eq, PartialEq, Clone)]
-#[must_use = "this struct does nothing unless you call term_input_into"]
-pub struct Attrs {
-    pub fgcolor: Color,
-    pub bgcolor: Color,
-    pub font_weight: Option<FontWeight>,
-    pub italic: bool,
-    pub underline: Option<UnderlineStyle>,
-    pub inverse: bool,
-    pub blink: Option<BlinkStyle>,
-    pub conceal: bool,
-    pub strikethrough: bool,
-    pub framed: Option<FrameStyle>,
-    pub overline: bool,
-    // The link this cell points to, if any. Set by OSC 8.
-    pub link_target: Option<LinkTarget>,
+test_pub! {
+    #[derive(Default, Debug, Eq, PartialEq, Clone)]
+    #[must_use = "this struct does nothing unless you call term_input_into"]
+    struct Attrs {
+        pub fgcolor: Color,
+        pub bgcolor: Color,
+        pub font_weight: Option<FontWeight>,
+        pub italic: bool,
+        pub underline: Option<UnderlineStyle>,
+        pub inverse: bool,
+        pub blink: Option<BlinkStyle>,
+        pub conceal: bool,
+        pub strikethrough: bool,
+        pub framed: Option<FrameStyle>,
+        pub overline: bool,
+        // The link this cell points to, if any. Set by OSC 8.
+        pub link_target: Option<LinkTarget>,
+    }
 }
 
-#[derive(Debug, Eq, PartialEq, Clone)]
-pub struct LinkTarget {
-    pub params: SmallVec<[u8; 8]>,
-    pub url: SmallVec<[u8; 8]>,
+test_pub! {
+    #[derive(Debug, Eq, PartialEq, Clone)]
+    struct LinkTarget {
+        pub params: SmallVec<[u8; 8]>,
+        pub url: SmallVec<[u8; 8]>,
+    }
 }
 
-#[derive(Debug, Eq, PartialEq, Clone)]
-pub enum UnderlineStyle {
-    Single,
-    Double,
+test_pub! {
+    #[derive(Debug, Eq, PartialEq, Clone)]
+    enum UnderlineStyle {
+        Single,
+        Double,
+    }
 }
 
-#[derive(Debug, Eq, PartialEq, Clone)]
-pub enum FontWeight {
-    Bold,
-    Faint,
+test_pub! {
+    #[derive(Debug, Eq, PartialEq, Clone)]
+    enum FontWeight {
+        Bold,
+        Faint,
+    }
 }
 
-#[derive(Debug, Eq, PartialEq, Clone)]
-pub enum BlinkStyle {
-    Slow,
-    Rapid,
+test_pub! {
+    #[derive(Debug, Eq, PartialEq, Clone)]
+    enum BlinkStyle {
+        Slow,
+        Rapid,
+    }
 }
 
-#[derive(Debug, Eq, PartialEq, Clone)]
-pub enum FrameStyle {
-    Frame,
-    Circle,
+test_pub! {
+    #[derive(Debug, Eq, PartialEq, Clone)]
+    enum FrameStyle {
+        Frame,
+        Circle,
+    }
 }
 
 impl std::fmt::Display for Attrs {
@@ -435,96 +459,102 @@ impl Attrs {
     }
 }
 
-// A dictionary of standard control codes. Access codes via the
-// control_codes() function. Most are constant struct members.
-// Codes with dynamic params are generated on the fly via methods.
-#[allow(dead_code)]
-pub struct ControlCodes {
-    pub clear_screen: ControlCode,
-    pub clear_attrs: ControlCode,
-    pub fgcolor_default: ControlCode,
-    pub bgcolor_default: ControlCode,
-    pub underline: ControlCode,
-    pub double_underline: ControlCode,
-    pub undo_underline: ControlCode,
-    pub bold: ControlCode,
-    pub faint: ControlCode,
-    pub reset_font_weight: ControlCode,
-    pub italic: ControlCode,
-    pub undo_italic: ControlCode,
-    pub inverse: ControlCode,
-    pub undo_inverse: ControlCode,
-    pub slow_blink: ControlCode,
-    pub rapid_blink: ControlCode,
-    pub undo_blink: ControlCode,
-    pub conceal: ControlCode,
-    pub undo_conceal: ControlCode,
-    pub strikethrough: ControlCode,
-    pub undo_strikethrough: ControlCode,
-    pub framed: ControlCode,
-    pub encircled: ControlCode,
-    pub undo_framed: ControlCode,
-    pub overline: ControlCode,
-    pub undo_overline: ControlCode,
-    pub save_cursor_position: ControlCode,
-    pub restore_cursor_position: ControlCode,
-    pub save_cursor: ControlCode,
-    pub restore_cursor: ControlCode,
-    pub insert_character: ControlCode,
-    pub delete_character: ControlCode,
-    pub erase_character: ControlCode,
-    pub enable_alt_screen: ControlCode,
-    pub disable_alt_screen: ControlCode,
-    pub erase_to_end: ControlCode,
-    pub erase_from_start: ControlCode,
-    pub erase_screen: ControlCode,
-    pub erase_scrollback: ControlCode,
-    pub erase_to_end_of_line: ControlCode,
-    pub erase_to_start_of_line: ControlCode,
-    pub erase_line: ControlCode,
-    pub device_status_report: ControlCode,
-    pub unset_scroll_region: ControlCode,
-    pub enable_scroll_region_origin_mode: ControlCode,
-    pub disable_scroll_region_origin_mode: ControlCode,
-    pub end_link: ControlCode,
-    pub show_cursor: ControlCode,
-    pub hide_cursor: ControlCode,
-    pub enable_application_keypad_mode: ControlCode,
-    pub disable_application_keypad_mode: ControlCode,
-    pub enable_application_keypad_mode_esc: ControlCode,
-    pub disable_application_keypad_mode_esc: ControlCode,
-    pub enable_paste_mode: ControlCode,
-    pub disable_paste_mode: ControlCode,
-    pub horizontal_tab_set: ControlCode,
-    pub soft_reset: ControlCode,
-    pub hard_reset: ControlCode,
+test_pub! {
+    // A dictionary of standard control codes. Access codes via the
+    // control_codes() function. Most are constant struct members.
+    // Codes with dynamic params are generated on the fly via methods.
+    #[allow(dead_code)]
+    struct ControlCodes {
+        pub clear_screen: ControlCode,
+        pub clear_attrs: ControlCode,
+        pub fgcolor_default: ControlCode,
+        pub bgcolor_default: ControlCode,
+        pub underline: ControlCode,
+        pub double_underline: ControlCode,
+        pub undo_underline: ControlCode,
+        pub bold: ControlCode,
+        pub faint: ControlCode,
+        pub reset_font_weight: ControlCode,
+        pub italic: ControlCode,
+        pub undo_italic: ControlCode,
+        pub inverse: ControlCode,
+        pub undo_inverse: ControlCode,
+        pub slow_blink: ControlCode,
+        pub rapid_blink: ControlCode,
+        pub undo_blink: ControlCode,
+        pub conceal: ControlCode,
+        pub undo_conceal: ControlCode,
+        pub strikethrough: ControlCode,
+        pub undo_strikethrough: ControlCode,
+        pub framed: ControlCode,
+        pub encircled: ControlCode,
+        pub undo_framed: ControlCode,
+        pub overline: ControlCode,
+        pub undo_overline: ControlCode,
+        pub save_cursor_position: ControlCode,
+        pub restore_cursor_position: ControlCode,
+        pub save_cursor: ControlCode,
+        pub restore_cursor: ControlCode,
+        pub insert_character: ControlCode,
+        pub delete_character: ControlCode,
+        pub erase_character: ControlCode,
+        pub enable_alt_screen: ControlCode,
+        pub disable_alt_screen: ControlCode,
+        pub erase_to_end: ControlCode,
+        pub erase_from_start: ControlCode,
+        pub erase_screen: ControlCode,
+        pub erase_scrollback: ControlCode,
+        pub erase_to_end_of_line: ControlCode,
+        pub erase_to_start_of_line: ControlCode,
+        pub erase_line: ControlCode,
+        pub device_status_report: ControlCode,
+        pub unset_scroll_region: ControlCode,
+        pub enable_scroll_region_origin_mode: ControlCode,
+        pub disable_scroll_region_origin_mode: ControlCode,
+        pub end_link: ControlCode,
+        pub show_cursor: ControlCode,
+        pub hide_cursor: ControlCode,
+        pub enable_application_keypad_mode: ControlCode,
+        pub disable_application_keypad_mode: ControlCode,
+        pub enable_application_keypad_mode_esc: ControlCode,
+        pub disable_application_keypad_mode_esc: ControlCode,
+        pub enable_paste_mode: ControlCode,
+        pub disable_paste_mode: ControlCode,
+        pub horizontal_tab_set: ControlCode,
+        pub soft_reset: ControlCode,
+        pub hard_reset: ControlCode,
+    }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum ControlCode {
-    OSC {
-        params: SmallVec<[SmallVec<[u8; 8]>; 2]>,
-        term: OSCTerm,
-    },
-    CSI {
-        params: SmallVec<[SmallVec<[u16; 4]>; 2]>,
-        intermediates: SmallVec<[u8; 8]>,
-        action: char,
-    },
-    ESC {
-        intermediates: SmallVec<[u8; 8]>,
-        byte: u8,
-    },
-    __NonExhaustive,
+test_pub! {
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    #[non_exhaustive]
+    enum ControlCode {
+        OSC {
+            params: SmallVec<[SmallVec<[u8; 8]>; 2]>,
+            term: OSCTerm,
+        },
+        CSI {
+            params: SmallVec<[SmallVec<[u16; 4]>; 2]>,
+            intermediates: SmallVec<[u8; 8]>,
+            action: char,
+        },
+        ESC {
+            intermediates: SmallVec<[u8; 8]>,
+            byte: u8,
+        },
+        __NonExhaustive,
+    }
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-#[allow(dead_code)]
-pub enum OSCTerm {
-    #[default]
-    St,
-    Bel,
+test_pub! {
+    #[derive(Clone, Debug, Default, Eq, PartialEq)]
+    #[allow(dead_code)]
+    enum OSCTerm {
+        #[default]
+        St,
+        Bel,
+    }
 }
 
 // Assertions proving that we are using no more memory than needed with the
@@ -683,277 +713,279 @@ impl ControlCode {
 
 static CONTROL_CODES: OnceLock<ControlCodes> = OnceLock::new();
 
-pub fn control_codes() -> &'static ControlCodes {
-    CONTROL_CODES.get_or_init(|| ControlCodes {
-        clear_screen: ControlCode::CSI {
-            params: smallvec![],
-            intermediates: smallvec![],
-            action: 'J',
-        },
-        clear_attrs: ControlCode::CSI {
-            params: smallvec![],
-            intermediates: smallvec![],
-            action: 'm',
-        },
-        fgcolor_default: ControlCode::CSI {
-            params: smallvec![smallvec![39]],
-            intermediates: smallvec![],
-            action: 'm',
-        },
-        bgcolor_default: ControlCode::CSI {
-            params: smallvec![smallvec![49]],
-            intermediates: smallvec![],
-            action: 'm',
-        },
-        underline: ControlCode::CSI {
-            params: smallvec![smallvec![4]],
-            intermediates: smallvec![],
-            action: 'm',
-        },
-        double_underline: ControlCode::CSI {
-            params: smallvec![smallvec![21]],
-            intermediates: smallvec![],
-            action: 'm',
-        },
-        undo_underline: ControlCode::CSI {
-            params: smallvec![smallvec![24]],
-            intermediates: smallvec![],
-            action: 'm',
-        },
-        bold: ControlCode::CSI {
-            params: smallvec![smallvec![1]],
-            intermediates: smallvec![],
-            action: 'm',
-        },
-        faint: ControlCode::CSI {
-            params: smallvec![smallvec![2]],
-            intermediates: smallvec![],
-            action: 'm',
-        },
-        reset_font_weight: ControlCode::CSI {
-            params: smallvec![smallvec![22]],
-            intermediates: smallvec![],
-            action: 'm',
-        },
-        italic: ControlCode::CSI {
-            params: smallvec![smallvec![3]],
-            intermediates: smallvec![],
-            action: 'm',
-        },
-        undo_italic: ControlCode::CSI {
-            params: smallvec![smallvec![23]],
-            intermediates: smallvec![],
-            action: 'm',
-        },
-        inverse: ControlCode::CSI {
-            params: smallvec![smallvec![7]],
-            intermediates: smallvec![],
-            action: 'm',
-        },
-        undo_inverse: ControlCode::CSI {
-            params: smallvec![smallvec![27]],
-            intermediates: smallvec![],
-            action: 'm',
-        },
-        slow_blink: ControlCode::CSI {
-            params: smallvec![smallvec![5]],
-            intermediates: smallvec![],
-            action: 'm',
-        },
-        rapid_blink: ControlCode::CSI {
-            params: smallvec![smallvec![6]],
-            intermediates: smallvec![],
-            action: 'm',
-        },
-        undo_blink: ControlCode::CSI {
-            params: smallvec![smallvec![25]],
-            intermediates: smallvec![],
-            action: 'm',
-        },
-        conceal: ControlCode::CSI {
-            params: smallvec![smallvec![8]],
-            intermediates: smallvec![],
-            action: 'm',
-        },
-        undo_conceal: ControlCode::CSI {
-            params: smallvec![smallvec![28]],
-            intermediates: smallvec![],
-            action: 'm',
-        },
-        strikethrough: ControlCode::CSI {
-            params: smallvec![smallvec![9]],
-            intermediates: smallvec![],
-            action: 'm',
-        },
-        undo_strikethrough: ControlCode::CSI {
-            params: smallvec![smallvec![29]],
-            intermediates: smallvec![],
-            action: 'm',
-        },
-        framed: ControlCode::CSI {
-            params: smallvec![smallvec![51]],
-            intermediates: smallvec![],
-            action: 'm',
-        },
-        encircled: ControlCode::CSI {
-            params: smallvec![smallvec![52]],
-            intermediates: smallvec![],
-            action: 'm',
-        },
-        undo_framed: ControlCode::CSI {
-            params: smallvec![smallvec![54]],
-            intermediates: smallvec![],
-            action: 'm',
-        },
-        overline: ControlCode::CSI {
-            params: smallvec![smallvec![53]],
-            intermediates: smallvec![],
-            action: 'm',
-        },
-        undo_overline: ControlCode::CSI {
-            params: smallvec![smallvec![55]],
-            intermediates: smallvec![],
-            action: 'm',
-        },
-        save_cursor_position: ControlCode::CSI {
-            params: smallvec![],
-            intermediates: smallvec![],
-            action: 's',
-        },
-        restore_cursor_position: ControlCode::CSI {
-            params: smallvec![],
-            intermediates: smallvec![],
-            action: 'u',
-        },
-        save_cursor: ControlCode::ESC { intermediates: smallvec![], byte: b'7' },
-        restore_cursor: ControlCode::ESC { intermediates: smallvec![], byte: b'8' },
-        insert_character: ControlCode::CSI {
-            params: smallvec![smallvec![1]],
-            intermediates: smallvec![],
-            action: '@',
-        },
-        delete_character: ControlCode::CSI {
-            params: smallvec![smallvec![1]],
-            intermediates: smallvec![],
-            action: 'P',
-        },
-        erase_character: ControlCode::CSI {
-            params: smallvec![smallvec![1]],
-            intermediates: smallvec![],
-            action: 'X',
-        },
-        enable_alt_screen: ControlCode::CSI {
-            params: smallvec![smallvec![1049]],
-            intermediates: smallvec![b'?'],
-            action: 'h',
-        },
-        disable_alt_screen: ControlCode::CSI {
-            params: smallvec![smallvec![1049]],
-            intermediates: smallvec![b'?'],
-            action: 'l',
-        },
-        erase_to_end: ControlCode::CSI {
-            params: smallvec![smallvec![0]],
-            intermediates: smallvec![],
-            action: 'J',
-        },
-        erase_from_start: ControlCode::CSI {
-            params: smallvec![smallvec![1]],
-            intermediates: smallvec![],
-            action: 'J',
-        },
-        erase_screen: ControlCode::CSI {
-            params: smallvec![smallvec![2]],
-            intermediates: smallvec![],
-            action: 'J',
-        },
-        erase_scrollback: ControlCode::CSI {
-            params: smallvec![smallvec![3]],
-            intermediates: smallvec![],
-            action: 'J',
-        },
-        erase_to_end_of_line: ControlCode::CSI {
-            params: smallvec![smallvec![0]],
-            intermediates: smallvec![],
-            action: 'K',
-        },
-        erase_to_start_of_line: ControlCode::CSI {
-            params: smallvec![smallvec![1]],
-            intermediates: smallvec![],
-            action: 'K',
-        },
-        erase_line: ControlCode::CSI {
-            params: smallvec![smallvec![2]],
-            intermediates: smallvec![],
-            action: 'K',
-        },
-        device_status_report: ControlCode::CSI {
-            params: smallvec![smallvec![6]],
-            intermediates: smallvec![],
-            action: 'n',
-        },
-        unset_scroll_region: ControlCode::CSI {
-            params: smallvec![],
-            intermediates: smallvec![],
-            action: 'r',
-        },
-        enable_scroll_region_origin_mode: ControlCode::CSI {
-            params: smallvec![smallvec![6]],
-            intermediates: smallvec![b'?'],
-            action: 'h',
-        },
-        disable_scroll_region_origin_mode: ControlCode::CSI {
-            params: smallvec![smallvec![6]],
-            intermediates: smallvec![b'?'],
-            action: 'l',
-        },
-        end_link: ControlCode::OSC { params: smallvec![smallvec![b'8']], term: OSCTerm::default() },
-        show_cursor: ControlCode::CSI {
-            params: smallvec![smallvec![25]],
-            intermediates: smallvec![b'?'],
-            action: 'h',
-        },
-        hide_cursor: ControlCode::CSI {
-            params: smallvec![smallvec![25]],
-            intermediates: smallvec![b'?'],
-            action: 'l',
-        },
-        enable_application_keypad_mode: ControlCode::CSI {
-            params: smallvec![smallvec![1]],
-            intermediates: smallvec![b'?'],
-            action: 'h',
-        },
-        disable_application_keypad_mode: ControlCode::CSI {
-            params: smallvec![smallvec![1]],
-            intermediates: smallvec![b'?'],
-            action: 'l',
-        },
-        enable_application_keypad_mode_esc: ControlCode::ESC {
-            intermediates: smallvec![],
-            byte: b'=',
-        },
-        disable_application_keypad_mode_esc: ControlCode::ESC {
-            intermediates: smallvec![],
-            byte: b'>',
-        },
-        enable_paste_mode: ControlCode::CSI {
-            params: smallvec![smallvec![2004]],
-            intermediates: smallvec![b'?'],
-            action: 'h',
-        },
-        disable_paste_mode: ControlCode::CSI {
-            params: smallvec![smallvec![2004]],
-            intermediates: smallvec![b'?'],
-            action: 'l',
-        },
-        horizontal_tab_set: ControlCode::ESC { intermediates: smallvec![], byte: b'H' },
-        soft_reset: ControlCode::CSI {
-            params: smallvec![],
-            intermediates: smallvec![b'!'],
-            action: 'p',
-        },
-        hard_reset: ControlCode::ESC { intermediates: smallvec![], byte: b'c' },
-    })
+test_pub! {
+    fn control_codes() -> &'static ControlCodes {
+        CONTROL_CODES.get_or_init(|| ControlCodes {
+            clear_screen: ControlCode::CSI {
+                params: smallvec![],
+                intermediates: smallvec![],
+                action: 'J',
+            },
+            clear_attrs: ControlCode::CSI {
+                params: smallvec![],
+                intermediates: smallvec![],
+                action: 'm',
+            },
+            fgcolor_default: ControlCode::CSI {
+                params: smallvec![smallvec![39]],
+                intermediates: smallvec![],
+                action: 'm',
+            },
+            bgcolor_default: ControlCode::CSI {
+                params: smallvec![smallvec![49]],
+                intermediates: smallvec![],
+                action: 'm',
+            },
+            underline: ControlCode::CSI {
+                params: smallvec![smallvec![4]],
+                intermediates: smallvec![],
+                action: 'm',
+            },
+            double_underline: ControlCode::CSI {
+                params: smallvec![smallvec![21]],
+                intermediates: smallvec![],
+                action: 'm',
+            },
+            undo_underline: ControlCode::CSI {
+                params: smallvec![smallvec![24]],
+                intermediates: smallvec![],
+                action: 'm',
+            },
+            bold: ControlCode::CSI {
+                params: smallvec![smallvec![1]],
+                intermediates: smallvec![],
+                action: 'm',
+            },
+            faint: ControlCode::CSI {
+                params: smallvec![smallvec![2]],
+                intermediates: smallvec![],
+                action: 'm',
+            },
+            reset_font_weight: ControlCode::CSI {
+                params: smallvec![smallvec![22]],
+                intermediates: smallvec![],
+                action: 'm',
+            },
+            italic: ControlCode::CSI {
+                params: smallvec![smallvec![3]],
+                intermediates: smallvec![],
+                action: 'm',
+            },
+            undo_italic: ControlCode::CSI {
+                params: smallvec![smallvec![23]],
+                intermediates: smallvec![],
+                action: 'm',
+            },
+            inverse: ControlCode::CSI {
+                params: smallvec![smallvec![7]],
+                intermediates: smallvec![],
+                action: 'm',
+            },
+            undo_inverse: ControlCode::CSI {
+                params: smallvec![smallvec![27]],
+                intermediates: smallvec![],
+                action: 'm',
+            },
+            slow_blink: ControlCode::CSI {
+                params: smallvec![smallvec![5]],
+                intermediates: smallvec![],
+                action: 'm',
+            },
+            rapid_blink: ControlCode::CSI {
+                params: smallvec![smallvec![6]],
+                intermediates: smallvec![],
+                action: 'm',
+            },
+            undo_blink: ControlCode::CSI {
+                params: smallvec![smallvec![25]],
+                intermediates: smallvec![],
+                action: 'm',
+            },
+            conceal: ControlCode::CSI {
+                params: smallvec![smallvec![8]],
+                intermediates: smallvec![],
+                action: 'm',
+            },
+            undo_conceal: ControlCode::CSI {
+                params: smallvec![smallvec![28]],
+                intermediates: smallvec![],
+                action: 'm',
+            },
+            strikethrough: ControlCode::CSI {
+                params: smallvec![smallvec![9]],
+                intermediates: smallvec![],
+                action: 'm',
+            },
+            undo_strikethrough: ControlCode::CSI {
+                params: smallvec![smallvec![29]],
+                intermediates: smallvec![],
+                action: 'm',
+            },
+            framed: ControlCode::CSI {
+                params: smallvec![smallvec![51]],
+                intermediates: smallvec![],
+                action: 'm',
+            },
+            encircled: ControlCode::CSI {
+                params: smallvec![smallvec![52]],
+                intermediates: smallvec![],
+                action: 'm',
+            },
+            undo_framed: ControlCode::CSI {
+                params: smallvec![smallvec![54]],
+                intermediates: smallvec![],
+                action: 'm',
+            },
+            overline: ControlCode::CSI {
+                params: smallvec![smallvec![53]],
+                intermediates: smallvec![],
+                action: 'm',
+            },
+            undo_overline: ControlCode::CSI {
+                params: smallvec![smallvec![55]],
+                intermediates: smallvec![],
+                action: 'm',
+            },
+            save_cursor_position: ControlCode::CSI {
+                params: smallvec![],
+                intermediates: smallvec![],
+                action: 's',
+            },
+            restore_cursor_position: ControlCode::CSI {
+                params: smallvec![],
+                intermediates: smallvec![],
+                action: 'u',
+            },
+            save_cursor: ControlCode::ESC { intermediates: smallvec![], byte: b'7' },
+            restore_cursor: ControlCode::ESC { intermediates: smallvec![], byte: b'8' },
+            insert_character: ControlCode::CSI {
+                params: smallvec![smallvec![1]],
+                intermediates: smallvec![],
+                action: '@',
+            },
+            delete_character: ControlCode::CSI {
+                params: smallvec![smallvec![1]],
+                intermediates: smallvec![],
+                action: 'P',
+            },
+            erase_character: ControlCode::CSI {
+                params: smallvec![smallvec![1]],
+                intermediates: smallvec![],
+                action: 'X',
+            },
+            enable_alt_screen: ControlCode::CSI {
+                params: smallvec![smallvec![1049]],
+                intermediates: smallvec![b'?'],
+                action: 'h',
+            },
+            disable_alt_screen: ControlCode::CSI {
+                params: smallvec![smallvec![1049]],
+                intermediates: smallvec![b'?'],
+                action: 'l',
+            },
+            erase_to_end: ControlCode::CSI {
+                params: smallvec![smallvec![0]],
+                intermediates: smallvec![],
+                action: 'J',
+            },
+            erase_from_start: ControlCode::CSI {
+                params: smallvec![smallvec![1]],
+                intermediates: smallvec![],
+                action: 'J',
+            },
+            erase_screen: ControlCode::CSI {
+                params: smallvec![smallvec![2]],
+                intermediates: smallvec![],
+                action: 'J',
+            },
+            erase_scrollback: ControlCode::CSI {
+                params: smallvec![smallvec![3]],
+                intermediates: smallvec![],
+                action: 'J',
+            },
+            erase_to_end_of_line: ControlCode::CSI {
+                params: smallvec![smallvec![0]],
+                intermediates: smallvec![],
+                action: 'K',
+            },
+            erase_to_start_of_line: ControlCode::CSI {
+                params: smallvec![smallvec![1]],
+                intermediates: smallvec![],
+                action: 'K',
+            },
+            erase_line: ControlCode::CSI {
+                params: smallvec![smallvec![2]],
+                intermediates: smallvec![],
+                action: 'K',
+            },
+            device_status_report: ControlCode::CSI {
+                params: smallvec![smallvec![6]],
+                intermediates: smallvec![],
+                action: 'n',
+            },
+            unset_scroll_region: ControlCode::CSI {
+                params: smallvec![],
+                intermediates: smallvec![],
+                action: 'r',
+            },
+            enable_scroll_region_origin_mode: ControlCode::CSI {
+                params: smallvec![smallvec![6]],
+                intermediates: smallvec![b'?'],
+                action: 'h',
+            },
+            disable_scroll_region_origin_mode: ControlCode::CSI {
+                params: smallvec![smallvec![6]],
+                intermediates: smallvec![b'?'],
+                action: 'l',
+            },
+            end_link: ControlCode::OSC { params: smallvec![smallvec![b'8']], term: OSCTerm::default() },
+            show_cursor: ControlCode::CSI {
+                params: smallvec![smallvec![25]],
+                intermediates: smallvec![b'?'],
+                action: 'h',
+            },
+            hide_cursor: ControlCode::CSI {
+                params: smallvec![smallvec![25]],
+                intermediates: smallvec![b'?'],
+                action: 'l',
+            },
+            enable_application_keypad_mode: ControlCode::CSI {
+                params: smallvec![smallvec![1]],
+                intermediates: smallvec![b'?'],
+                action: 'h',
+            },
+            disable_application_keypad_mode: ControlCode::CSI {
+                params: smallvec![smallvec![1]],
+                intermediates: smallvec![b'?'],
+                action: 'l',
+            },
+            enable_application_keypad_mode_esc: ControlCode::ESC {
+                intermediates: smallvec![],
+                byte: b'=',
+            },
+            disable_application_keypad_mode_esc: ControlCode::ESC {
+                intermediates: smallvec![],
+                byte: b'>',
+            },
+            enable_paste_mode: ControlCode::CSI {
+                params: smallvec![smallvec![2004]],
+                intermediates: smallvec![b'?'],
+                action: 'h',
+            },
+            disable_paste_mode: ControlCode::CSI {
+                params: smallvec![smallvec![2004]],
+                intermediates: smallvec![b'?'],
+                action: 'l',
+            },
+            horizontal_tab_set: ControlCode::ESC { intermediates: smallvec![], byte: b'H' },
+            soft_reset: ControlCode::CSI {
+                params: smallvec![],
+                intermediates: smallvec![b'!'],
+                action: 'p',
+            },
+            hard_reset: ControlCode::ESC { intermediates: smallvec![], byte: b'c' },
+        })
+    }
 }
 
 #[allow(dead_code)]
@@ -1255,19 +1287,21 @@ impl ControlCodes {
     }
 }
 
-/// Represents a foreground or background color for cells.
-#[derive(Eq, PartialEq, Debug, Copy, Clone, Default)]
-#[allow(dead_code)]
-pub enum Color {
-    /// The default terminal color.
-    #[default]
-    Default,
+test_pub! {
+    /// Represents a foreground or background color for cells.
+    #[derive(Eq, PartialEq, Debug, Copy, Clone, Default)]
+    #[allow(dead_code)]
+    enum Color {
+        /// The default terminal color.
+        #[default]
+        Default,
 
-    /// An indexed terminal color.
-    Idx(u8),
+        /// An indexed terminal color.
+        Idx(u8),
 
-    /// An RGB terminal color. The parameters are (red, green, blue).
-    Rgb(u8, u8, u8),
+        /// An RGB terminal color. The parameters are (red, green, blue).
+        Rgb(u8, u8, u8),
+    }
 }
 
 impl Color {
@@ -1288,9 +1322,11 @@ impl Color {
     }
 }
 
-#[derive(Default, Debug)]
-#[must_use = "this struct does nothing unless you call term_input_into"]
-pub struct Crlf;
+test_pub! {
+    #[derive(Default, Debug)]
+    #[must_use = "this struct does nothing unless you call term_input_into"]
+    struct Crlf;
+}
 
 impl AsTermInput for Crlf {
     fn term_input_into(&self, buf: &mut Vec<u8>) {

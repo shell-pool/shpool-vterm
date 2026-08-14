@@ -24,7 +24,7 @@ use crate::{
 use anyhow::anyhow;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub struct Line {
+pub(crate) struct Line {
     /// The cells stored in this line.
     pub cells: Vec<Cell>,
     /// If true, indicates that this line was automatically wrapped due to
@@ -200,7 +200,7 @@ impl Line {
 }
 
 /// Specify a region of the line.
-pub enum Section {
+pub(crate) enum Section {
     StartTo(usize),
     ToEnd(usize),
     Whole,

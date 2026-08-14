@@ -30,7 +30,7 @@ use tracing::{error, warn};
 // A scrollback stores the termianal state for the main screen.
 // Alt screen state is stored seperately.
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub struct Scrollback {
+pub(crate) struct Scrollback {
     /// The entire scrollback buffer for the terminal.
     ///
     /// The bottom of the terminal is stored at the front of the deque

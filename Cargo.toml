@@ -25,7 +25,7 @@ bitvec = "1" # packed bitset
 
 [features]
 # This opens up some visibility that we don't want in the main crate API.
-internal-test = []
+unstable-internal-test = []
 
 [dev-dependencies]
-shpool-vterm = { path = ".", features = ["internal-test"] }
+shpool-vterm = { path = ".", features = ["unstable-internal-test"] }

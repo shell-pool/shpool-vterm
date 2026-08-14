@@ -23,13 +23,13 @@ static EMPTY_CELL: OnceLock<Cell> = OnceLock::new();
 // A shared empty cell const. Should be used to generate empty cell
 // references when needed to avoid duplicating empty cells to reference
 // everywhere.
-pub fn empty() -> &'static Cell {
+pub(crate) fn empty() -> &'static Cell {
     EMPTY_CELL.get_or_init(|| Cell::empty())
 }
 
 /// A cell in a terminal.
 #[derive(Clone, Eq, PartialEq)]
-pub struct Cell {
+pub(crate) struct Cell {
     /// The contents of a cell. Usually just a single character,
     /// but in some cases there might be modifier codepoints like
     /// from diacritics or emoji modifiers.

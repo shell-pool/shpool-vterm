@@ -27,16 +27,19 @@ use bitvec::{bitvec, vec::BitVec};
 use smallvec::SmallVec;
 use tracing::{debug, trace, warn};
 
+#[macro_use]
+mod visibility;
+
 mod altscreen;
 mod cell;
 mod line;
 mod screen;
 mod scrollback;
 
-#[cfg(not(feature = "internal-test"))]
+#[cfg(not(feature = "unstable-internal-test"))]
 mod term;
 
-#[cfg(feature = "internal-test")]
+#[cfg(feature = "unstable-internal-test")]
 pub mod term;
 
 /// A representation of a terminal.

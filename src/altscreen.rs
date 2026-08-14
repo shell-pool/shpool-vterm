@@ -25,7 +25,7 @@ use crate::{
 use anyhow::{anyhow, Context};
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub struct AltScreen {
+pub(crate) struct AltScreen {
     /// The entire grid the altscreen. size.height should always equal
     /// buf.len().
     ///
