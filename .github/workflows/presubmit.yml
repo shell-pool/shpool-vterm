@@ -1,0 +1,28 @@
+name: presubmit
+on: [pull_request, workflow_call, workflow_dispatch]
+
+jobs:
+  test:
+    name: cargo test --all-features (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+      - uses: moonrepo/setup-rust@abb2d32350334249b178c401e5ec5836e0cd88d3
+        with:
+          inherit-toolchain: true
+      - run: RUST_BACKTRACE=full cargo test --all-features
+
+  rustfmt:
+    name: cargo +nightly fmt -- --check
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+      - uses: moonrepo/setup-rust@abb2d32350334249b178c401e5ec5836e0cd88d3
+        with:
+          components: rustfmt
+          channel: nightly
+      - run: cargo +nightly fmt -- --check
