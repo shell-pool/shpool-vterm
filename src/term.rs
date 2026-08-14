@@ -525,6 +525,9 @@ test_pub! {
         pub horizontal_tab_set: ControlCode,
         pub soft_reset: ControlCode,
         pub hard_reset: ControlCode,
+        pub designate_g0_us_ascii: ControlCode,
+        pub designate_g1_us_ascii: ControlCode,
+        pub designate_g0_uk_ascii: ControlCode,
     }
 }
 
@@ -996,6 +999,18 @@ test_pub! {
                 action: 'p',
             },
             hard_reset: ControlCode::ESC { intermediates: smallvec![], byte: b'c' },
+            designate_g0_us_ascii: ControlCode::ESC {
+                intermediates: smallvec![b'('],
+                byte: b'B',
+            },
+            designate_g1_us_ascii: ControlCode::ESC {
+                intermediates: smallvec![b')'],
+                byte: b'B',
+            },
+            designate_g0_uk_ascii: ControlCode::ESC {
+                intermediates: smallvec![b'('],
+                byte: b'A',
+            },
         })
     }
 }

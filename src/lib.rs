@@ -1121,6 +1121,10 @@ impl vte::Perform for State {
             ([], b'=') => self.application_keypad_mode_enabled = true,
             ([], b'>') => self.application_keypad_mode_enabled = false,
 
+            // Designates US-ASCII or UK-ASCII as a G0-G3 character set. We handle
+            // utf-8, which is a superset of ascii, so this is a no-op.
+            ([b'(' | b')' | b'*' | b'+'], b'B' | b'A') => {}
+
             // OSC terminators that get sent to the esc handler as well,
             // we can ignore them.
             ([], 92) => {}

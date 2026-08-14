@@ -241,6 +241,24 @@ frag! {
 }
 
 frag! {
+    ascii_charset_ignored { scrollback_lines: 100, width: 10, height: 10 }
+    <= term::Raw::from("A"),
+       term::control_codes().designate_g0_us_ascii,
+       term::Raw::from("B"),
+       term::control_codes().designate_g1_us_ascii,
+       term::Raw::from("C"),
+       term::control_codes().designate_g0_uk_ascii,
+       term::Raw::from("D")
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::Raw::from("ABCD"),
+            term::ControlCodes::cursor_position(1, 5),
+            term::control_codes().clear_attrs
+}
+
+frag! {
     erase_display_to_end_with_decom { scrollback_lines: 100, width: 5, height: 5 }
     <= term::Raw::from("11111"), term::Crlf::default(),
        term::Raw::from("22222"), term::Crlf::default(),
