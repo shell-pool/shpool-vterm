@@ -29,6 +29,7 @@ jobs:
       - name: Install Rust toolchain
         uses: moonrepo/setup-rust@abb2d32350334249b178c401e5ec5836e0cd88d3
         with:
+          channel: stable
           bins: cross
       - name: Run release-plz
         uses: MarcoIeni/release-plz-action@e8792575c7f2366cf6ff3ccc33ead9ace5b691c7
