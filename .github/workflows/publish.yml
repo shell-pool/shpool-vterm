@@ -13,6 +13,8 @@ jobs:
   release-plz:
     name: Release-plz
     runs-on: ubuntu-latest
+    env:
+      RUSTUP_TOOLCHAIN: stable
     steps:
       # Generating a GitHub token, so that PRs and tags created by
       # the release-plz-action can trigger actions workflows.
