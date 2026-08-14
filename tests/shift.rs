@@ -390,3 +390,64 @@ frag! {
             term::control_codes().clear_attrs,
             term::ControlCodes::fgcolor_idx(1)
 }
+
+frag! {
+    erase_char_basic { scrollback_lines: 100, width: 5, height: 4 }
+    <= term::Raw::from("123"),
+       term::ControlCodes::cursor_position(1, 2),
+       term::ControlCodes::erase_character(1)
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::Raw::from("1 3"),
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    erase_many_chars { scrollback_lines: 100, width: 5, height: 4 }
+    <= term::Raw::from("12345"),
+       term::ControlCodes::cursor_position(1, 2),
+       term::ControlCodes::erase_character(3)
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::Raw::from("1   5"),
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    erase_char_with_attrs { scrollback_lines: 100, width: 5, height: 4 }
+    <= term::Raw::from("123"),
+       term::ControlCodes::cursor_position(1, 2),
+       term::ControlCodes::fgcolor_idx(1),
+       term::ControlCodes::erase_character(1)
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::Raw::from("1"),
+            term::ControlCodes::fgcolor_idx(1),
+            term::Raw::from(" "),
+            term::control_codes().fgcolor_default,
+            term::Raw::from("3"),
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().clear_attrs,
+            term::ControlCodes::fgcolor_idx(1)
+}
+
+frag! {
+    erase_char_at_right_margin { scrollback_lines: 100, width: 5, height: 4 }
+    <= term::Raw::from("12345"),
+       term::ControlCodes::erase_character(1)
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::Raw::from("12345"),
+            term::ControlCodes::cursor_position(1, 6),
+            term::control_codes().clear_attrs
+}

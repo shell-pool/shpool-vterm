@@ -175,6 +175,28 @@ impl Line {
             self.cells.push(Cell::empty_with_attrs(attrs.clone()));
         }
     }
+
+    /// Blank out n characters to the right of the current cursor. Unlike
+    /// delete, this leaves the cells in place, just clobbers their contents.
+    ///
+    /// This implements ECH (Erase Character)
+    pub fn erase_character(&mut self, width: usize, col: usize, attrs: &term::Attrs, n: usize) {
+        if col >= width {
+            return;
+        }
+
+        while self.cells.len() < col {
+            self.cells.push(Cell::empty());
+        }
+
+        let erase_to = std::cmp::min(width, col + n);
+        for i in col..std::cmp::min(self.cells.len(), col + n) {
+            self.cells[i] = Cell::empty_with_attrs(attrs.clone());
+        }
+        while self.cells.len() < erase_to {
+            self.cells.push(Cell::empty_with_attrs(attrs.clone()));
+        }
+    }
 }
 
 /// Specify a region of the line.

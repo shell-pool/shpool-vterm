@@ -670,6 +670,84 @@ frag! {
 }
 
 frag! {
+    alt_screen_erase_char_basic { scrollback_lines: 100, width: 5, height: 4 }
+    <= term::control_codes().enable_alt_screen,
+       term::Raw::from("123"),
+       term::ControlCodes::cursor_position(1, 2),
+       term::ControlCodes::erase_character(1)
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::Raw::from("1 3"),
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    alt_screen_erase_many_chars { scrollback_lines: 100, width: 5, height: 4 }
+    <= term::control_codes().enable_alt_screen,
+       term::Raw::from("12345"),
+       term::ControlCodes::cursor_position(1, 2),
+       term::ControlCodes::erase_character(3)
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::Raw::from("1   5"),
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    alt_screen_erase_char_with_attrs { scrollback_lines: 100, width: 5, height: 4 }
+    <= term::control_codes().enable_alt_screen,
+       term::Raw::from("123"),
+       term::ControlCodes::cursor_position(1, 2),
+       term::ControlCodes::fgcolor_idx(1),
+       term::ControlCodes::erase_character(1)
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::Raw::from("1"),
+            term::ControlCodes::fgcolor_idx(1),
+            term::Raw::from(" "),
+            term::control_codes().fgcolor_default,
+            term::Raw::from("3"),
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().clear_attrs,
+            term::ControlCodes::fgcolor_idx(1)
+}
+
+frag! {
+    alt_screen_erase_char_at_end_of_line { scrollback_lines: 100, width: 5, height: 4 }
+    <= term::control_codes().enable_alt_screen,
+       term::Raw::from("12345"),
+       term::ControlCodes::cursor_position(1, 5),
+       term::ControlCodes::erase_character(1)
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::Raw::from("1234 "),
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::ControlCodes::cursor_position(1, 5),
+            term::control_codes().clear_attrs
+}
+
+frag! {
     alt_screen_scroll_on_newline { scrollback_lines: 100, width: 5, height: 3 }
     <= term::control_codes().enable_alt_screen,
        term::Raw::from("1"), term::Crlf::default(),
