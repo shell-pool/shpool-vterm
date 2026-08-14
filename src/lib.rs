@@ -820,7 +820,7 @@ impl vte::Perform for State {
 
                         _ => {
                             warn!(
-                                "Unhandled CSI l command: CSI {:?} {:?} l",
+                                "Unhandled CSI h command: CSI {:?} {:?} h",
                                 intermediates,
                                 params.iter().collect::<Vec<&[u16]>>()
                             );
@@ -1014,7 +1014,7 @@ impl vte::Perform for State {
                     warn!("DECSTR only partially handled");
                 }
                 _ => warn!(
-                    "Unhandled CSI l command: CSI {:?} {:?} l",
+                    "Unhandled CSI p command: CSI {:?} {:?} p",
                     intermediates,
                     params.iter().collect::<Vec<&[u16]>>()
                 ),
@@ -1082,6 +1082,10 @@ impl vte::Perform for State {
 
                 warn!("RIS only partially handled");
             }
+
+            ([], b'=') => self.application_keypad_mode_enabled = true,
+            ([], b'>') => self.application_keypad_mode_enabled = false,
+
             // OSC terminators that get sent to the esc handler as well,
             // we can ignore them.
             ([], 92) => {}
