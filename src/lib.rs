@@ -171,6 +171,13 @@ struct State {
     /// Tracks application keypad mode state. Controlled via
     /// `CSI ? 1 {h,l}`.
     application_keypad_mode_enabled: bool,
+    /// When set, the underlying terminal is supposed to emit
+    /// `\x1b[I` sentinals when the window gains focus. For our
+    /// purposes we just need to know how to track and restore
+    /// the state.
+    ///
+    /// Controlled via `CSI ? 1004 {h,l}`.
+    report_focus: bool,
     /// Tracks paste mode. Controlled via `CSI ? 2004 {h,l}`.
     in_paste_mode: bool,
     /// Tab stop columns. By default, these are spaced 8 cols apart
@@ -215,6 +222,7 @@ impl State {
             functional_colors: [NONE_VEC; 10],
             cursor_hidden: false,
             application_keypad_mode_enabled: false,
+            report_focus: false,
             in_paste_mode: false,
             tabstops: bitvec![0; size.width],
         };
@@ -362,6 +370,9 @@ impl State {
         }
         if self.application_keypad_mode_enabled {
             controls.enable_application_keypad_mode.term_input_into(buf);
+        }
+        if self.report_focus {
+            controls.enable_report_focus.term_input_into(buf);
         }
         if self.in_paste_mode {
             controls.enable_paste_mode.term_input_into(buf);
@@ -825,6 +836,7 @@ impl vte::Perform for State {
                         [1] => self.application_keypad_mode_enabled = true,
                         [6] => self.screen_mut().set_origin_mode(OriginMode::ScrollRegion),
                         [25] => self.cursor_hidden = false,
+                        [1004] => self.report_focus = true,
                         // enable alt screen
                         [1049] => {
                             // The alt-screen gets reset upon entry, so we need to
@@ -859,6 +871,7 @@ impl vte::Perform for State {
                         [1] => self.application_keypad_mode_enabled = false,
                         [6] => self.screen_mut().set_origin_mode(OriginMode::Term),
                         [25] => self.cursor_hidden = true,
+                        [1004] => self.report_focus = false,
                         [1049] => self.screen_mode = ScreenMode::Scrollback,
                         [2004] => self.in_paste_mode = false,
                         // Means "resume & flush visual rendering." We are

@@ -518,6 +518,8 @@ test_pub! {
         pub disable_application_keypad_mode: ControlCode,
         pub enable_application_keypad_mode_esc: ControlCode,
         pub disable_application_keypad_mode_esc: ControlCode,
+        pub enable_report_focus: ControlCode,
+        pub disable_report_focus: ControlCode,
         pub enable_paste_mode: ControlCode,
         pub disable_paste_mode: ControlCode,
         pub horizontal_tab_set: ControlCode,
@@ -966,6 +968,16 @@ test_pub! {
             disable_application_keypad_mode_esc: ControlCode::ESC {
                 intermediates: smallvec![],
                 byte: b'>',
+            },
+            enable_report_focus: ControlCode::CSI {
+                params: smallvec![smallvec![1004]],
+                intermediates: smallvec![b'?'],
+                action: 'h',
+            },
+            disable_report_focus: ControlCode::CSI {
+                params: smallvec![smallvec![1004]],
+                intermediates: smallvec![b'?'],
+                action: 'l',
             },
             enable_paste_mode: ControlCode::CSI {
                 params: smallvec![smallvec![2004]],

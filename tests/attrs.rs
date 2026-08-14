@@ -528,3 +528,55 @@ frag! {
             term::ControlCodes::cursor_position(1, 1),
             term::control_codes().clear_attrs
 }
+
+frag! {
+    report_focus { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::control_codes().enable_report_focus
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs,
+            term::control_codes().enable_report_focus
+}
+
+frag! {
+    disable_report_focus { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::control_codes().enable_report_focus,
+       term::control_codes().disable_report_focus
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    report_focus_with_text { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::control_codes().enable_report_focus,
+       term::Raw::from("abc")
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::Raw::from("abc"),
+            term::ControlCodes::cursor_position(1, 4),
+            term::control_codes().clear_attrs,
+            term::control_codes().enable_report_focus
+}
+
+frag! {
+    report_focus_and_paste_mode { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::control_codes().enable_paste_mode,
+       term::control_codes().enable_report_focus
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs,
+            term::control_codes().enable_report_focus,
+            term::control_codes().enable_paste_mode
+}
