@@ -817,6 +817,9 @@ impl vte::Perform for State {
                             self.screen_mode = ScreenMode::Alt;
                         }
                         [2004] => self.in_paste_mode = true,
+                        // Means "pause visual rendering." We are not rendering
+                        // anything visually so we don't care.
+                        [2026] => {},
 
                         _ => {
                             warn!(
@@ -842,6 +845,9 @@ impl vte::Perform for State {
                         [25] => self.cursor_hidden = true,
                         [1049] => self.screen_mode = ScreenMode::Scrollback,
                         [2004] => self.in_paste_mode = false,
+                        // Means "resume & flush visual rendering." We are
+                        // not rendering anything visually so we don't care.
+                        [2026] => {},
                         _ => {
                             warn!(
                                 "Unhandled CSI l command: CSI {:?} {:?} l",
