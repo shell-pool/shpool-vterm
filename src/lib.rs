@@ -1084,6 +1084,21 @@ impl vte::Perform for State {
 
                     warn!("DECSTR only partially handled");
                 }
+                // DECRQM (DEC Request Mode Private)
+                [b'?', b'$'] => {
+                    // TODO(#4): actuate query state machine.
+                    //
+                    // In the future, we'll want to expose an API that
+                    // allows the embedding application to stream the
+                    // response of the underlying terminal so that we
+                    // can sniff its response and figure out what capabilities
+                    // it supports. This is the key to handling kitty's
+                    // im-such-a-special-boy escape sequences for example
+                    // (half the reason to write this crate), but for the
+                    // moment we just suppress the warning log and convert
+                    // to a debug log.
+                    debug!("ignoring DECRQM query: params={:?}", params.iter().collect::<Vec<_>>());
+                }
                 _ => warn!(
                     "Unhandled CSI p command: CSI {:?} {:?} p",
                     intermediates,
