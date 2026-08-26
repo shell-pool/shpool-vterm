@@ -674,8 +674,9 @@ impl vte::Perform for State {
                 screen.cursor.col = 0;
                 screen.clamp();
             }
-            // CHA (Cursor Horizontal Absolute)
-            'G' => {
+            // HPA (Horizontal Position Absolute, CSI n `)
+            // CHA (Cursor Horizontal Absolute, CSI n G)
+            '`' | 'G' => {
                 let n = param_or(&mut params_iter, 1) as usize;
                 let n = n.saturating_sub(1); // translate to 0 indexing
 

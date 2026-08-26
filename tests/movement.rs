@@ -275,6 +275,22 @@ frag! {
 }
 
 frag! {
+    horizontal_position_absolute { scrollback_lines: 100, width: 10, height: 10 }
+    <= term::Raw::from("A"),
+       term::ControlCodes::horizontal_position_absolute(3),
+       term::Raw::from("B")
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::Raw::from("A"),
+            term::Raw::from(" "),
+            term::Raw::from("B"),
+            term::ControlCodes::cursor_position(1, 4),
+            term::control_codes().clear_attrs
+}
+
+frag! {
     cursor_position_no_params { scrollback_lines: 100, width: 10, height: 10 }
     <= term::Raw::from("123"),
        // cursor position with no params (should be the same as (1,1)).

@@ -1133,6 +1133,14 @@ impl ControlCodes {
         }
     }
 
+    pub fn horizontal_position_absolute(col: u16) -> ControlCode {
+        ControlCode::CSI {
+            params: smallvec![smallvec![col]],
+            intermediates: smallvec![],
+            action: '`',
+        }
+    }
+
     fn move_cursor(n: u16, action: char) -> ControlCode {
         if n == 1 {
             ControlCode::CSI { params: smallvec![], intermediates: smallvec![], action }
