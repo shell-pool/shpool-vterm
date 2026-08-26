@@ -636,3 +636,165 @@ frag! {
             term::ControlCodes::cursor_position(2, 2),
             term::control_codes().clear_attrs
 }
+
+frag! {
+    repeat_character_basic { scrollback_lines: 100, width: 10, height: 10 }
+    <= term::Raw::from("A"),
+       term::ControlCodes::repeat_character(3)
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::Raw::from("AAAA"),
+            term::ControlCodes::cursor_position(1, 5),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    repeat_character_default_one { scrollback_lines: 100, width: 10, height: 10 }
+    <= term::Raw::from("A"),
+       term::ControlCodes::repeat_character(1)
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::Raw::from("AA"),
+            term::ControlCodes::cursor_position(1, 3),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    repeat_character_consecutive { scrollback_lines: 100, width: 10, height: 10 }
+    <= term::Raw::from("A"),
+       term::ControlCodes::repeat_character(2),
+       term::ControlCodes::repeat_character(1)
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::Raw::from("AAAA"),
+            term::ControlCodes::cursor_position(1, 5),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    repeat_character_reset_on_newline { scrollback_lines: 100, width: 10, height: 10 }
+    <= term::Raw::from("A\n"),
+       term::ControlCodes::repeat_character(3)
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::Raw::from("A"),
+            term::ControlCodes::cursor_position(2, 2),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    repeat_character_reset_on_carriage_return { scrollback_lines: 100, width: 10, height: 10 }
+    <= term::Raw::from("ABC\r"),
+       term::ControlCodes::repeat_character(2)
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::Raw::from("ABC"),
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    repeat_character_reset_on_backspace { scrollback_lines: 100, width: 10, height: 10 }
+    <= term::Raw::from("AB\x08"),
+       term::ControlCodes::repeat_character(2)
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::Raw::from("AB"),
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    repeat_character_reset_on_tab { scrollback_lines: 100, width: 10, height: 10 }
+    <= term::Raw::from("A\t"),
+       term::ControlCodes::repeat_character(2)
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::Raw::from("A"),
+            term::ControlCodes::cursor_position(1, 9),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    repeat_character_reset_on_cursor_move { scrollback_lines: 100, width: 10, height: 10 }
+    <= term::Raw::from("A"),
+       term::ControlCodes::cursor_forward(2),
+       term::ControlCodes::repeat_character(3)
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::Raw::from("A"),
+            term::ControlCodes::cursor_position(1, 4),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    repeat_character_reset_on_csi_with_intermediates { scrollback_lines: 100, width: 10, height: 10 }
+    <= term::Raw::from("A"),
+       term::ControlCode::CSI { params: smallvec![smallvec![3]], intermediates: smallvec![b'?'], action: 'b' },
+       term::ControlCodes::repeat_character(3)
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::Raw::from("A"),
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    repeat_character_reset_on_esc { scrollback_lines: 100, width: 10, height: 10 }
+    <= term::Raw::from("A"),
+       term::control_codes().save_cursor,
+       term::ControlCodes::repeat_character(3)
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::Raw::from("A"),
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    repeat_character_reset_on_osc { scrollback_lines: 100, width: 10, height: 10 }
+    <= term::Raw::from("A"),
+       term::ControlCodes::set_title(smallvec![b't']),
+       term::ControlCodes::repeat_character(3)
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::Raw::from("A"),
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().clear_attrs,
+            term::ControlCodes::set_title(smallvec![b't'])
+}
+
+frag! {
+    repeat_character_reset_on_dcs_hook { scrollback_lines: 100, width: 10, height: 10 }
+    <= term::Raw::from("A\x1bP+q\x1b\\"),
+       term::ControlCodes::repeat_character(3)
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::Raw::from("A"),
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().clear_attrs
+}

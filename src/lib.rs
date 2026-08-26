@@ -147,6 +147,9 @@ struct State {
     altscreen: Screen,
     /// The currently active screen mode.
     screen_mode: ScreenMode,
+    /// The last graphic char that was printed. This is used by REP
+    /// (CSI Pn b).
+    last_print_char: Option<char>,
     /// The current cursor attrs. These are shared between the scrollback
     /// and alt screens, which is why they are stored here rather than
     /// with the curors themsevles.
@@ -225,6 +228,7 @@ impl State {
             report_focus: false,
             in_paste_mode: false,
             tabstops: bitvec![0; size.width],
+            last_print_char: None,
         };
         st.fill_tabstops(0, size.width);
         st
@@ -432,6 +436,7 @@ enum ScreenMode {
 impl vte::Perform for State {
     fn print(&mut self, c: char) {
         trace!("print: {}", c);
+        self.last_print_char = Some(c);
         let attrs = self.cursor_attrs.clone();
         let screen = self.screen_mut();
         screen.snap_to_bottom();
@@ -441,6 +446,7 @@ impl vte::Perform for State {
     }
 
     fn execute(&mut self, byte: u8) {
+        self.last_print_char = None;
         trace!("execute: byte {}", byte);
         match byte {
             b'\n' => {
@@ -485,6 +491,7 @@ impl vte::Perform for State {
     }
 
     fn hook(&mut self, _params: &vte::Params, intermediates: &[u8], ignore: bool, action: char) {
+        self.last_print_char = None;
         debug!(
             "unhandled hook{}: {intermediates:?} {action}",
             if ignore { " (ignored)" } else { "" }
@@ -493,10 +500,12 @@ impl vte::Perform for State {
 
     fn put(&mut self, byte: u8) {
         trace!("unhandled put: {byte}");
+        self.last_print_char = None;
     }
 
     fn unhook(&mut self) {
         debug!("unhandled unhook");
+        self.last_print_char = None;
     }
 
     // OSC commands are of the form
@@ -510,6 +519,7 @@ impl vte::Perform for State {
     #[rustfmt::skip]
     fn osc_dispatch(&mut self, params: &[&[u8]], bell_terminated: bool) {
         trace!("osc_dispatch: {:?}", params);
+        self.last_print_char = None;
 
         let mut params_iter = params.iter();
         match params_iter.next() {
@@ -628,6 +638,10 @@ impl vte::Perform for State {
         }
 
         let mut params_iter = params.iter();
+
+        if action != 'b' || !intermediates.is_empty() {
+            self.last_print_char = None;
+        }
 
         match action {
             // CUU (Cursor Up)
@@ -800,6 +814,19 @@ impl vte::Perform for State {
                 let col = screen.cursor.col;
                 if let Some(l) = screen.get_line_mut() {
                     l.erase_character(width, col, &attrs, n);
+                }
+            }
+            // REP (Repeat Preceding Character)
+            'b' if intermediates.is_empty() => if let Some(c) = self.last_print_char {
+                let n = param_or(&mut params_iter, 1) as usize;
+
+                let cell = Cell::new(c, self.cursor_attrs.clone());
+                let screen = self.screen_mut();
+                screen.snap_to_bottom();
+                for _ in 0..n {
+                    if let Err(e) = screen.write_at_cursor(cell.clone()) {
+                        warn!("writing char at cursor: {e:?}");
+                    }
                 }
             }
 
@@ -1090,6 +1117,7 @@ impl vte::Perform for State {
             return;
         }
         trace!("esc_dispatch: {}", byte);
+        self.last_print_char = None;
 
         match (intermediates, byte) {
             // save cursor (ESC 7)
