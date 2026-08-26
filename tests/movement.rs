@@ -291,6 +291,64 @@ frag! {
 }
 
 frag! {
+    vertical_position_absolute { scrollback_lines: 100, width: 10, height: 10 }
+    <= term::Raw::from("A"),
+       term::ControlCodes::vertical_position_absolute(3),
+       term::Raw::from("B")
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::Raw::from("A"),
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::Raw::from(" B"),
+            term::ControlCodes::cursor_position(3, 3),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    vertical_position_absolute_default_one { scrollback_lines: 100, width: 10, height: 10 }
+    <= term::Raw::from("A"),
+       term::Crlf::default(),
+       term::Raw::from("B"),
+       term::ControlCode::CSI {
+           params: smallvec![],
+           intermediates: smallvec![],
+           action: 'd',
+       },
+       term::Raw::from("X")
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::Raw::from("AX"),
+            term::Crlf::default(),
+            term::Raw::from("B"),
+            term::ControlCodes::cursor_position(1, 3),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    vertical_position_absolute_origin_mode { scrollback_lines: 100, width: 4, height: 4 }
+    <= term::ControlCodes::set_scroll_region(2, 4),
+       term::control_codes().enable_scroll_region_origin_mode,
+       term::ControlCodes::vertical_position_absolute(2),
+       term::Raw::from("X"),
+       term::control_codes().disable_scroll_region_origin_mode
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::Raw::from("X"),
+            term::ControlCodes::set_scroll_region(2, 4),
+            term::ControlCodes::cursor_position(3, 2),
+            term::control_codes().clear_attrs
+}
+
+frag! {
     cursor_position_no_params { scrollback_lines: 100, width: 10, height: 10 }
     <= term::Raw::from("123"),
        // cursor position with no params (should be the same as (1,1)).

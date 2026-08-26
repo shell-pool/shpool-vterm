@@ -1147,6 +1147,14 @@ impl ControlCodes {
         }
     }
 
+    pub fn vertical_position_absolute(row: u16) -> ControlCode {
+        ControlCode::CSI {
+            params: smallvec![smallvec![row]],
+            intermediates: smallvec![],
+            action: 'd',
+        }
+    }
+
     fn move_cursor(n: u16, action: char) -> ControlCode {
         if n == 1 {
             ControlCode::CSI { params: smallvec![], intermediates: smallvec![], action }

@@ -829,6 +829,14 @@ impl vte::Perform for State {
                     }
                 }
             }
+            // VPA (Vertical Line Position Absolute)
+            'd' => {
+                let row = param_or(&mut params_iter, 1) as usize;
+                let col = self.screen().cursor.col + 1;
+                let screen = self.screen_mut();
+                screen.set_cursor(term::Pos { row, col });
+                screen.clamp();
+            }
 
             // SCP (Save Cursor Position)
             's' => {
