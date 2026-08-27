@@ -20,6 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+use anyhow::anyhow;
 use smallvec::{smallvec, SmallVec};
 use std::sync::OnceLock;
 
@@ -190,6 +191,60 @@ impl std::convert::From<&str> for Raw {
 impl AsTermInput for Raw {
     fn term_input_into(&self, buf: &mut Vec<u8>) {
         buf.extend_from_slice(self.inner.as_slice());
+    }
+}
+
+test_pub! {
+    #[derive(Debug, Eq, PartialEq)]
+    enum CursorStyle {
+        Default,
+        BlinkBlock,
+        SteadyBlock,
+        BlinkUnderline,
+        SteadyUnderline,
+        BlinkBar,
+        SteadyBar,
+    }
+}
+
+impl TryFrom<usize> for CursorStyle {
+    type Error = anyhow::Error;
+    fn try_from(value: usize) -> Result<Self, Self::Error> {
+        Ok(match value {
+            0 => CursorStyle::Default,
+            1 => CursorStyle::BlinkBlock,
+            2 => CursorStyle::SteadyBlock,
+            3 => CursorStyle::BlinkUnderline,
+            4 => CursorStyle::SteadyUnderline,
+            5 => CursorStyle::BlinkBar,
+            6 => CursorStyle::SteadyBar,
+            _ => return Err(anyhow!("unknown cursor style code {}", value)),
+        })
+    }
+}
+
+impl CursorStyle {
+    fn as_code(&self) -> u16 {
+        match self {
+            CursorStyle::Default => 0,
+            CursorStyle::BlinkBlock => 1,
+            CursorStyle::SteadyBlock => 2,
+            CursorStyle::BlinkUnderline => 3,
+            CursorStyle::SteadyUnderline => 4,
+            CursorStyle::BlinkBar => 5,
+            CursorStyle::SteadyBar => 6,
+        }
+    }
+}
+
+impl AsTermInput for CursorStyle {
+    fn term_input_into(&self, buf: &mut Vec<u8>) {
+        ControlCode::CSI {
+            params: smallvec![smallvec![self.as_code()]],
+            intermediates: smallvec![b' '],
+            action: 'q',
+        }
+        .term_input_into(buf);
     }
 }
 
@@ -542,6 +597,13 @@ test_pub! {
         },
         CSI {
             params: SmallVec<[SmallVec<[u16; 4]>; 2]>,
+            /// Holds both private parameter prefixes (0x3C..=0x3F, e.g.
+            /// `?` in `\x1b[?1049h`) and true ECMA-48 intermediate
+            /// bytes (0x20..=0x2F, e.g. space in `\x1b[1 q`).
+            ///
+            /// This mirrors how `vte` bundles both into
+            /// `Perform::csi_dispatch`, avoiding the need for
+            /// separate fields for prefixes and intermediates.
             intermediates: SmallVec<[u8; 8]>,
             action: char,
         },
@@ -591,7 +653,24 @@ impl AsTermInput for ControlCode {
             }
             ControlCode::CSI { params, intermediates, action } => {
                 buf.extend_from_slice(b"\x1b["); // CSI
-                buf.extend_from_slice(intermediates);
+
+                // In ANSI / ECMA-48 escape sequences, private
+                // parameter prefixes (0x3C..=0x3F, such as '?', '>',
+                // '=') must precede parameter digits, while true
+                // intermediate characters (0x20..=0x2F, such as space
+                // or '$') must follow parameters and precede the final
+                // action character.
+                //
+                // For convenience, both prefixes and intermediates are
+                // stored together in `intermediates` to mirror `vte`'s
+                // `csi_dispatch` signature. We filter by `>= 0x30` and
+                // `< 0x30` to serialize each byte into its correct
+                // position.
+                for intermediate in intermediates {
+                    if *intermediate >= 0x30 {
+                        buf.push(*intermediate);
+                    }
+                }
 
                 for (i, param) in params.iter().enumerate() {
                     if i != 0 {
@@ -603,6 +682,12 @@ impl AsTermInput for ControlCode {
                             buf.push(b':');
                         }
                         extend_itoa(buf, *subparam);
+                    }
+                }
+
+                for intermediate in intermediates {
+                    if *intermediate < 0x30 {
+                        buf.push(*intermediate);
                     }
                 }
 
@@ -634,7 +719,9 @@ impl std::fmt::Display for ControlCode {
             ControlCode::CSI { params, intermediates, action } => {
                 write!(f, "CSI ")?;
                 for intermediate in intermediates {
-                    write!(f, "{} ", *intermediate as char)?;
+                    if *intermediate >= 0x30 {
+                        write!(f, "{} ", *intermediate as char)?;
+                    }
                 }
                 for (i, param) in params.iter().enumerate() {
                     if i != 0 {
@@ -645,6 +732,11 @@ impl std::fmt::Display for ControlCode {
                             write!(f, ": ")?;
                         }
                         write!(f, "{} ", subparam)?;
+                    }
+                }
+                for intermediate in intermediates {
+                    if *intermediate < 0x30 {
+                        write!(f, "{} ", *intermediate as char)?;
                     }
                 }
                 write!(f, "{}", action)?;
@@ -1327,10 +1419,7 @@ impl ControlCodes {
 
     pub fn tab_clear(code: Option<u16>) -> ControlCode {
         let params = match code {
-            Some(c) => {
-                let inner: SmallVec<[u16; 4]> = smallvec![c];
-                smallvec![inner]
-            }
+            Some(c) => smallvec![smallvec![c]],
             None => smallvec![],
         };
         ControlCode::CSI { params, intermediates: smallvec![], action: 'g' }
@@ -1338,13 +1427,18 @@ impl ControlCodes {
 
     pub fn cursor_tab_control(code: Option<u16>) -> ControlCode {
         let params = match code {
-            Some(c) => {
-                let inner: SmallVec<[u16; 4]> = smallvec![c];
-                smallvec![inner]
-            }
+            Some(c) => smallvec![smallvec![c]],
             None => smallvec![],
         };
         ControlCode::CSI { params, intermediates: smallvec![], action: 'W' }
+    }
+
+    pub fn cursor_style(code: Option<u16>) -> ControlCode {
+        let params = match code {
+            Some(c) => smallvec![smallvec![c]],
+            None => smallvec![],
+        };
+        ControlCode::CSI { params, intermediates: smallvec![b' '], action: 'q' }
     }
 }
 
@@ -1398,4 +1492,88 @@ impl AsTermInput for Crlf {
 fn extend_itoa<I: itoa::Integer>(buf: &mut Vec<u8>, i: I) {
     let mut itoa_buf = itoa::Buffer::new();
     buf.extend_from_slice(itoa_buf.format(i).as_bytes());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Default)]
+    struct CsiRecorder {
+        dispatched: Vec<(Vec<Vec<u16>>, Vec<u8>, bool, char)>,
+    }
+
+    impl vte::Perform for CsiRecorder {
+        fn csi_dispatch(
+            &mut self,
+            params: &vte::Params,
+            intermediates: &[u8],
+            ignore: bool,
+            action: char,
+        ) {
+            let p: Vec<Vec<u16>> = params.iter().map(|sub| sub.to_vec()).collect();
+            self.dispatched.push((p, intermediates.to_vec(), ignore, action));
+        }
+    }
+
+    #[test]
+    fn test_csi_intermediate_vte_parse() {
+        let style = CursorStyle::SteadyBlock;
+        let mut buf = vec![];
+        style.term_input_into(&mut buf);
+        assert_eq!(buf, b"\x1b[2 q");
+
+        let mut parser = vte::Parser::new();
+        let mut recorder = CsiRecorder::default();
+        parser.advance(&mut recorder, &buf);
+
+        assert_eq!(recorder.dispatched.len(), 1);
+        let (params, intermediates, ignore, action) = &recorder.dispatched[0];
+        assert_eq!(*params, vec![vec![2]]);
+        assert_eq!(*intermediates, vec![b' ']);
+        assert_eq!(*ignore, false);
+        assert_eq!(*action, 'q');
+    }
+
+    #[test]
+    fn test_csi_prefix_vte_parse() {
+        let code = control_codes().enable_alt_screen.clone();
+        let mut buf = vec![];
+        code.term_input_into(&mut buf);
+        assert_eq!(buf, b"\x1b[?1049h");
+
+        let mut parser = vte::Parser::new();
+        let mut recorder = CsiRecorder::default();
+        parser.advance(&mut recorder, &buf);
+
+        assert_eq!(recorder.dispatched.len(), 1);
+        let (params, intermediates, ignore, action) = &recorder.dispatched[0];
+        assert_eq!(*params, vec![vec![1049]]);
+        assert_eq!(*intermediates, vec![b'?']);
+        assert_eq!(*ignore, false);
+        assert_eq!(*action, 'h');
+    }
+
+    #[test]
+    fn test_csi_prefix_and_intermediate_vte_parse() {
+        let code = ControlCode::CSI {
+            params: smallvec![smallvec![1049]],
+            intermediates: smallvec![b'?', b'$'],
+            action: 'p',
+        };
+        let mut buf = vec![];
+        code.term_input_into(&mut buf);
+        assert_eq!(buf, b"\x1b[?1049$p");
+
+        let mut parser = vte::Parser::new();
+        let mut recorder = CsiRecorder::default();
+        parser.advance(&mut recorder, &buf);
+
+        assert_eq!(recorder.dispatched.len(), 1);
+        let (params, intermediates, ignore, action) = &recorder.dispatched[0];
+        assert_eq!(*params, vec![vec![1049]]);
+        assert_eq!(*intermediates, vec![b'?', b'$']);
+        assert_eq!(*ignore, false);
+        assert_eq!(*action, 'p');
+    }
 }

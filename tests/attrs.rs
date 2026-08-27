@@ -580,3 +580,153 @@ frag! {
             term::control_codes().enable_report_focus,
             term::control_codes().enable_paste_mode
 }
+
+frag! {
+    cursor_style_blink_block { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::CursorStyle::BlinkBlock
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs,
+            term::CursorStyle::BlinkBlock
+}
+
+frag! {
+    cursor_style_steady_block { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::CursorStyle::SteadyBlock
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs,
+            term::CursorStyle::SteadyBlock
+}
+
+frag! {
+    cursor_style_blink_underline { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::CursorStyle::BlinkUnderline
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs,
+            term::CursorStyle::BlinkUnderline
+}
+
+frag! {
+    cursor_style_steady_underline { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::CursorStyle::SteadyUnderline
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs,
+            term::CursorStyle::SteadyUnderline
+}
+
+frag! {
+    cursor_style_blink_bar { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::CursorStyle::BlinkBar
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs,
+            term::CursorStyle::BlinkBar
+}
+
+frag! {
+    cursor_style_steady_bar { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::CursorStyle::SteadyBar
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs,
+            term::CursorStyle::SteadyBar
+}
+
+frag! {
+    cursor_style_switch { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::CursorStyle::BlinkBlock,
+       term::CursorStyle::SteadyBar
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs,
+            term::CursorStyle::SteadyBar
+}
+
+frag! {
+    cursor_style_reset { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::CursorStyle::SteadyBar,
+       term::CursorStyle::Default
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    cursor_style_with_text { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::CursorStyle::SteadyBar,
+       term::Raw::from("abc")
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::Raw::from("abc"),
+            term::ControlCodes::cursor_position(1, 4),
+            term::control_codes().clear_attrs,
+            term::CursorStyle::SteadyBar
+}
+
+frag! {
+    cursor_style_and_hide_cursor { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::CursorStyle::SteadyBar,
+       term::control_codes().hide_cursor
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs,
+            term::CursorStyle::SteadyBar,
+            term::control_codes().hide_cursor
+}
+
+frag! {
+    cursor_style_no_params { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::CursorStyle::SteadyBar,
+       term::ControlCodes::cursor_style(None)
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    cursor_style_out_of_bounds { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::CursorStyle::SteadyBar,
+       term::ControlCodes::cursor_style(Some(99))
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs,
+            term::CursorStyle::SteadyBar
+}

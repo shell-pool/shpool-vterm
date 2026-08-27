@@ -152,8 +152,12 @@ struct State {
     last_print_char: Option<char>,
     /// The current cursor attrs. These are shared between the scrollback
     /// and alt screens, which is why they are stored here rather than
-    /// with the curors themsevles.
+    /// with the curors themsevles. If we think of the cursor as a paintbrush,
+    /// these attrs are the color paint that it is currently holding.
     cursor_attrs: term::Attrs,
+    /// The style for the cursor itself, not for the characters that
+    /// the cursor is emitting.
+    cursor_style: term::CursorStyle,
     /// The terminal title, as set by `OSC 0` and `OSC 2`.
     title: Option<SmallVec<[u8; 8]>>,
     /// The terminal icon name, as set by `OSC 0` and `OSC 1`.
@@ -218,6 +222,7 @@ impl State {
             altscreen: Screen::alt(size),
             screen_mode: ScreenMode::Scrollback,
             cursor_attrs: term::Attrs::default(),
+            cursor_style: term::CursorStyle::Default,
             title: None,
             icon_name: None,
             working_dir: None,
@@ -332,6 +337,9 @@ impl State {
         let codes = term::Attrs::default().transition_to(&self.cursor_attrs);
         for c in codes.into_iter() {
             c.term_input_into(buf);
+        }
+        if self.cursor_style != term::CursorStyle::Default {
+            self.cursor_style.term_input_into(buf);
         }
 
         // Restore the title / icon name. Most terminals treat theses as the
@@ -1081,6 +1089,7 @@ impl vte::Perform for State {
                     self.tabstops.fill(false);
                     let width = self.screen().size.width;
                     self.fill_tabstops(0, width);
+                    self.cursor_style = term::CursorStyle::Default;
 
                     warn!("DECSTR only partially handled");
                 }
@@ -1104,6 +1113,14 @@ impl vte::Perform for State {
                     intermediates,
                     params.iter().collect::<Vec<&[u16]>>()
                 ),
+            },
+            // DECSCUSR (Set Cursor Style / Shape)
+            'q' if intermediates == [b' '] => {
+                let code = param_or(&mut params_iter, 0) as usize;
+                match term::CursorStyle::try_from(code) {
+                    Ok(style) => self.cursor_style = style,
+                    Err(e) => warn!("parsing cursor style: {:?}", e),
+                }
             },
             // DECSTBM (Set Scroll Region)
             'r' => {
@@ -1166,6 +1183,7 @@ impl vte::Perform for State {
                 self.tabstops.fill(false);
                 let width = self.screen().size.width;
                 self.fill_tabstops(0, width);
+                self.cursor_style = term::CursorStyle::Default;
 
                 warn!("RIS only partially handled");
             }
