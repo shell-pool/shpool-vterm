@@ -866,6 +866,7 @@ impl vte::Perform for State {
                     }
                 }
             }
+            'c' => debug!("CSI ... c - device attribute query"),
             // VPA (Vertical Line Position Absolute)
             'd' => {
                 let row = param_or(&mut params_iter, 1) as usize;
