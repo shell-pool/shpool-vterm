@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1](https://github.com/shell-pool/shpool-vterm/compare/v0.2.0...v0.2.1) - 2026-08-27
+
+### Added
+
+- add HVP support
+- add title stack support
+- add cursor style support
+- add VPA support
+- add REP support
+- add HPA support
+- suppress ascii charset config codes
+- add report focus tracking support
+
+### Other
+
+- ignore DA queries
+- suppress query control code logs
+
 ## [0.2.0](https://github.com/shell-pool/shpool-vterm/compare/v0.1.0...v0.2.0) - 2026-08-14
 
 ### Added
