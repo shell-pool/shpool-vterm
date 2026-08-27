@@ -748,6 +748,13 @@ impl std::fmt::Display for ControlCode {
                 }
                 write!(f, "{}", byte)?;
             }
+            ControlCode::OSC { params, term } => {
+                write!(f, "OSC ")?;
+                for param in params {
+                    write!(f, "{} ", String::from_utf8_lossy(param.as_slice()))?;
+                }
+                write!(f, "{:?}", term)?;
+            }
             _ => write!(f, "<display unimpl>")?,
         }
 
@@ -1439,6 +1446,22 @@ impl ControlCodes {
             None => smallvec![],
         };
         ControlCode::CSI { params, intermediates: smallvec![b' '], action: 'q' }
+    }
+
+    pub fn save_title(code: Option<u16>) -> ControlCode {
+        let params = match code {
+            Some(c) => smallvec![smallvec![22], smallvec![c]],
+            None => smallvec![smallvec![22]],
+        };
+        ControlCode::CSI { params, intermediates: smallvec![], action: 't' }
+    }
+
+    pub fn restore_title(code: Option<u16>) -> ControlCode {
+        let params = match code {
+            Some(c) => smallvec![smallvec![23], smallvec![c]],
+            None => smallvec![smallvec![23]],
+        };
+        ControlCode::CSI { params, intermediates: smallvec![], action: 't' }
     }
 }
 

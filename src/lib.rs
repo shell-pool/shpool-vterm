@@ -42,6 +42,8 @@ mod term;
 #[cfg(feature = "unstable-internal-test")]
 pub mod term;
 
+const MAX_TITLE_STACK_DEPTH: usize = 64;
+
 /// A representation of a terminal.
 pub struct Term {
     parser: vte::Parser,
@@ -159,9 +161,9 @@ struct State {
     /// the cursor is emitting.
     cursor_style: term::CursorStyle,
     /// The terminal title, as set by `OSC 0` and `OSC 2`.
-    title: Option<SmallVec<[u8; 8]>>,
+    title_stack: Vec<SmallVec<[u8; 8]>>,
     /// The terminal icon name, as set by `OSC 0` and `OSC 1`.
-    icon_name: Option<SmallVec<[u8; 8]>>,
+    icon_name_stack: Vec<SmallVec<[u8; 8]>>,
     /// The terminal working directory (some terminal emulators use this
     /// to know what directory to start new shells in).
     working_dir: Option<WorkingDir>,
@@ -223,8 +225,8 @@ impl State {
             screen_mode: ScreenMode::Scrollback,
             cursor_attrs: term::Attrs::default(),
             cursor_style: term::CursorStyle::Default,
-            title: None,
-            icon_name: None,
+            title_stack: vec![],
+            icon_name_stack: vec![],
             working_dir: None,
             palette_overrides: BTreeMap::new(),
             functional_colors: [NONE_VEC; 10],
@@ -346,19 +348,27 @@ impl State {
         // same thing these days, but we'll go the extra mile and differentiate
         // rather than just always sending `OSC 0 ; <title> ST` in case there is
         // a terminal that actually makes a distinction.
-        match (&self.title, &self.icon_name) {
-            (Some(title), Some(icon_name)) if title == icon_name => {
+        match (self.title_stack.last(), self.icon_name_stack.last()) {
+            (Some(title), Some(icon_name)) if !title.is_empty() && title == icon_name => {
                 ControlCodes::set_title_and_icon_name(title.clone()).term_input_into(buf)
             }
             (Some(title), Some(icon_name)) => {
-                ControlCodes::set_title(title.clone()).term_input_into(buf);
-                ControlCodes::set_icon_name(icon_name.clone()).term_input_into(buf);
+                if !title.is_empty() {
+                    ControlCodes::set_title(title.clone()).term_input_into(buf);
+                }
+                if !icon_name.is_empty() {
+                    ControlCodes::set_icon_name(icon_name.clone()).term_input_into(buf);
+                }
             }
             (Some(title), None) => {
-                ControlCodes::set_title(title.clone()).term_input_into(buf);
+                if !title.is_empty() {
+                    ControlCodes::set_title(title.clone()).term_input_into(buf);
+                }
             }
             (None, Some(icon_name)) => {
-                ControlCodes::set_icon_name(icon_name.clone()).term_input_into(buf);
+                if !icon_name.is_empty() {
+                    ControlCodes::set_icon_name(icon_name.clone()).term_input_into(buf);
+                }
             }
             (None, None) => {}
         }
@@ -431,6 +441,22 @@ impl State {
             }
 
             idx += 1;
+        }
+    }
+
+    fn set_title(&mut self, title: SmallVec<[u8; 8]>) {
+        if let Some(top) = self.title_stack.last_mut() {
+            *top = title;
+        } else {
+            self.title_stack.push(title);
+        }
+    }
+
+    fn set_icon_name(&mut self, icon_name: SmallVec<[u8; 8]>) {
+        if let Some(top) = self.icon_name_stack.last_mut() {
+            *top = icon_name;
+        } else {
+            self.icon_name_stack.push(icon_name);
         }
     }
 }
@@ -533,18 +559,21 @@ impl vte::Perform for State {
         match params_iter.next() {
             // Title manipulation
             Some([b'0']) => if let Some(title) = params_iter.next() {
-                self.title = Some(title.to_vec().into());
-                self.icon_name = Some(title.to_vec().into());
+                let title: SmallVec<[u8; 8]> = title.to_vec().into();
+                self.set_title(title.clone());
+                self.set_icon_name(title);
             } else {
                 warn!("OSC 0 with no title param");
             },
             Some([b'1']) => if let Some(icon_name) = params_iter.next() {
-                self.icon_name = Some(icon_name.to_vec().into());
+                let icon_name: SmallVec<[u8; 8]> = icon_name.to_vec().into();
+                self.set_icon_name(icon_name);
             } else {
                 warn!("OSC 1 with no icon_name param");
             },
             Some([b'2']) => if let Some(title) = params_iter.next() {
-                self.title = Some(title.to_vec().into());
+                let title: SmallVec<[u8; 8]> = title.to_vec().into();
+                self.set_title(title);
             } else {
                 warn!("OSC 2 with no title param");
             },
@@ -851,6 +880,44 @@ impl vte::Perform for State {
                 let screen = self.screen_mut();
                 let cursor = screen.cursor.clone();
                 screen.saved_cursor.pos = cursor;
+            }
+            // Window Title Operations
+            't' => while let Some(code) = params_iter.next() {
+                match code {
+                    [14] => debug!("CSI 14 t - pixel size query"),
+                    [16] => debug!("CSI 16 t - cell size query"),
+                    [18] => debug!("CSI 18 t - term size query"),
+                    [19] => debug!("CSI 19 t - display size query"),
+                    [22] => {
+                        let code = param_or(&mut params_iter, 0) as usize;
+                        if (code == 0 || code == 1) && self.icon_name_stack.len() < MAX_TITLE_STACK_DEPTH {
+                            if let Some(icon_name) = self.icon_name_stack.last().cloned() {
+                                self.icon_name_stack.push(icon_name);
+                            } else {
+                                self.icon_name_stack.push(SmallVec::new());
+                            }
+                        }
+
+                        if (code == 0 || code == 2) && self.title_stack.len() < MAX_TITLE_STACK_DEPTH {
+                            if let Some(title) = self.title_stack.last().cloned() {
+                                self.title_stack.push(title);
+                            } else {
+                                self.title_stack.push(SmallVec::new());
+                            }
+                        }
+                    }
+                    [23] => {
+                        let code = param_or(&mut params_iter, 0) as usize;
+                        if code == 0 || code == 1 {
+                            self.icon_name_stack.pop();
+                        }
+
+                        if code == 0 || code == 2 {
+                            self.title_stack.pop();
+                        }
+                    }
+                    _ => warn!("unhandled CSI ... {:?} t", code),
+                }
             }
             // RCP (Restore Cursor Position)
             'u' => {
