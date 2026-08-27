@@ -1230,6 +1230,18 @@ impl ControlCodes {
         }
     }
 
+    pub fn horizontal_and_vertical_position(row: u16, col: u16) -> ControlCode {
+        if row == 1 && col == 1 {
+            ControlCode::CSI { params: smallvec![], intermediates: smallvec![], action: 'f' }
+        } else {
+            ControlCode::CSI {
+                params: smallvec![smallvec![row], smallvec![col]],
+                intermediates: smallvec![],
+                action: 'f',
+            }
+        }
+    }
+
     pub fn cursor_horizontal_absolute(col: u16) -> ControlCode {
         ControlCode::CSI {
             params: smallvec![smallvec![col]],

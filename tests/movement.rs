@@ -240,6 +240,23 @@ frag! {
 }
 
 frag! {
+    horizontal_and_vertical_position { scrollback_lines: 100, width: 10, height: 10 }
+    <= term::Raw::from("A"),
+       term::ControlCodes::horizontal_and_vertical_position(3, 3),
+       term::Raw::from("B")
+    => ContentRegion::All =>
+            term::control_codes().clear_attrs,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_screen,
+            term::Raw::from("A"),
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::Raw::from("  B"),
+            term::ControlCodes::cursor_position(3, 4),
+            term::control_codes().clear_attrs
+}
+
+frag! {
     scp_rcp { scrollback_lines: 100, width: 10, height: 10 }
     <= term::Raw::from("A"),
        term::control_codes().save_cursor_position,

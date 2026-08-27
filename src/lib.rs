@@ -735,8 +735,9 @@ impl vte::Perform for State {
                 screen.cursor.col = n;
                 screen.clamp();
             }
+            // HVP (Horizontal and Vertical Position)
             // CUP (Cursor Set Position)
-            'H' => {
+            'f' | 'H' => {
                 // parse the params and adjust 1 indexing to 0 indexing
                 let row = param_or(&mut params_iter, 1) as usize;
                 let col = param_or(&mut params_iter, 1) as usize;
