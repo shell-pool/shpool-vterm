@@ -19,13 +19,13 @@
 use crate::{
     cell::Cell,
     line::{self, Line},
+    log,
     term::{self, AsTermInput, OriginMode, Pos, ScrollRegion},
     ContentRegion,
 };
 use std::collections::VecDeque;
 
 use anyhow::{anyhow, Context};
-use tracing::{error, warn};
 
 // A scrollback stores the termianal state for the main screen.
 // Alt screen state is stored seperately.
@@ -46,6 +46,7 @@ pub(crate) struct Scrollback {
     /// This is set by DECSTBM (CSI n ; n r).
     pub scroll_region: ScrollRegion,
     pub origin_mode: OriginMode,
+    logger: log::Context,
 }
 
 impl std::fmt::Display for Scrollback {
@@ -67,7 +68,12 @@ impl Scrollback {
             lines: scrollback_lines,
             scroll_region: ScrollRegion::default(),
             origin_mode: OriginMode::default(),
+            logger: log::Context::None,
         }
+    }
+
+    pub fn set_logger(&mut self, logger: log::Context) {
+        self.logger = logger;
     }
 
     /// Get the max number of scrollback lines this grid
@@ -410,14 +416,14 @@ impl Scrollback {
                                 to_line.erase(line::Section::Whole);
                             }
                         } else {
-                            warn!("scrollback::scroll_down: out of bounds shuffle");
+                            warn!(self.logger, "scrollback::scroll_down: out of bounds shuffle");
                         }
                     }
                     for i in 0..n {
                         if let Some(line) = self.get_line_mut(*size, top + to_shuffle + i) {
                             line.erase(line::Section::Whole);
                         } else {
-                            warn!("scrollback::scroll_down: out of bounds backfill");
+                            warn!(self.logger, "scrollback::scroll_down: out of bounds backfill");
                         }
                     }
                 }
@@ -453,7 +459,7 @@ impl Scrollback {
             if let Some(l) = self.buf.pop_front() {
                 lines_below_cursor.push(l);
             } else {
-                error!("internal error: row idx computed incorrectly");
+                error!(self.logger, "internal error: row idx computed incorrectly");
             }
         }
 
@@ -507,7 +513,7 @@ impl Scrollback {
             if let Some(l) = self.buf.pop_front() {
                 lines_below_cursor.push(l);
             } else {
-                error!("internal error: row idx computed incorrectly");
+                error!(self.logger, "internal error: row idx computed incorrectly");
             }
         }
 

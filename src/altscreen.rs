@@ -19,6 +19,7 @@ use std::collections::VecDeque;
 use crate::{
     cell::Cell,
     line::{self, Line},
+    log,
     term::{self, AsTermInput, OriginMode, Pos, ScrollRegion},
 };
 
@@ -36,6 +37,7 @@ pub(crate) struct AltScreen {
     /// This is set by DECSTBM (CSI n ; n r).
     pub scroll_region: ScrollRegion,
     pub origin_mode: OriginMode,
+    logger: log::Context,
 }
 
 impl AltScreen {
@@ -48,7 +50,12 @@ impl AltScreen {
             buf,
             scroll_region: ScrollRegion::default(),
             origin_mode: OriginMode::default(),
+            logger: log::Context::None,
         }
+    }
+
+    pub fn set_logger(&mut self, logger: log::Context) {
+        self.logger = logger;
     }
 
     /// Write the given cell to the given cursor position, returning the next

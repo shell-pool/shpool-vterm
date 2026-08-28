@@ -19,11 +19,10 @@ use crate::{
     altscreen::AltScreen,
     cell::Cell,
     line::Line,
+    log,
     scrollback::Scrollback,
     term::{self, AsTermInput, OriginMode, Pos, ScrollRegion},
 };
-
-use tracing::warn;
 
 /// A screen containts some kind of grid of cells, plus top
 /// level fields that are common to all screen variants.
@@ -41,6 +40,7 @@ pub struct Screen {
     // The slot where cursor position info is saved by the SCP/RCP
     // and ESC 7 / ESC 8 commands.
     pub saved_cursor: SavedCursor,
+    logger: log::Context,
 }
 
 impl Screen {
@@ -55,6 +55,7 @@ impl Screen {
             size,
             cursor: Pos { row: 0, col: 0 },
             saved_cursor: SavedCursor::new(Pos { row: 0, col: 0 }),
+            logger: log::Context::None,
         }
     }
 
@@ -65,7 +66,13 @@ impl Screen {
             size,
             cursor: Pos { row: 0, col: 0 },
             saved_cursor: SavedCursor::new(Pos { row: 0, col: 0 }),
+            logger: log::Context::None,
         }
+    }
+
+    pub fn set_logger(&mut self, logger: log::Context) {
+        self.grid.set_logger(logger.clone());
+        self.logger = logger;
     }
 
     /// Return the number of scrollback lines iff this is a scrollback screen.
@@ -83,7 +90,7 @@ impl Screen {
         if let Grid::Scrollback(scrollback) = &mut self.grid {
             scrollback.set_scrollback_lines(self.size, scrollback_lines);
         } else {
-            warn!("attempt to set scrollback lines on non-scrollback screen");
+            warn!(self.logger, "attempt to set scrollback lines on non-scrollback screen");
         }
     }
 
@@ -327,6 +334,13 @@ impl Grid {
         match self {
             Grid::Scrollback(s) => &s.scroll_region,
             Grid::AltScreen(alt) => &alt.scroll_region,
+        }
+    }
+
+    fn set_logger(&mut self, logger: log::Context) {
+        match self {
+            Grid::Scrollback(s) => s.set_logger(logger),
+            Grid::AltScreen(alt) => alt.set_logger(logger),
         }
     }
 }

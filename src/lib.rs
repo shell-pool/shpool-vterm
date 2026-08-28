@@ -25,10 +25,12 @@ use crate::{
 
 use bitvec::{bitvec, vec::BitVec};
 use smallvec::SmallVec;
-use tracing::{debug, trace, warn};
 
 #[macro_use]
 mod visibility;
+
+#[macro_use]
+mod log;
 
 mod altscreen;
 mod cell;
@@ -48,6 +50,7 @@ const MAX_TITLE_STACK_DEPTH: usize = 64;
 pub struct Term {
     parser: vte::Parser,
     state: State,
+    logger: log::Context,
 }
 
 impl Term {
@@ -60,7 +63,20 @@ impl Term {
     /// less than size.height, it will be automatically adjusted
     /// to be equal to size.height.
     pub fn new(scrollback_lines: usize, size: Size) -> Self {
-        Term { parser: vte::Parser::new(), state: State::new(scrollback_lines, size) }
+        Term {
+            parser: vte::Parser::new(),
+            state: State::new(scrollback_lines, size),
+            logger: log::Context::None,
+        }
+    }
+
+    /// Attach a tag to this term to help uniquely identify it
+    /// in log and error messages. This is useful for applications
+    /// which juggle multiple vterm instances at once.
+    pub fn tag(&mut self, tag: String) {
+        let logger = log::Context::Tag(tag);
+        self.logger = logger.clone();
+        self.state.set_logger(logger);
     }
 
     /// Get the current terminal size.
@@ -193,6 +209,7 @@ struct State {
     /// starting at col 9, but they can be directly manipulated by certain
     /// control codes as well.
     tabstops: BitVec,
+    logger: log::Context,
 }
 
 struct WorkingDir {
@@ -236,9 +253,16 @@ impl State {
             in_paste_mode: false,
             tabstops: bitvec![0; size.width],
             last_print_char: None,
+            logger: log::Context::None,
         };
         st.fill_tabstops(0, size.width);
         st
+    }
+
+    fn set_logger(&mut self, logger: log::Context) {
+        self.scrollback.set_logger(logger.clone());
+        self.altscreen.set_logger(logger.clone());
+        self.logger = logger;
     }
 
     fn screen_mut(&mut self) -> &mut Screen {
@@ -296,7 +320,7 @@ impl State {
             let i: u16 = match i.try_into() {
                 Ok(i) => i,
                 Err(e) => {
-                    warn!("generating tabstop codes: index out of bounds: {:?}", e);
+                    warn!(self.logger, "generating tabstop codes: index out of bounds: {:?}", e);
                     return;
                 }
             };
@@ -469,19 +493,19 @@ enum ScreenMode {
 
 impl vte::Perform for State {
     fn print(&mut self, c: char) {
-        trace!("print: {}", c);
+        trace!(self.logger, "print: {}", c);
         self.last_print_char = Some(c);
         let attrs = self.cursor_attrs.clone();
         let screen = self.screen_mut();
         screen.snap_to_bottom();
         if let Err(e) = screen.write_at_cursor(Cell::new(c, attrs)) {
-            warn!("writing char at cursor: {e:?}");
+            warn!(self.logger, "writing char at cursor: {:?}", e);
         }
     }
 
     fn execute(&mut self, byte: u8) {
         self.last_print_char = None;
-        trace!("execute: byte {}", byte);
+        trace!(self.logger, "execute: byte {}", byte);
         match byte {
             b'\n' => {
                 let screen = self.screen_mut();
@@ -519,7 +543,7 @@ impl vte::Perform for State {
             // bell, ignore
             b'\x07' => {}
             _ => {
-                warn!("execute: unhandled byte {}", byte);
+                warn!(self.logger, "execute: unhandled byte {}", byte);
             }
         }
     }
@@ -527,18 +551,21 @@ impl vte::Perform for State {
     fn hook(&mut self, _params: &vte::Params, intermediates: &[u8], ignore: bool, action: char) {
         self.last_print_char = None;
         debug!(
-            "unhandled hook{}: {intermediates:?} {action}",
-            if ignore { " (ignored)" } else { "" }
+            self.logger,
+            "unhandled hook{}: {:?} {}",
+            if ignore { " (ignored)" } else { "" },
+            intermediates,
+            action
         );
     }
 
     fn put(&mut self, byte: u8) {
-        trace!("unhandled put: {byte}");
+        trace!(self.logger, "unhandled put: {}", byte);
         self.last_print_char = None;
     }
 
     fn unhook(&mut self) {
-        debug!("unhandled unhook");
+        debug!(self.logger, "unhandled unhook");
         self.last_print_char = None;
     }
 
@@ -552,7 +579,7 @@ impl vte::Perform for State {
     // same regardless of the terminator they have.
     #[rustfmt::skip]
     fn osc_dispatch(&mut self, params: &[&[u8]], bell_terminated: bool) {
-        trace!("osc_dispatch: {:?}", params);
+        trace!(self.logger, "osc_dispatch: {:?}", params);
         self.last_print_char = None;
 
         let mut params_iter = params.iter();
@@ -563,19 +590,19 @@ impl vte::Perform for State {
                 self.set_title(title.clone());
                 self.set_icon_name(title);
             } else {
-                warn!("OSC 0 with no title param");
+                warn!(self.logger, "OSC 0 with no title param");
             },
             Some([b'1']) => if let Some(icon_name) = params_iter.next() {
                 let icon_name: SmallVec<[u8; 8]> = icon_name.to_vec().into();
                 self.set_icon_name(icon_name);
             } else {
-                warn!("OSC 1 with no icon_name param");
+                warn!(self.logger, "OSC 1 with no icon_name param");
             },
             Some([b'2']) => if let Some(title) = params_iter.next() {
                 let title: SmallVec<[u8; 8]> = title.to_vec().into();
                 self.set_title(title);
             } else {
-                warn!("OSC 2 with no title param");
+                warn!(self.logger, "OSC 2 with no title param");
             },
 
             // Color Palette
@@ -592,9 +619,9 @@ impl vte::Perform for State {
                         Ok(i) => {
                             self.palette_overrides.insert(i, color_spec.to_vec());
                         },
-                        Err(e) => warn!("OSC 4: idx is an invalid number '{s}': {e}"),
+                        Err(e) => warn!(self.logger, "OSC 4: idx is an invalid number '{}': {}", s, e),
                     },
-                    Err(e) => warn!("OSC 4: invalid idx '{idx:?}': {e}"),
+                    Err(e) => warn!(self.logger, "OSC 4: invalid idx '{:?}': {}", idx, e),
                 }
             },
             Some([b'1', b'0', b'4']) => while let Some(idx) = params_iter.next() {
@@ -603,9 +630,9 @@ impl vte::Perform for State {
                         Ok(i) => {
                             self.palette_overrides.remove(&i);
                         },
-                        Err(e) => warn!("OSC 104: idx is an invalid number '{s}': {e}"),
+                        Err(e) => warn!(self.logger, "OSC 104: idx is an invalid number '{}': {}", s, e),
                     },
-                    Err(e) => warn!("OSC 104: invalid idx '{idx:?}': {e}"),
+                    Err(e) => warn!(self.logger, "OSC 104: invalid idx '{:?}': {}", idx, e),
                 }
             },
 
@@ -616,7 +643,7 @@ impl vte::Perform for State {
                     dir: dir.to_vec().into(),
                 });
             } else {
-                warn!("OSC 7 with fewer than 2 params");
+                warn!(self.logger, "OSC 7 with fewer than 2 params");
             },
 
             // Links. Depending on params, OSC 8 both starts and ends links.
@@ -637,13 +664,13 @@ impl vte::Perform for State {
             Some([b'1', x]) if b'0' <= *x && *x <= b'9' =>
                 self.set_functional_color((*x - b'0') as usize, params_iter),
 
-            Some([b'5', b'2']) => debug!("ignoring OSC 52 (clipboard)"),
-            Some([b'9']) => debug!("ignoring OSC 9 (desktop notification)"),
-            Some([b'7', b'7', b'7']) => debug!("ignoring OSC 777"),
-            Some([b'1', b'3', b'3']) => debug!("ignoring OSC 133 (iterm2 marks)"),
-            Some([b'3', b'0', b'0', b'8']) => debug!("ignoring OSC 3008 (systemd context signaling)"),
+            Some([b'5', b'2']) => debug!(self.logger, "ignoring OSC 52 (clipboard)"),
+            Some([b'9']) => debug!(self.logger, "ignoring OSC 9 (desktop notification)"),
+            Some([b'7', b'7', b'7']) => debug!(self.logger, "ignoring OSC 777"),
+            Some([b'1', b'3', b'3']) => debug!(self.logger, "ignoring OSC 133 (iterm2 marks)"),
+            Some([b'3', b'0', b'0', b'8']) => debug!(self.logger, "ignoring OSC 3008 (systemd context signaling)"),
 
-            _ => warn!("unhandled 'OSC {:?} {}'", params, if bell_terminated {
+            _ => warn!(self.logger, "unhandled 'OSC {:?} {}'", params, if bell_terminated {
                 "BEL"
             } else {
                 "ST"
@@ -666,11 +693,11 @@ impl vte::Perform for State {
         action: char,
     ) {
         if ignore {
-            warn!("malformed CSI seq");
+            warn!(self.logger, "malformed CSI seq");
             return;
         }
         if tracing::enabled!(tracing::Level::TRACE) {
-            trace!("csi_dispatch: intermediates={:?} params={:?} {}",
+            trace!(self.logger, "csi_dispatch: intermediates={:?} params={:?} {}",
                 intermediates, params.iter().collect::<Vec<_>>(), action);
         }
 
@@ -752,7 +779,7 @@ impl vte::Perform for State {
                     [1] => self.screen_mut().erase_from_start(),
                     [2] => self.screen_mut().erase(false),
                     [3] => self.screen_mut().erase(true),
-                    _ => warn!("unhandled 'CSI {code:?} J'"),
+                    _ => warn!(self.logger, "unhandled 'CSI {:?} J'", code),
                 }
             }
             // EL (Erase in Line)
@@ -775,7 +802,7 @@ impl vte::Perform for State {
                     [2] => if let Some(l) = self.screen_mut().get_line_mut() {
                         l.erase(line::Section::Whole);
                     }
-                    _ => warn!("unhandled 'CSI {code:?} K'"),
+                    _ => warn!(self.logger, "unhandled 'CSI {:?} K'", code),
                 }
             }
             // IL (Insert Line)
@@ -808,7 +835,7 @@ impl vte::Perform for State {
                     5 => {
                         self.tabstops.fill(false);
                     }
-                    _ => warn!("unhandled 'CSI {code:?} W'"),
+                    _ => warn!(self.logger, "unhandled 'CSI {:?} W'", code),
                 }
             }
             // SD (Scroll Down)
@@ -857,17 +884,18 @@ impl vte::Perform for State {
             // REP (Repeat Preceding Character)
             'b' if intermediates.is_empty() => if let Some(c) = self.last_print_char {
                 let n = param_or(&mut params_iter, 1) as usize;
+                let logger = self.logger.clone();
 
                 let cell = Cell::new(c, self.cursor_attrs.clone());
                 let screen = self.screen_mut();
                 screen.snap_to_bottom();
                 for _ in 0..n {
                     if let Err(e) = screen.write_at_cursor(cell.clone()) {
-                        warn!("writing char at cursor: {e:?}");
+                        warn!(logger, "writing char at cursor: {:?}", e);
                     }
                 }
             }
-            'c' => debug!("CSI ... c - device attribute query"),
+            'c' => debug!(self.logger, "CSI ... c - device attribute query"),
             // VPA (Vertical Line Position Absolute)
             'd' => {
                 let row = param_or(&mut params_iter, 1) as usize;
@@ -886,10 +914,10 @@ impl vte::Perform for State {
             // Window Title Operations
             't' => while let Some(code) = params_iter.next() {
                 match code {
-                    [14] => debug!("CSI 14 t - pixel size query"),
-                    [16] => debug!("CSI 16 t - cell size query"),
-                    [18] => debug!("CSI 18 t - term size query"),
-                    [19] => debug!("CSI 19 t - display size query"),
+                    [14] => debug!(self.logger, "CSI 14 t - pixel size query"),
+                    [16] => debug!(self.logger, "CSI 16 t - cell size query"),
+                    [18] => debug!(self.logger, "CSI 18 t - term size query"),
+                    [19] => debug!(self.logger, "CSI 19 t - display size query"),
                     [22] => {
                         let code = param_or(&mut params_iter, 0) as usize;
                         if (code == 0 || code == 1) && self.icon_name_stack.len() < MAX_TITLE_STACK_DEPTH {
@@ -918,7 +946,7 @@ impl vte::Perform for State {
                             self.title_stack.pop();
                         }
                     }
-                    _ => warn!("unhandled CSI ... {:?} t", code),
+                    _ => warn!(self.logger, "unhandled CSI ... {:?} t", code),
                 }
             }
             // RCP (Restore Cursor Position)
@@ -939,7 +967,7 @@ impl vte::Perform for State {
                     3 => {
                         self.tabstops.fill(false);
                     }
-                    _ => warn!("unhandled 'CSI {code:?} g'"),
+                    _ => warn!(self.logger, "unhandled 'CSI {:?} g'", code),
                 }
             }
 
@@ -964,6 +992,7 @@ impl vte::Perform for State {
 
                         _ => {
                             warn!(
+                                self.logger,
                                 "Unhandled CSI h command: CSI {:?} {:?} h",
                                 intermediates,
                                 params.iter().collect::<Vec<&[u16]>>()
@@ -973,6 +1002,7 @@ impl vte::Perform for State {
                     }
                 }
                 _ => warn!(
+                    self.logger,
                     "Unhandled CSI h command: CSI {:?} {:?} h",
                     intermediates,
                     params.iter().collect::<Vec<&[u16]>>()
@@ -992,6 +1022,7 @@ impl vte::Perform for State {
                         [2026] => {},
                         _ => {
                             warn!(
+                                self.logger,
                                 "Unhandled CSI l command: CSI {:?} {:?} l",
                                 intermediates,
                                 params.iter().collect::<Vec<&[u16]>>()
@@ -1001,6 +1032,7 @@ impl vte::Perform for State {
                     }
                 }
                 _ => warn!(
+                    self.logger,
                     "Unhandled CSI l command: CSI {:?} {:?} l",
                     intermediates,
                     params.iter().collect::<Vec<&[u16]>>()
@@ -1017,7 +1049,7 @@ impl vte::Perform for State {
                     // responded with a code indicating that it supported the
                     // extensions in order to determine how we should interpret
                     // control codes).
-                    [6] => debug!("ignoring DSR (CSI 6 n), that's the real terminal's job"),
+                    [6] => debug!(self.logger, "ignoring DSR (CSI 6 n), that's the real terminal's job"),
                     _ => {}
                 }
             },
@@ -1080,18 +1112,18 @@ impl vte::Perform for State {
                     [49] => self.cursor_attrs.bgcolor = term::Color::Default,
                     [n] if 40 <= *n && *n < 48 => match (*n - 40).try_into() {
                         Ok(i) => self.cursor_attrs.bgcolor = term::Color::Idx(i),
-                        Err(e) => warn!("out of bounds bgcolor idx (1): {e:?}"),
+                        Err(e) => warn!(self.logger, "out of bounds bgcolor idx (1): {:?}", e),
                     }
                     [n] if 100 <= *n && *n < 108 => match (*n - 92).try_into() {
                         Ok(i) => self.cursor_attrs.bgcolor = term::Color::Idx(i),
-                        Err(e) => warn!("out of bounds bgcolor idx (2): {e:?}"),
+                        Err(e) => warn!(self.logger, "out of bounds bgcolor idx (2): {:?}", e),
                     }
                     [48] => match params_iter.next() {
                         Some([5]) => {
                             let n = param_or(&mut params_iter, 0);
                             match n.try_into() {
                                 Ok(i) => self.cursor_attrs.bgcolor = term::Color::Idx(i),
-                                Err(e) => warn!("out of bounds bgcolor idx (3): {e:?}"),
+                                Err(e) => warn!(self.logger, "out of bounds bgcolor idx (3): {:?}", e),
                             }
                         },
                         Some([2]) => {
@@ -1106,21 +1138,21 @@ impl vte::Perform for State {
                             if let (Ok(r), Ok(g), Ok(b)) = (r.try_into(), g.try_into(), b.try_into()) {
                                 self.cursor_attrs.bgcolor = term::Color::Rgb(r, g, b);
                             } else {
-                                warn!("out of bounds color codes for CSI 48 2 ... m");
+                                warn!(self.logger, "out of bounds color codes for CSI 48 2 ... m");
                             }
                         },
-                        _ => warn!("unhandled incomplete 'CSI 48 ... m'"),
+                        _ => warn!(self.logger, "unhandled incomplete 'CSI 48 ... m'"),
                     },
 
                     // Foreground Color Handling.
                     [39] => self.cursor_attrs.fgcolor = term::Color::Default,
                     [n] if 30 <= *n && *n < 38 => match (*n - 30).try_into() {
                         Ok(i) => self.cursor_attrs.fgcolor = term::Color::Idx(i),
-                        Err(e) => warn!("out of bounds fgcolor idx (1): {e:?}"),
+                        Err(e) => warn!(self.logger, "out of bounds fgcolor idx (1): {:?}", e),
                     }
                     [n] if 90 <= *n && *n < 98 => match (*n - 82).try_into() {
                         Ok(i) => self.cursor_attrs.fgcolor = term::Color::Idx(i),
-                        Err(e) => warn!("out of bounds fgcolor idx (2): {e:?}"),
+                        Err(e) => warn!(self.logger, "out of bounds fgcolor idx (2): {:?}", e),
                     }
                     [38] => match params_iter.next() {
                         Some([5]) => {
@@ -1128,7 +1160,7 @@ impl vte::Perform for State {
                             let n = param_or(&mut params_iter, 0);
                             match n.try_into() {
                                 Ok(i) => self.cursor_attrs.fgcolor = term::Color::Idx(i),
-                                Err(e) => warn!("out of bounds fgcolor idx (3): {e:?}"),
+                                Err(e) => warn!(self.logger, "out of bounds fgcolor idx (3): {:?}", e),
                             }
                         },
                         Some([2]) => {
@@ -1143,13 +1175,13 @@ impl vte::Perform for State {
                             if let (Ok(r), Ok(g), Ok(b)) = (r.try_into(), g.try_into(), b.try_into()) {
                                 self.cursor_attrs.fgcolor = term::Color::Rgb(r, g, b);
                             } else {
-                                warn!("out of bounds color codes for CSI 38 2 ... m");
+                                warn!(self.logger, "out of bounds color codes for CSI 38 2 ... m");
                             }
                         },
-                        _ => warn!("unhandled incomplete 'CSI 38 ... m'"),
+                        _ => warn!(self.logger, "unhandled incomplete 'CSI 38 ... m'"),
                     },
 
-                    _ => warn!("unhandled 'CSI {param:?} m'"),
+                    _ => warn!(self.logger, "unhandled 'CSI {:?} m'", param),
                 }
             }
             'p' => match intermediates {
@@ -1160,7 +1192,7 @@ impl vte::Perform for State {
                     self.fill_tabstops(0, width);
                     self.cursor_style = term::CursorStyle::Default;
 
-                    warn!("DECSTR only partially handled");
+                    warn!(self.logger, "DECSTR only partially handled");
                 }
                 // DECRQM (DEC Request Mode Private)
                 [b'?', b'$'] => {
@@ -1175,9 +1207,10 @@ impl vte::Perform for State {
                     // (half the reason to write this crate), but for the
                     // moment we just suppress the warning log and convert
                     // to a debug log.
-                    debug!("ignoring DECRQM query: params={:?}", params.iter().collect::<Vec<_>>());
+                    debug!(self.logger, "ignoring DECRQM query: params={:?}", params.iter().collect::<Vec<_>>());
                 }
                 _ => warn!(
+                    self.logger,
                     "Unhandled CSI p command: CSI {:?} {:?} p",
                     intermediates,
                     params.iter().collect::<Vec<&[u16]>>()
@@ -1188,7 +1221,7 @@ impl vte::Perform for State {
                 let code = param_or(&mut params_iter, 0) as usize;
                 match term::CursorStyle::try_from(code) {
                     Ok(style) => self.cursor_style = style,
-                    Err(e) => warn!("parsing cursor style: {:?}", e),
+                    Err(e) => warn!(self.logger, "parsing cursor style: {:?}", e),
                 }
             },
             // DECSTBM (Set Scroll Region)
@@ -1215,17 +1248,17 @@ impl vte::Perform for State {
             }
 
             _ => {
-                warn!("unhandled action {}", action);
+                warn!(self.logger, "unhandled action {}", action);
             }
         }
     }
 
     fn esc_dispatch(&mut self, intermediates: &[u8], ignore: bool, byte: u8) {
         if ignore {
-            warn!("malformed ESC seq");
+            warn!(self.logger, "malformed ESC seq");
             return;
         }
-        trace!("esc_dispatch: {}", byte);
+        trace!(self.logger, "esc_dispatch: {}", byte);
         self.last_print_char = None;
 
         match (intermediates, byte) {
@@ -1254,7 +1287,7 @@ impl vte::Perform for State {
                 self.fill_tabstops(0, width);
                 self.cursor_style = term::CursorStyle::Default;
 
-                warn!("RIS only partially handled");
+                warn!(self.logger, "RIS only partially handled");
             }
 
             ([], b'=') => self.application_keypad_mode_enabled = true,
@@ -1268,7 +1301,7 @@ impl vte::Perform for State {
             // we can ignore them.
             ([], 92) => {}
 
-            _ => warn!("unhandled ESC seq ({intermediates:?}, {byte})"),
+            _ => warn!(self.logger, "unhandled ESC seq ({:?}, {})", intermediates, byte),
         }
     }
 
