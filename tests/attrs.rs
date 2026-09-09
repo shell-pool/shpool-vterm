@@ -1019,8 +1019,28 @@ frag! {
 
 frag! {
     smooth_scroll_mode_ignored { scrollback_lines: 10, width: 10, height: 10 }
-    <= term::Raw::from("\x1b[?4h"),
-       term::Raw::from("\x1b[?4l")
+    <= term::control_codes().enable_smooth_scroll_mode,
+       term::control_codes().disable_smooth_scroll_mode
+    => ContentRegion::All =>
+            reset_codes,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    deccolm_mode_ignored { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::control_codes().enable_132_column_mode,
+       term::control_codes().disable_132_column_mode
+    => ContentRegion::All =>
+            reset_codes,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    deccolm_and_decsclm_batched_ignored { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::ControlCodes::dec_private_modes_reset(&[3, 4]),
+       term::ControlCodes::dec_private_modes_set(&[3, 4])
     => ContentRegion::All =>
             reset_codes,
             term::ControlCodes::cursor_position(1, 1),

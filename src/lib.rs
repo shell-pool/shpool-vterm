@@ -1058,6 +1058,11 @@ impl vte::Perform for State {
                 [b'?'] => while let Some(code) = params_iter.next() {
                     match code {
                         [1] => self.application_keypad_mode_enabled = true,
+                        // 132 Column Mode (DECCOLM). Terminal dimensions are controlled
+                        // by the client window/multiplexer, not child process escape sequences.
+                        [3] => {},
+                        // Smooth Scroll Mode (DECSCLM). Visual display scrolling timing
+                        // is irrelevant in a headless virtual terminal.
                         [4] => {},
                         [6] => self.screen_mut().set_origin_mode(OriginMode::ScrollRegion),
                         [12] => self.cursor_blinking = Some(true),
@@ -1111,6 +1116,13 @@ impl vte::Perform for State {
                 [b'?'] => while let Some(code) = params_iter.next() {
                     match code {
                         [1] => self.application_keypad_mode_enabled = false,
+                        // 80 Column Mode (DECCOLM). Terminal dimensions are controlled
+                        // by the client window/multiplexer. Standard terminfo `is2` sends
+                        // `\E[?3;4l` on startup; resetting column width or clearing the screen
+                        // here would break sessions wider than 80 columns.
+                        [3] => {},
+                        // Jump Scroll Mode (DECSCLM). Visual display scrolling timing
+                        // is irrelevant in a headless virtual terminal.
                         [4] => {},
                         [6] => self.screen_mut().set_origin_mode(OriginMode::Term),
                         [12] => self.cursor_blinking = Some(false),

@@ -598,6 +598,14 @@ test_pub! {
         pub disable_paste_mode: ControlCode,
         pub enable_insert_mode: ControlCode,
         pub disable_insert_mode: ControlCode,
+        pub enable_132_column_mode: ControlCode,
+        pub disable_132_column_mode: ControlCode,
+        pub enable_smooth_scroll_mode: ControlCode,
+        pub disable_smooth_scroll_mode: ControlCode,
+        pub enable_deccolm: ControlCode,
+        pub disable_deccolm: ControlCode,
+        pub enable_decsclm: ControlCode,
+        pub disable_decsclm: ControlCode,
         pub horizontal_tab_set: ControlCode,
         pub soft_reset: ControlCode,
         pub hard_reset: ControlCode,
@@ -1163,6 +1171,46 @@ test_pub! {
                 intermediates: smallvec![],
                 action: 'l',
             },
+            enable_132_column_mode: ControlCode::CSI {
+                params: smallvec![smallvec![3]],
+                intermediates: smallvec![b'?'],
+                action: 'h',
+            },
+            disable_132_column_mode: ControlCode::CSI {
+                params: smallvec![smallvec![3]],
+                intermediates: smallvec![b'?'],
+                action: 'l',
+            },
+            enable_smooth_scroll_mode: ControlCode::CSI {
+                params: smallvec![smallvec![4]],
+                intermediates: smallvec![b'?'],
+                action: 'h',
+            },
+            disable_smooth_scroll_mode: ControlCode::CSI {
+                params: smallvec![smallvec![4]],
+                intermediates: smallvec![b'?'],
+                action: 'l',
+            },
+            enable_deccolm: ControlCode::CSI {
+                params: smallvec![smallvec![3]],
+                intermediates: smallvec![b'?'],
+                action: 'h',
+            },
+            disable_deccolm: ControlCode::CSI {
+                params: smallvec![smallvec![3]],
+                intermediates: smallvec![b'?'],
+                action: 'l',
+            },
+            enable_decsclm: ControlCode::CSI {
+                params: smallvec![smallvec![4]],
+                intermediates: smallvec![b'?'],
+                action: 'h',
+            },
+            disable_decsclm: ControlCode::CSI {
+                params: smallvec![smallvec![4]],
+                intermediates: smallvec![b'?'],
+                action: 'l',
+            },
             horizontal_tab_set: ControlCode::ESC { intermediates: smallvec![], byte: b'H' },
             soft_reset: ControlCode::CSI {
                 params: smallvec![],
@@ -1570,6 +1618,16 @@ impl ControlCodes {
             None => smallvec![smallvec![23]],
         };
         ControlCode::CSI { params, intermediates: smallvec![], action: 't' }
+    }
+
+    pub fn dec_private_modes_set(modes: &[u16]) -> ControlCode {
+        let params = modes.iter().map(|&m| smallvec![m]).collect();
+        ControlCode::CSI { params, intermediates: smallvec![b'?'], action: 'h' }
+    }
+
+    pub fn dec_private_modes_reset(modes: &[u16]) -> ControlCode {
+        let params = modes.iter().map(|&m| smallvec![m]).collect();
+        ControlCode::CSI { params, intermediates: smallvec![b'?'], action: 'l' }
     }
 }
 
