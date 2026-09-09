@@ -777,3 +777,115 @@ frag! {
             term::ControlCodes::cursor_position(1, 3),
             term::control_codes().clear_attrs
 }
+
+frag! {
+    underline_colors_basic { scrollback_lines: 20, width: 20, height: 20 }
+    <= term::Raw::from("a"),
+       term::ControlCodes::underline_color_idx(1),
+       term::Raw::from("b"),
+       term::ControlCodes::underline_color_idx(100),
+       term::Raw::from("c"),
+       term::ControlCodes::underline_color_rgb(10, 20, 30),
+       term::Raw::from("d"),
+       term::control_codes().underline_color_default,
+       term::Raw::from("e")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("a"),
+            term::ControlCodes::underline_color_idx(1),
+            term::Raw::from("b"),
+            term::ControlCodes::underline_color_idx(100),
+            term::Raw::from("c"),
+            term::ControlCodes::underline_color_rgb(10, 20, 30),
+            term::Raw::from("d"),
+            term::control_codes().underline_color_default,
+            term::Raw::from("e"),
+            term::ControlCodes::cursor_position(1, 6),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    underline_color_cursor_restore { scrollback_lines: 10, width: 20, height: 10 }
+    <= term::Raw::from("a"),
+       term::ControlCodes::underline_color_rgb(255, 128, 0)
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("a"),
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().clear_attrs,
+            term::ControlCodes::underline_color_rgb(255, 128, 0)
+}
+
+frag! {
+    underline_color_colon_syntax { scrollback_lines: 10, width: 20, height: 10 }
+    <= term::Raw::from("\x1b[58:2:0:255:192:185ma\x1b[58:2:10:20:30mb\x1b[58:5:42mc\x1b[59md")
+    => ContentRegion::All =>
+            reset_codes,
+            term::ControlCodes::underline_color_rgb(255, 192, 185),
+            term::Raw::from("a"),
+            term::ControlCodes::underline_color_rgb(10, 20, 30),
+            term::Raw::from("b"),
+            term::ControlCodes::underline_color_idx(42),
+            term::Raw::from("c"),
+            term::control_codes().underline_color_default,
+            term::Raw::from("d"),
+            term::ControlCodes::cursor_position(1, 5),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    underline_color_reset_clear_attrs { scrollback_lines: 10, width: 20, height: 10 }
+    <= term::ControlCodes::underline_color_rgb(100, 150, 200),
+       term::Raw::from("colored"),
+       term::control_codes().clear_attrs,
+       term::Raw::from("plain")
+    => ContentRegion::All =>
+            reset_codes,
+            term::ControlCodes::underline_color_rgb(100, 150, 200),
+            term::Raw::from("colored"),
+            term::control_codes().underline_color_default,
+            term::Raw::from("plain"),
+            term::ControlCodes::cursor_position(1, 13),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    save_restore_cursor_attrs_underline_color { scrollback_lines: 10, width: 20, height: 10 }
+    <= term::ControlCodes::underline_color_rgb(1, 2, 3),
+       term::Raw::from("A"),
+       term::control_codes().save_cursor,
+       term::control_codes().underline_color_default,
+       term::ControlCodes::cursor_forward(1),
+       term::Raw::from("B"),
+       term::control_codes().restore_cursor,
+       term::Raw::from("C")
+    => ContentRegion::All =>
+            reset_codes,
+            term::ControlCodes::underline_color_rgb(1, 2, 3),
+            term::Raw::from("AC"),
+            term::control_codes().underline_color_default,
+            term::Raw::from("B"),
+            term::ControlCodes::cursor_position(1, 3),
+            term::control_codes().clear_attrs,
+            term::ControlCodes::underline_color_rgb(1, 2, 3)
+}
+
+frag! {
+    decstr_resets_underline_color { scrollback_lines: 10, width: 20, height: 10 }
+    <= term::ControlCodes::underline_color_rgb(1, 2, 3),
+       term::control_codes().soft_reset
+    => ContentRegion::All =>
+            reset_codes,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    ris_resets_underline_color { scrollback_lines: 10, width: 20, height: 10 }
+    <= term::ControlCodes::underline_color_rgb(1, 2, 3),
+       term::control_codes().hard_reset
+    => ContentRegion::All =>
+            reset_codes,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs
+}

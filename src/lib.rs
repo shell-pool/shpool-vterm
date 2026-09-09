@@ -1121,6 +1121,15 @@ impl vte::Perform for State {
                     [53] => self.cursor_attrs.overline = true,
                     [55] => self.cursor_attrs.overline = false,
 
+                    // Underline Color Handling.
+                    [59] => self.cursor_attrs.underline_color = term::Color::Default,
+                    param if !param.is_empty() && param[0] == 58 => {
+                        match parse_extended_color(param, &mut params_iter) {
+                            Some(color) => self.cursor_attrs.underline_color = color,
+                            None => warn!(self.logger, "unhandled incomplete 'CSI 58 ... m'"),
+                        }
+                    }
+
                     // Background Color Handling.
                     [49] => self.cursor_attrs.bgcolor = term::Color::Default,
                     [n] if 40 <= *n && *n < 48 => match (*n - 40).try_into() {
@@ -1131,31 +1140,12 @@ impl vte::Perform for State {
                         Ok(i) => self.cursor_attrs.bgcolor = term::Color::Idx(i),
                         Err(e) => warn!(self.logger, "out of bounds bgcolor idx (2): {:?}", e),
                     }
-                    [48] => match params_iter.next() {
-                        Some([5]) => {
-                            let n = param_or(&mut params_iter, 0);
-                            match n.try_into() {
-                                Ok(i) => self.cursor_attrs.bgcolor = term::Color::Idx(i),
-                                Err(e) => warn!(self.logger, "out of bounds bgcolor idx (3): {:?}", e),
-                            }
-                        },
-                        Some([2]) => {
-                            // N.B. apparently some very old termianls have a "space id"
-                            // param before the three color params. It might make sense
-                            // to fully slurp the params here and if there are 4 provided
-                            // drop the first to avoid shifting the rgb. I'm guessing this
-                            // is so rare as to not matter though.
-                            let r = param_or(&mut params_iter, 0);
-                            let g = param_or(&mut params_iter, 0);
-                            let b = param_or(&mut params_iter, 0);
-                            if let (Ok(r), Ok(g), Ok(b)) = (r.try_into(), g.try_into(), b.try_into()) {
-                                self.cursor_attrs.bgcolor = term::Color::Rgb(r, g, b);
-                            } else {
-                                warn!(self.logger, "out of bounds color codes for CSI 48 2 ... m");
-                            }
-                        },
-                        _ => warn!(self.logger, "unhandled incomplete 'CSI 48 ... m'"),
-                    },
+                    param if !param.is_empty() && param[0] == 48 => {
+                        match parse_extended_color(param, &mut params_iter) {
+                            Some(color) => self.cursor_attrs.bgcolor = color,
+                            None => warn!(self.logger, "unhandled incomplete 'CSI 48 ... m'"),
+                        }
+                    }
 
                     // Foreground Color Handling.
                     [39] => self.cursor_attrs.fgcolor = term::Color::Default,
@@ -1167,32 +1157,12 @@ impl vte::Perform for State {
                         Ok(i) => self.cursor_attrs.fgcolor = term::Color::Idx(i),
                         Err(e) => warn!(self.logger, "out of bounds fgcolor idx (2): {:?}", e),
                     }
-                    [38] => match params_iter.next() {
-                        Some([5]) => {
-
-                            let n = param_or(&mut params_iter, 0);
-                            match n.try_into() {
-                                Ok(i) => self.cursor_attrs.fgcolor = term::Color::Idx(i),
-                                Err(e) => warn!(self.logger, "out of bounds fgcolor idx (3): {:?}", e),
-                            }
-                        },
-                        Some([2]) => {
-                            // N.B. apparently some very old termianls have a "space id"
-                            // param before the three color params. It might make sense
-                            // to fully slurp the params here and if there are 4 provided
-                            // drop the first to avoid shifting the rgb. I'm guessing this
-                            // is so rare as to not matter though.
-                            let r = param_or(&mut params_iter, 0);
-                            let g = param_or(&mut params_iter, 0);
-                            let b = param_or(&mut params_iter, 0);
-                            if let (Ok(r), Ok(g), Ok(b)) = (r.try_into(), g.try_into(), b.try_into()) {
-                                self.cursor_attrs.fgcolor = term::Color::Rgb(r, g, b);
-                            } else {
-                                warn!(self.logger, "out of bounds color codes for CSI 38 2 ... m");
-                            }
-                        },
-                        _ => warn!(self.logger, "unhandled incomplete 'CSI 38 ... m'"),
-                    },
+                    param if !param.is_empty() && param[0] == 38 => {
+                        match parse_extended_color(param, &mut params_iter) {
+                            Some(color) => self.cursor_attrs.fgcolor = color,
+                            None => warn!(self.logger, "unhandled incomplete 'CSI 38 ... m'"),
+                        }
+                    }
 
                     _ => warn!(self.logger, "unhandled 'CSI {:?} m'", param),
                 }
@@ -1346,6 +1316,63 @@ fn maybe_param<'params>(params: &mut vte::ParamsIter<'params>) -> Option<u16> {
         Some([0]) => None,
         Some([p]) => Some(*p),
         _ => None,
+    }
+}
+
+fn parse_extended_color<'params>(
+    first_param: &[u16],
+    params_iter: &mut vte::ParamsIter<'params>,
+) -> Option<term::Color> {
+    if first_param.len() > 1 {
+        // Colon-delimited subparameters: e.g. [58, 2, r, g, b] or [58, 2,
+        // space_id, r, g, b]
+        match first_param[1] {
+            5 => {
+                if first_param.len() >= 3 {
+                    let idx = first_param[2].try_into().ok()?;
+                    Some(term::Color::Idx(idx))
+                } else {
+                    None
+                }
+            }
+            2 => {
+                if first_param.len() == 5 {
+                    let r = first_param[2].try_into().ok()?;
+                    let g = first_param[3].try_into().ok()?;
+                    let b = first_param[4].try_into().ok()?;
+                    Some(term::Color::Rgb(r, g, b))
+                } else if first_param.len() >= 6 {
+                    // Includes color space ID (e.g. 58:2:0:r:g:b or
+                    // 58:2::r:g:b)
+                    let r = first_param[3].try_into().ok()?;
+                    let g = first_param[4].try_into().ok()?;
+                    let b = first_param[5].try_into().ok()?;
+                    Some(term::Color::Rgb(r, g, b))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    } else {
+        // Semicolon-delimited parameters: e.g. [58], [2], [r], [g], [b]
+        match params_iter.next() {
+            Some([5]) => {
+                let n = param_or(params_iter, 0);
+                let idx = n.try_into().ok()?;
+                Some(term::Color::Idx(idx))
+            }
+            Some([2]) => {
+                let r = param_or(params_iter, 0);
+                let g = param_or(params_iter, 0);
+                let b = param_or(params_iter, 0);
+                let r = r.try_into().ok()?;
+                let g = g.try_into().ok()?;
+                let b = b.try_into().ok()?;
+                Some(term::Color::Rgb(r, g, b))
+            }
+            _ => None,
+        }
     }
 }
 

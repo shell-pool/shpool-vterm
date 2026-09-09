@@ -254,6 +254,7 @@ test_pub! {
     struct Attrs {
         pub fgcolor: Color,
         pub bgcolor: Color,
+        pub underline_color: Color,
         pub font_weight: Option<FontWeight>,
         pub italic: bool,
         pub underline: Option<UnderlineStyle>,
@@ -318,6 +319,10 @@ impl std::fmt::Display for Attrs {
             write!(f, "<BG {:?}>", self.bgcolor)?;
         }
 
+        if !matches!(self.underline_color, Color::Default) {
+            write!(f, "<UL {:?}>", self.underline_color)?;
+        }
+
         match self.font_weight {
             Some(FontWeight::Bold) => write!(f, "b")?,
             Some(FontWeight::Faint) => write!(f, "f")?,
@@ -371,6 +376,7 @@ impl Attrs {
     pub fn has_attrs(&self) -> bool {
         !matches!(self.fgcolor, Color::Default)
             || !matches!(self.bgcolor, Color::Default)
+            || !matches!(self.underline_color, Color::Default)
             || self.font_weight.is_some()
             || self.italic
             || self.underline.is_some()
@@ -397,6 +403,10 @@ impl Attrs {
 
         if self.bgcolor != next.bgcolor {
             codes.push(next.bgcolor.bgcode());
+        }
+
+        if self.underline_color != next.underline_color {
+            codes.push(next.underline_color.underline_code());
         }
 
         if self.italic && !next.italic {
@@ -524,6 +534,7 @@ test_pub! {
         pub clear_attrs: ControlCode,
         pub fgcolor_default: ControlCode,
         pub bgcolor_default: ControlCode,
+        pub underline_color_default: ControlCode,
         pub underline: ControlCode,
         pub double_underline: ControlCode,
         pub undo_underline: ControlCode,
@@ -839,6 +850,11 @@ test_pub! {
             },
             bgcolor_default: ControlCode::CSI {
                 params: smallvec![smallvec![49]],
+                intermediates: smallvec![],
+                action: 'm',
+            },
+            underline_color_default: ControlCode::CSI {
+                params: smallvec![smallvec![59]],
                 intermediates: smallvec![],
                 action: 'm',
             },
@@ -1196,6 +1212,28 @@ impl ControlCodes {
         }
     }
 
+    pub fn underline_color_idx(i: u8) -> ControlCode {
+        ControlCode::CSI {
+            params: smallvec![smallvec![58], smallvec![5], smallvec![i as u16]],
+            intermediates: smallvec![],
+            action: 'm',
+        }
+    }
+
+    pub fn underline_color_rgb(r: u8, g: u8, b: u8) -> ControlCode {
+        ControlCode::CSI {
+            params: smallvec![
+                smallvec![58],
+                smallvec![2],
+                smallvec![r as u16],
+                smallvec![g as u16],
+                smallvec![b as u16]
+            ],
+            intermediates: smallvec![],
+            action: 'm',
+        }
+    }
+
     pub fn cursor_up(n: u16) -> ControlCode {
         Self::move_cursor(n, 'A')
     }
@@ -1510,6 +1548,14 @@ impl Color {
             Color::Default => control_codes().fgcolor_default.clone(),
             Color::Idx(i) => ControlCodes::fgcolor_idx(*i),
             Color::Rgb(r, g, b) => ControlCodes::fgcolor_rgb(*r, *g, *b),
+        }
+    }
+
+    fn underline_code(&self) -> ControlCode {
+        match self {
+            Color::Default => control_codes().underline_color_default.clone(),
+            Color::Idx(i) => ControlCodes::underline_color_idx(*i),
+            Color::Rgb(r, g, b) => ControlCodes::underline_color_rgb(*r, *g, *b),
         }
     }
 }
