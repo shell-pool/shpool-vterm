@@ -179,6 +179,17 @@ frag! {
             term::ControlCodes::set_title(smallvec![b'A'])
 }
 
+frag! {
+    dimension_queries_with_subparams_ignored { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::Raw::from("\x1b[14;0t\x1b[16;0t\x1b[18;0t\x1b[19;0t\x1b[14:0t\x1b[18:0t\x1b[0t\x1b[t"),
+       term::ControlCodes::set_title(smallvec![b'A'])
+    => ContentRegion::All =>
+            reset_codes,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs,
+            term::ControlCodes::set_title(smallvec![b'A'])
+}
+
 #[test]
 fn title_stack_depth_limit() {
     use shpool_vterm::term::AsTermInput;

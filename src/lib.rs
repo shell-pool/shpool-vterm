@@ -982,10 +982,11 @@ impl vte::Perform for State {
             // Window Title Operations
             't' => while let Some(code) = params_iter.next() {
                 match code {
-                    [14] => debug!(self.logger, "CSI 14 t - pixel size query"),
-                    [16] => debug!(self.logger, "CSI 16 t - cell size query"),
-                    [18] => debug!(self.logger, "CSI 18 t - term size query"),
-                    [19] => debug!(self.logger, "CSI 19 t - display size query"),
+                    [] | [0] => debug!(self.logger, "CSI 0 t - ignoring"),
+                    [14, ..] => debug!(self.logger, "CSI 14 t - pixel size query"),
+                    [16, ..] => debug!(self.logger, "CSI 16 t - cell size query"),
+                    [18, ..] => debug!(self.logger, "CSI 18 t - term size query"),
+                    [19, ..] => debug!(self.logger, "CSI 19 t - display size query"),
                     [22] => {
                         let code = param_or(&mut params_iter, 0) as usize;
                         if (code == 0 || code == 1) && self.icon_name_stack.len() < MAX_TITLE_STACK_DEPTH {
