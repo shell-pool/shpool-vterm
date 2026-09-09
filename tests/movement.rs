@@ -769,3 +769,125 @@ frag! {
             term::ControlCodes::cursor_position(1, 2),
             term::control_codes().clear_attrs
 }
+
+frag! {
+    reverse_index_basic { scrollback_lines: 100, width: 10, height: 10 }
+    <= term::Raw::from("A"),
+       term::Crlf::default(),
+       term::Raw::from("B"),
+       term::control_codes().reverse_index,
+       term::Raw::from("C")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("AC"),
+            term::Crlf::default(),
+            term::Raw::from("B"),
+            term::ControlCodes::cursor_position(1, 3),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    reverse_index_scroll_at_top { scrollback_lines: 100, width: 5, height: 3 }
+    <= term::Raw::from("1"), term::Crlf::default(),
+       term::Raw::from("2"), term::Crlf::default(),
+       term::Raw::from("3"),
+       term::ControlCodes::cursor_position(1, 1),
+       term::control_codes().reverse_index,
+       term::Raw::from("X")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("X"),
+            term::Crlf::default(),
+            term::Raw::from("1"),
+            term::Crlf::default(),
+            term::Raw::from("2"),
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    reverse_index_scroll_region { scrollback_lines: 100, width: 5, height: 5 }
+    <= term::Raw::from("0"), term::Crlf::default(),
+       term::Raw::from("1"), term::Crlf::default(),
+       term::Raw::from("2"), term::Crlf::default(),
+       term::Raw::from("3"), term::Crlf::default(),
+       term::Raw::from("4"),
+       term::ControlCodes::set_scroll_region(2, 4),
+       term::ControlCodes::cursor_position(2, 1),
+       term::control_codes().reverse_index,
+       term::Raw::from("X")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("0"),
+            term::Crlf::default(),
+            term::Raw::from("X"),
+            term::Crlf::default(),
+            term::Raw::from("1"),
+            term::Crlf::default(),
+            term::Raw::from("2"),
+            term::Crlf::default(),
+            term::Raw::from("4"),
+            term::ControlCodes::set_scroll_region(2, 4),
+            term::ControlCodes::cursor_position(2, 2),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    reverse_index_above_scroll_region { scrollback_lines: 100, width: 5, height: 5 }
+    <= term::Raw::from("0"), term::Crlf::default(),
+       term::Raw::from("1"), term::Crlf::default(),
+       term::Raw::from("2"),
+       term::ControlCodes::set_scroll_region(3, 5),
+       term::ControlCodes::cursor_position(2, 1),
+       term::control_codes().reverse_index,
+       term::Raw::from("X")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("X"),
+            term::Crlf::default(),
+            term::Raw::from("1"),
+            term::Crlf::default(),
+            term::Raw::from("2"),
+            term::ControlCodes::set_scroll_region(3, 5),
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    reverse_index_clamp_top_outside_scroll_region { scrollback_lines: 100, width: 5, height: 5 }
+    <= term::Raw::from("A"),
+       term::ControlCodes::set_scroll_region(3, 5),
+       term::ControlCodes::cursor_position(1, 1),
+       term::control_codes().reverse_index,
+       term::Raw::from("B")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("B"),
+            term::ControlCodes::set_scroll_region(3, 5),
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    reverse_index_below_scroll_region { scrollback_lines: 100, width: 5, height: 5 }
+    <= term::Raw::from("0"), term::Crlf::default(),
+       term::Raw::from("1"), term::Crlf::default(),
+       term::Raw::from("2"), term::Crlf::default(),
+       term::Raw::from("3"),
+       term::ControlCodes::set_scroll_region(1, 3),
+       term::ControlCodes::cursor_position(4, 1),
+       term::control_codes().reverse_index,
+       term::Raw::from("X")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("0"),
+            term::Crlf::default(),
+            term::Raw::from("1"),
+            term::Crlf::default(),
+            term::Raw::from("X"),
+            term::Crlf::default(),
+            term::Raw::from("3"),
+            term::ControlCodes::set_scroll_region(1, 3),
+            term::ControlCodes::cursor_position(3, 2),
+            term::control_codes().clear_attrs
+}

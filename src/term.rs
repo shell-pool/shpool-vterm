@@ -550,6 +550,7 @@ test_pub! {
         pub restore_cursor_position: ControlCode,
         pub save_cursor: ControlCode,
         pub restore_cursor: ControlCode,
+        pub reverse_index: ControlCode,
         pub insert_character: ControlCode,
         pub delete_character: ControlCode,
         pub erase_character: ControlCode,
@@ -963,6 +964,7 @@ test_pub! {
             },
             save_cursor: ControlCode::ESC { intermediates: smallvec![], byte: b'7' },
             restore_cursor: ControlCode::ESC { intermediates: smallvec![], byte: b'8' },
+            reverse_index: ControlCode::ESC { intermediates: smallvec![], byte: b'M' },
             insert_character: ControlCode::CSI {
                 params: smallvec![smallvec![1]],
                 intermediates: smallvec![],

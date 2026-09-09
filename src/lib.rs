@@ -1294,6 +1294,18 @@ impl vte::Perform for State {
                 let col = self.screen().cursor.col;
                 self.tabstops.set(col, true);
             }
+            // RI (Reverse Index)
+            ([], b'M') => {
+                let screen = self.screen_mut();
+                let (scroll_top, _) =
+                    screen.scroll_region(false).as_region(&screen.size).row_bounds();
+
+                if screen.cursor.row == scroll_top {
+                    screen.insert_lines(1);
+                } else if screen.cursor.row > 0 {
+                    screen.cursor.row -= 1;
+                }
+            }
             // RIS (Reset to Initial State)
             ([], b'c') => {
                 self.tabstops.fill(false);
