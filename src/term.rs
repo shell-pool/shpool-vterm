@@ -582,6 +582,10 @@ test_pub! {
         pub end_link: ControlCode,
         pub show_cursor: ControlCode,
         pub hide_cursor: ControlCode,
+        pub enable_cursor_blink: ControlCode,
+        pub disable_cursor_blink: ControlCode,
+        pub enable_cursor_blinking: ControlCode,
+        pub disable_cursor_blinking: ControlCode,
         pub enable_application_keypad_mode: ControlCode,
         pub disable_application_keypad_mode: ControlCode,
         pub enable_application_keypad_mode_esc: ControlCode,
@@ -1074,6 +1078,26 @@ test_pub! {
             },
             hide_cursor: ControlCode::CSI {
                 params: smallvec![smallvec![25]],
+                intermediates: smallvec![b'?'],
+                action: 'l',
+            },
+            enable_cursor_blink: ControlCode::CSI {
+                params: smallvec![smallvec![12]],
+                intermediates: smallvec![b'?'],
+                action: 'h',
+            },
+            disable_cursor_blink: ControlCode::CSI {
+                params: smallvec![smallvec![12]],
+                intermediates: smallvec![b'?'],
+                action: 'l',
+            },
+            enable_cursor_blinking: ControlCode::CSI {
+                params: smallvec![smallvec![12]],
+                intermediates: smallvec![b'?'],
+                action: 'h',
+            },
+            disable_cursor_blinking: ControlCode::CSI {
+                params: smallvec![smallvec![12]],
                 intermediates: smallvec![b'?'],
                 action: 'l',
             },

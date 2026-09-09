@@ -889,3 +889,78 @@ frag! {
             term::ControlCodes::cursor_position(1, 1),
             term::control_codes().clear_attrs
 }
+
+frag! {
+    enable_cursor_blink { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::control_codes().enable_cursor_blink
+    => ContentRegion::All =>
+            reset_codes,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs,
+            term::control_codes().enable_cursor_blink
+}
+
+frag! {
+    disable_cursor_blink { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::control_codes().disable_cursor_blink
+    => ContentRegion::All =>
+            reset_codes,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs,
+            term::control_codes().disable_cursor_blink
+}
+
+frag! {
+    cursor_blink_toggle { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::control_codes().enable_cursor_blink,
+       term::control_codes().disable_cursor_blink
+    => ContentRegion::All =>
+            reset_codes,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs,
+            term::control_codes().disable_cursor_blink
+}
+
+frag! {
+    cursor_blink_with_text { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::control_codes().disable_cursor_blink,
+       term::Raw::from("abc")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("abc"),
+            term::ControlCodes::cursor_position(1, 4),
+            term::control_codes().clear_attrs,
+            term::control_codes().disable_cursor_blink
+}
+
+frag! {
+    cursor_blink_and_hide_cursor { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::control_codes().disable_cursor_blink,
+       term::control_codes().hide_cursor
+    => ContentRegion::All =>
+            reset_codes,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs,
+            term::control_codes().hide_cursor,
+            term::control_codes().disable_cursor_blink
+}
+
+frag! {
+    decstr_resets_cursor_blink { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::control_codes().disable_cursor_blink,
+       term::control_codes().soft_reset
+    => ContentRegion::All =>
+            reset_codes,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    ris_resets_cursor_blink { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::control_codes().enable_cursor_blink,
+       term::control_codes().hard_reset
+    => ContentRegion::All =>
+            reset_codes,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs
+}

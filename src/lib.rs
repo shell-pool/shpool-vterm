@@ -199,6 +199,8 @@ struct State {
     /// Tracks if the cursor is currently hidden. Controlled
     /// via the `CSI ? 25 {h,l}` codes.
     cursor_hidden: bool,
+    /// Tracks cursor blinking mode. Controlled via `CSI ? 12 {h,l}`.
+    cursor_blinking: Option<bool>,
     /// Tracks application keypad mode state. Controlled via
     /// `CSI ? 1 {h,l}`.
     application_keypad_mode_enabled: bool,
@@ -254,6 +256,7 @@ impl State {
             palette_overrides: BTreeMap::new(),
             functional_colors: [NONE_VEC; 10],
             cursor_hidden: false,
+            cursor_blinking: None,
             application_keypad_mode_enabled: false,
             report_focus: false,
             in_paste_mode: false,
@@ -426,6 +429,13 @@ impl State {
 
         if self.cursor_hidden {
             controls.hide_cursor.term_input_into(buf);
+        }
+        if let Some(blinking) = self.cursor_blinking {
+            if blinking {
+                controls.enable_cursor_blink.term_input_into(buf);
+            } else {
+                controls.disable_cursor_blink.term_input_into(buf);
+            }
         }
         if self.application_keypad_mode_enabled {
             controls.enable_application_keypad_mode.term_input_into(buf);
@@ -989,6 +999,7 @@ impl vte::Perform for State {
                     match code {
                         [1] => self.application_keypad_mode_enabled = true,
                         [6] => self.screen_mut().set_origin_mode(OriginMode::ScrollRegion),
+                        [12] => self.cursor_blinking = Some(true),
                         [25] => self.cursor_hidden = false,
                         [1004] => self.report_focus = true,
                         // enable alt screen
@@ -1026,6 +1037,7 @@ impl vte::Perform for State {
                     match code {
                         [1] => self.application_keypad_mode_enabled = false,
                         [6] => self.screen_mut().set_origin_mode(OriginMode::Term),
+                        [12] => self.cursor_blinking = Some(false),
                         [25] => self.cursor_hidden = true,
                         [1004] => self.report_focus = false,
                         [1049] => self.screen_mode = ScreenMode::Scrollback,
@@ -1175,6 +1187,7 @@ impl vte::Perform for State {
                     self.fill_tabstops(0, width);
                     self.cursor_style = term::CursorStyle::Default;
                     self.cursor_attrs = term::Attrs::default();
+                    self.cursor_blinking = None;
 
                     warn!(self.logger, "DECSTR only partially handled");
                 }
@@ -1283,6 +1296,7 @@ impl vte::Perform for State {
                 self.fill_tabstops(0, width);
                 self.cursor_style = term::CursorStyle::Default;
                 self.cursor_attrs = term::Attrs::default();
+                self.cursor_blinking = None;
 
                 warn!(self.logger, "RIS only partially handled");
             }
