@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.3](https://github.com/shell-pool/shpool-vterm/compare/v0.2.2...v0.2.3) - 2026-09-09
+
+### Added
+
+- add insert mode support
+- add backward tab support
+- add cursor blinking support
+- more fully support underline color
+- add RI support
+
+### Fixed
+
+- more thoroughly ignore queries
+- avoid restoring half-open links
+
+### Other
+
+- ignore DECCOLM
+
 ## [0.2.2](https://github.com/shell-pool/shpool-vterm/compare/v0.2.1...v0.2.2) - 2026-08-28
 
 ### Added
