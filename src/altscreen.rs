@@ -217,8 +217,8 @@ impl AltScreen {
         let lines_to_insert = std::cmp::min(n, bottom - cursor.row);
         let shuffle_lines = (bottom - top) - lines_to_insert - (cursor.row - top);
         for i in 0..shuffle_lines {
-            // By using std::mem::replace rather than cloning we can avoid a little
-            // work on the second pass.
+            // By using std::mem::replace rather than cloning we can avoid a
+            // little work on the second pass.
             let bottom_offset = bottom - 1 - i;
             self.buf[bottom_offset] =
                 std::mem::replace(&mut self.buf[bottom_offset - lines_to_insert], Line::new());

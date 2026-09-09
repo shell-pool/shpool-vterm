@@ -8,9 +8,7 @@ frag! {
     default { scrollback_lines: 100, width: 20, height: 10 }
     <= term::Raw::from("A\tB")
     => ContentRegion::All =>
-            term::control_codes().clear_attrs,
-            term::ControlCodes::cursor_position(1, 1),
-            term::control_codes().clear_screen,
+            reset_codes,
             term::Raw::from("A"),
             term::Raw::from("       "), // 7 spaces
             term::Raw::from("B"),
@@ -22,9 +20,7 @@ frag! {
     clamp { scrollback_lines: 100, width: 10, height: 10 }
     <= term::Raw::from("A\tB\tC")
     => ContentRegion::All =>
-            term::control_codes().clear_attrs,
-            term::ControlCodes::cursor_position(1, 1),
-            term::control_codes().clear_screen,
+            reset_codes,
             term::Raw::from("A"),
             term::Raw::from("       "), // 7 spaces
             term::Raw::from("B"),
@@ -41,9 +37,7 @@ fn resize() {
     term.process(b"A\tB");
 
     let mut expected = vec![];
-    term::control_codes().clear_attrs.term_input_into(&mut expected);
-    term::ControlCodes::cursor_position(1, 1).term_input_into(&mut expected);
-    term::control_codes().clear_screen.term_input_into(&mut expected);
+    crate::support::frag::reset_codes.term_input_into(&mut expected);
     term::Raw::from("A").term_input_into(&mut expected);
     term::Raw::from("       ").term_input_into(&mut expected);
     term::Raw::from("B").term_input_into(&mut expected);
@@ -57,9 +51,7 @@ fn resize() {
     term.process(b"C\tD");
 
     let mut expected2 = vec![];
-    term::control_codes().clear_attrs.term_input_into(&mut expected2);
-    term::ControlCodes::cursor_position(1, 1).term_input_into(&mut expected2);
-    term::control_codes().clear_screen.term_input_into(&mut expected2);
+    crate::support::frag::reset_codes.term_input_into(&mut expected2);
     term::Raw::from("A").term_input_into(&mut expected2);
     term::Raw::from("       ").term_input_into(&mut expected2);
     term::Raw::from("B").term_input_into(&mut expected2);
@@ -81,9 +73,7 @@ frag! {
        term::ControlCodes::tab_clear(None),
        term::Raw::from("\r\tC")
     => ContentRegion::All =>
-            term::control_codes().clear_attrs,
-            term::ControlCodes::cursor_position(1, 1),
-            term::control_codes().clear_screen,
+            reset_codes,
             term::Raw::from("     "), // 5 spaces
             term::Raw::from("B"),
             term::Raw::from("  "), // 2 spaces
@@ -101,9 +91,7 @@ frag! {
        term::ControlCodes::cursor_tab_control(Some(2)),
        term::Raw::from("\r\tC")
     => ContentRegion::All =>
-            term::control_codes().clear_attrs,
-            term::ControlCodes::cursor_position(1, 1),
-            term::control_codes().clear_screen,
+            reset_codes,
             term::Raw::from("     "), // 5 spaces
             term::Raw::from("B"),
             term::Raw::from("  "), // 2 spaces
@@ -117,9 +105,7 @@ frag! {
     <= term::ControlCodes::tab_clear(Some(3)),
        term::Raw::from("\tA")
     => ContentRegion::All =>
-            term::control_codes().clear_attrs,
-            term::ControlCodes::cursor_position(1, 1),
-            term::control_codes().clear_screen,
+            reset_codes,
             term::ControlCodes::tab_clear(Some(3)),
             term::Raw::from("                   "), // 19 spaces
             term::Raw::from("A"),
@@ -132,9 +118,7 @@ frag! {
     <= term::ControlCodes::cursor_tab_control(Some(5)),
        term::Raw::from("\tA")
     => ContentRegion::All =>
-            term::control_codes().clear_attrs,
-            term::ControlCodes::cursor_position(1, 1),
-            term::control_codes().clear_screen,
+            reset_codes,
             term::ControlCodes::tab_clear(Some(3)),
             term::Raw::from("                   "), // 19 spaces
             term::Raw::from("A"),
@@ -148,9 +132,7 @@ frag! {
        term::control_codes().soft_reset,
        term::Raw::from("\tA")
     => ContentRegion::All =>
-            term::control_codes().clear_attrs,
-            term::ControlCodes::cursor_position(1, 1),
-            term::control_codes().clear_screen,
+            reset_codes,
             term::Raw::from("        "), // 8 spaces
             term::Raw::from("A"),
             term::ControlCodes::cursor_position(1, 10),
@@ -163,9 +145,7 @@ frag! {
        term::control_codes().hard_reset,
        term::Raw::from("\tA")
     => ContentRegion::All =>
-            term::control_codes().clear_attrs,
-            term::ControlCodes::cursor_position(1, 1),
-            term::control_codes().clear_screen,
+            reset_codes,
             term::Raw::from("        "), // 8 spaces
             term::Raw::from("A"),
             term::ControlCodes::cursor_position(1, 10),

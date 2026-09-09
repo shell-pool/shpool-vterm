@@ -3,6 +3,19 @@ use std::fmt::Write;
 use shpool_vterm::{term, ContentRegion};
 use smallvec::{smallvec, ToSmallVec};
 
+#[allow(non_camel_case_types)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct reset_codes;
+
+impl shpool_vterm::term::AsTermInput for reset_codes {
+    fn term_input_into(&self, buf: &mut Vec<u8>) {
+        shpool_vterm::term::control_codes().end_link.term_input_into(buf);
+        shpool_vterm::term::control_codes().clear_attrs.term_input_into(buf);
+        shpool_vterm::term::ControlCodes::cursor_position(1, 1).term_input_into(buf);
+        shpool_vterm::term::control_codes().clear_screen.term_input_into(buf);
+    }
+}
+
 macro_rules! frag {
     {
         $test_name:ident
@@ -17,6 +30,8 @@ macro_rules! frag {
         #[test]
         fn $test_name() {
             use shpool_vterm::term::AsTermInput;
+            #[allow(unused_imports)]
+            use crate::support::frag::reset_codes;
             let mut input: Vec<u8> = vec![];
             $(
                 $input_expr.term_input_into(&mut input);

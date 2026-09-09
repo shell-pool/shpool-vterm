@@ -9,9 +9,7 @@ frag! {
     title_only { scrollback_lines: 10, width: 10, height: 10 }
     <= term::ControlCodes::set_title(smallvec![b't', b'i', b't', b'l', b'e'])
     => ContentRegion::All =>
-            term::control_codes().clear_attrs,
-            term::ControlCodes::cursor_position(1, 1),
-            term::control_codes().clear_screen,
+            reset_codes,
             term::ControlCodes::cursor_position(1, 1),
             term::control_codes().clear_attrs,
             term::ControlCodes::set_title(smallvec![b't', b'i', b't', b'l', b'e'])
@@ -21,9 +19,7 @@ frag! {
     icon_only { scrollback_lines: 10, width: 10, height: 10 }
     <= term::ControlCodes::set_icon_name(smallvec![b'i', b'c', b'o', b'n'])
     => ContentRegion::All =>
-            term::control_codes().clear_attrs,
-            term::ControlCodes::cursor_position(1, 1),
-            term::control_codes().clear_screen,
+            reset_codes,
             term::ControlCodes::cursor_position(1, 1),
             term::control_codes().clear_attrs,
             term::ControlCodes::set_icon_name(smallvec![b'i', b'c', b'o', b'n'])
@@ -33,9 +29,7 @@ frag! {
     title_and_icon_same { scrollback_lines: 10, width: 10, height: 10 }
     <= term::ControlCodes::set_title_and_icon_name(smallvec![b's', b'a', b'm', b'e'])
     => ContentRegion::All =>
-            term::control_codes().clear_attrs,
-            term::ControlCodes::cursor_position(1, 1),
-            term::control_codes().clear_screen,
+            reset_codes,
             term::ControlCodes::cursor_position(1, 1),
             term::control_codes().clear_attrs,
             term::ControlCodes::set_title_and_icon_name(smallvec![b's', b'a', b'm', b'e'])
@@ -46,9 +40,7 @@ frag! {
     <= term::ControlCodes::set_title_and_icon_name(smallvec![b'A']),
        term::ControlCodes::set_title(smallvec![b'B'])
     => ContentRegion::All =>
-            term::control_codes().clear_attrs,
-            term::ControlCodes::cursor_position(1, 1),
-            term::control_codes().clear_screen,
+            reset_codes,
             term::ControlCodes::cursor_position(1, 1),
             term::control_codes().clear_attrs,
             term::ControlCodes::set_title(smallvec![b'B']),
@@ -62,9 +54,7 @@ frag! {
        term::ControlCodes::set_title(smallvec![b'B']),
        term::ControlCodes::restore_title(Some(2))
     => ContentRegion::All =>
-            term::control_codes().clear_attrs,
-            term::ControlCodes::cursor_position(1, 1),
-            term::control_codes().clear_screen,
+            reset_codes,
             term::ControlCodes::cursor_position(1, 1),
             term::control_codes().clear_attrs,
             term::ControlCodes::set_title(smallvec![b'A'])
@@ -77,9 +67,7 @@ frag! {
        term::ControlCodes::set_icon_name(smallvec![b'B']),
        term::ControlCodes::restore_title(Some(1))
     => ContentRegion::All =>
-            term::control_codes().clear_attrs,
-            term::ControlCodes::cursor_position(1, 1),
-            term::control_codes().clear_screen,
+            reset_codes,
             term::ControlCodes::cursor_position(1, 1),
             term::control_codes().clear_attrs,
             term::ControlCodes::set_icon_name(smallvec![b'A'])
@@ -92,9 +80,7 @@ frag! {
        term::ControlCodes::set_title_and_icon_name(smallvec![b'B']),
        term::ControlCodes::restore_title(Some(0))
     => ContentRegion::All =>
-            term::control_codes().clear_attrs,
-            term::ControlCodes::cursor_position(1, 1),
-            term::control_codes().clear_screen,
+            reset_codes,
             term::ControlCodes::cursor_position(1, 1),
             term::control_codes().clear_attrs,
             term::ControlCodes::set_title_and_icon_name(smallvec![b'A'])
@@ -107,9 +93,7 @@ frag! {
        term::ControlCodes::set_title_and_icon_name(smallvec![b'B']),
        term::ControlCodes::restore_title(None)
     => ContentRegion::All =>
-            term::control_codes().clear_attrs,
-            term::ControlCodes::cursor_position(1, 1),
-            term::control_codes().clear_screen,
+            reset_codes,
             term::ControlCodes::cursor_position(1, 1),
             term::control_codes().clear_attrs,
             term::ControlCodes::set_title_and_icon_name(smallvec![b'A'])
@@ -124,9 +108,7 @@ frag! {
        term::ControlCodes::set_title(smallvec![b'C']),
        term::ControlCodes::restore_title(Some(2))
     => ContentRegion::All =>
-            term::control_codes().clear_attrs,
-            term::ControlCodes::cursor_position(1, 1),
-            term::control_codes().clear_screen,
+            reset_codes,
             term::ControlCodes::cursor_position(1, 1),
             term::control_codes().clear_attrs,
             term::ControlCodes::set_title(smallvec![b'B'])
@@ -141,9 +123,7 @@ frag! {
        term::ControlCodes::set_icon_name(smallvec![b'2']),
        term::ControlCodes::restore_title(Some(2))
     => ContentRegion::All =>
-            term::control_codes().clear_attrs,
-            term::ControlCodes::cursor_position(1, 1),
-            term::control_codes().clear_screen,
+            reset_codes,
             term::ControlCodes::cursor_position(1, 1),
             term::control_codes().clear_attrs,
             term::ControlCodes::set_title(smallvec![b'A']),
@@ -159,9 +139,7 @@ frag! {
        term::ControlCodes::set_icon_name(smallvec![b'2']),
        term::ControlCodes::restore_title(Some(1))
     => ContentRegion::All =>
-            term::control_codes().clear_attrs,
-            term::ControlCodes::cursor_position(1, 1),
-            term::control_codes().clear_screen,
+            reset_codes,
             term::ControlCodes::cursor_position(1, 1),
             term::control_codes().clear_attrs,
             term::ControlCodes::set_title(smallvec![b'B']),
@@ -173,9 +151,7 @@ frag! {
     <= term::ControlCodes::restore_title(None),
        term::ControlCodes::set_title(smallvec![b'A'])
     => ContentRegion::All =>
-            term::control_codes().clear_attrs,
-            term::ControlCodes::cursor_position(1, 1),
-            term::control_codes().clear_screen,
+            reset_codes,
             term::ControlCodes::cursor_position(1, 1),
             term::control_codes().clear_attrs,
             term::ControlCodes::set_title(smallvec![b'A'])
@@ -187,9 +163,7 @@ frag! {
        term::ControlCodes::set_title(smallvec![b'A']),
        term::ControlCodes::restore_title(None)
     => ContentRegion::All =>
-            term::control_codes().clear_attrs,
-            term::ControlCodes::cursor_position(1, 1),
-            term::control_codes().clear_screen,
+            reset_codes,
             term::ControlCodes::cursor_position(1, 1),
             term::control_codes().clear_attrs
 }
@@ -199,9 +173,7 @@ frag! {
     <= term::Raw::from("\x1b[14t\x1b[16t\x1b[18t\x1b[19t"),
        term::ControlCodes::set_title(smallvec![b'A'])
     => ContentRegion::All =>
-            term::control_codes().clear_attrs,
-            term::ControlCodes::cursor_position(1, 1),
-            term::control_codes().clear_screen,
+            reset_codes,
             term::ControlCodes::cursor_position(1, 1),
             term::control_codes().clear_attrs,
             term::ControlCodes::set_title(smallvec![b'A'])
@@ -228,9 +200,7 @@ fn title_stack_depth_limit() {
     term.process(b"\x1b[23;2t");
 
     let mut want = vec![];
-    term::control_codes().clear_attrs.term_input_into(&mut want);
-    term::ControlCodes::cursor_position(1, 1).term_input_into(&mut want);
-    term::control_codes().clear_screen.term_input_into(&mut want);
+    support::frag::reset_codes.term_input_into(&mut want);
     term::ControlCodes::cursor_position(1, 1).term_input_into(&mut want);
     term::control_codes().clear_attrs.term_input_into(&mut want);
     term::ControlCodes::set_title(smallvec![b'A']).term_input_into(&mut want);
@@ -245,9 +215,7 @@ frag! {
        term::ControlCodes::set_icon_name(smallvec![b'B']),
        term::ControlCodes::restore_title(Some(2))
     => ContentRegion::All =>
-            term::control_codes().clear_attrs,
-            term::ControlCodes::cursor_position(1, 1),
-            term::control_codes().clear_screen,
+            reset_codes,
             term::ControlCodes::cursor_position(1, 1),
             term::control_codes().clear_attrs,
             term::ControlCodes::set_icon_name(smallvec![b'B'])
@@ -260,9 +228,7 @@ frag! {
        term::ControlCodes::set_icon_name(smallvec![b'B']),
        term::ControlCodes::restore_title(Some(1))
     => ContentRegion::All =>
-            term::control_codes().clear_attrs,
-            term::ControlCodes::cursor_position(1, 1),
-            term::control_codes().clear_screen,
+            reset_codes,
             term::ControlCodes::cursor_position(1, 1),
             term::control_codes().clear_attrs,
             term::ControlCodes::set_title(smallvec![b'A'])

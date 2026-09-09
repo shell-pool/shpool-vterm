@@ -224,8 +224,9 @@ mod tests {
         let c1 = Cell::new('a', term::Attrs::default());
         let c2 = Cell::new('b', term::Attrs::default());
 
-        // Set within current length (needs push first to not be out of bounds of vector
-        // if we treated it strictly, but set() handles extension)
+        // Set within current length (needs push first to not be out of bounds
+        // of vector if we treated it strictly, but set() handles
+        // extension)
 
         // set at 0
         line.set_cell(width, 0, c1.clone())?;

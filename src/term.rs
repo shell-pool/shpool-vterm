@@ -1048,7 +1048,7 @@ test_pub! {
                 intermediates: smallvec![b'?'],
                 action: 'l',
             },
-            end_link: ControlCode::OSC { params: smallvec![smallvec![b'8']], term: OSCTerm::default() },
+            end_link: ControlCode::OSC { params: smallvec![smallvec![b'8'], smallvec![], smallvec![]], term: OSCTerm::default() },
             show_cursor: ControlCode::CSI {
                 params: smallvec![smallvec![25]],
                 intermediates: smallvec![b'?'],

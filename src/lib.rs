@@ -124,6 +124,12 @@ impl Term {
     /// reset the emulator to the contents of this Term instance.
     pub fn contents(&self, dump_region: ContentRegion) -> Vec<u8> {
         let mut buf = vec![];
+
+        // Reset alone does not terminate active links, so before
+        // we issue a reset, we'll issue an end link to fully
+        // reset the link.
+        term::control_codes().end_link.term_input_into(&mut buf);
+
         term::control_codes().clear_attrs.term_input_into(&mut buf);
         term::ControlCodes::cursor_position(1, 1).term_input_into(&mut buf);
         term::control_codes().clear_screen.term_input_into(&mut buf);
@@ -360,7 +366,14 @@ impl State {
         // restore cursor attributes (the screen will have already restored our
         // position).
         controls.clear_attrs.term_input_into(buf);
-        let codes = term::Attrs::default().transition_to(&self.cursor_attrs);
+        let mut cursor_attrs = self.cursor_attrs.clone();
+        // Avoid starting a link even if there is one active in the
+        // terminal state because the reconnecting terminal almost
+        // certainly has forgotten it was in the middle of drawing
+        // a link and will wind up creating a massive link if we
+        // fully faithfully restore the cursor attr state..
+        cursor_attrs.link_target = None;
+        let codes = term::Attrs::default().transition_to(&cursor_attrs);
         for c in codes.into_iter() {
             c.term_input_into(buf);
         }
@@ -1191,6 +1204,7 @@ impl vte::Perform for State {
                     let width = self.screen().size.width;
                     self.fill_tabstops(0, width);
                     self.cursor_style = term::CursorStyle::Default;
+                    self.cursor_attrs = term::Attrs::default();
 
                     warn!(self.logger, "DECSTR only partially handled");
                 }
@@ -1286,6 +1300,7 @@ impl vte::Perform for State {
                 let width = self.screen().size.width;
                 self.fill_tabstops(0, width);
                 self.cursor_style = term::CursorStyle::Default;
+                self.cursor_attrs = term::Attrs::default();
 
                 warn!(self.logger, "RIS only partially handled");
             }

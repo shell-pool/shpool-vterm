@@ -13,9 +13,7 @@ frag! {
        term::ControlCodes::cursor_position(2, 1),
        term::ControlCodes::insert_lines(1)
     => ContentRegion::All =>
-            term::control_codes().clear_attrs,
-            term::ControlCodes::cursor_position(1, 1),
-            term::control_codes().clear_screen,
+            reset_codes,
             term::Raw::from("11"),
             term::Crlf::default(),
             term::Crlf::default(),
@@ -38,9 +36,7 @@ frag! {
        term::ControlCodes::cursor_position(3, 1),
        term::ControlCodes::insert_lines(1)
     => ContentRegion::All =>
-            term::control_codes().clear_attrs,
-            term::ControlCodes::cursor_position(1, 1),
-            term::control_codes().clear_screen,
+            reset_codes,
             term::Raw::from("11"),
             term::Crlf::default(),
             term::Raw::from("22"),
@@ -63,9 +59,7 @@ frag! {
        term::ControlCodes::cursor_position(2, 1),
        term::ControlCodes::insert_lines(10)
     => ContentRegion::All =>
-            term::control_codes().clear_attrs,
-            term::ControlCodes::cursor_position(1, 1),
-            term::control_codes().clear_screen,
+            reset_codes,
             term::Raw::from("11"),
             term::Crlf::default(),
             term::Crlf::default(),
@@ -84,9 +78,7 @@ frag! {
        term::ControlCodes::cursor_position(2, 1),
        term::ControlCodes::insert_lines(2)
     => ContentRegion::All =>
-            term::control_codes().clear_attrs,
-            term::ControlCodes::cursor_position(1, 1),
-            term::control_codes().clear_screen,
+            reset_codes,
             term::Raw::from("11"),
             term::Crlf::default(),
             term::Crlf::default(),
@@ -109,9 +101,7 @@ frag! {
        term::ControlCodes::cursor_position(1, 1),
        term::ControlCodes::insert_lines(1)
     => ContentRegion::All =>
-            term::control_codes().clear_attrs,
-            term::ControlCodes::cursor_position(1, 1),
-            term::control_codes().clear_screen,
+            reset_codes,
             term::Raw::from("11"),
             term::Crlf::default(),
             term::Raw::from("22"),
@@ -133,9 +123,7 @@ frag! {
        term::ControlCodes::cursor_position(4, 1),
        term::ControlCodes::insert_lines(1)
     => ContentRegion::All =>
-            term::control_codes().clear_attrs,
-            term::ControlCodes::cursor_position(1, 1),
-            term::control_codes().clear_screen,
+            reset_codes,
             term::Raw::from("11"),
             term::Crlf::default(),
             term::Raw::from("22"),
@@ -155,9 +143,7 @@ frag! {
        term::ControlCodes::cursor_position(3, 1),
        term::ControlCodes::insert_lines(1)
     => ContentRegion::All =>
-            term::control_codes().clear_attrs,
-            term::ControlCodes::cursor_position(1, 1),
-            term::control_codes().clear_screen,
+            reset_codes,
             term::Raw::from("11"),
             term::Crlf::default(),
             term::Raw::from("22"),
@@ -182,9 +168,7 @@ frag! {
        term::ControlCodes::cursor_position(2, 1),
        term::ControlCodes::delete_lines(1)
     => ContentRegion::All =>
-            term::control_codes().clear_attrs,
-            term::ControlCodes::cursor_position(1, 1),
-            term::control_codes().clear_screen,
+            reset_codes,
             term::Raw::from("11"),
             term::Crlf::default(),
             term::Raw::from("33"),
@@ -207,9 +191,7 @@ frag! {
        term::ControlCodes::cursor_position(3, 1),
        term::ControlCodes::delete_lines(1)
     => ContentRegion::All =>
-            term::control_codes().clear_attrs,
-            term::ControlCodes::cursor_position(1, 1),
-            term::control_codes().clear_screen,
+            reset_codes,
             term::Raw::from("11"),
             term::Crlf::default(),
             term::Raw::from("22"),
@@ -232,9 +214,7 @@ frag! {
        term::ControlCodes::cursor_position(2, 1),
        term::ControlCodes::delete_lines(10)
     => ContentRegion::All =>
-            term::control_codes().clear_attrs,
-            term::ControlCodes::cursor_position(1, 1),
-            term::control_codes().clear_screen,
+            reset_codes,
             term::Raw::from("11"),
             term::Crlf::default(),
             term::Crlf::default(),
@@ -254,9 +234,7 @@ frag! {
        term::ControlCodes::cursor_position(1, 1),
        term::ControlCodes::delete_lines(1)
     => ContentRegion::All =>
-            term::control_codes().clear_attrs,
-            term::ControlCodes::cursor_position(1, 1),
-            term::control_codes().clear_screen,
+            reset_codes,
             term::Raw::from("11"),
             term::Crlf::default(),
             term::Raw::from("22"),
@@ -278,9 +256,7 @@ frag! {
        term::ControlCodes::cursor_position(4, 1),
        term::ControlCodes::delete_lines(1)
     => ContentRegion::All =>
-            term::control_codes().clear_attrs,
-            term::ControlCodes::cursor_position(1, 1),
-            term::control_codes().clear_screen,
+            reset_codes,
             term::Raw::from("11"),
             term::Crlf::default(),
             term::Raw::from("22"),
@@ -294,9 +270,7 @@ frag! {
        term::ControlCodes::cursor_position(1, 2),
        term::ControlCodes::insert_character(1)
     => ContentRegion::All =>
-            term::control_codes().clear_attrs,
-            term::ControlCodes::cursor_position(1, 1),
-            term::control_codes().clear_screen,
+            reset_codes,
             term::Raw::from("1 23"),
             term::ControlCodes::cursor_position(1, 2),
             term::control_codes().clear_attrs
@@ -308,9 +282,7 @@ frag! {
        term::ControlCodes::cursor_position(1, 1),
        term::ControlCodes::insert_character(1)
     => ContentRegion::All =>
-            term::control_codes().clear_attrs,
-            term::ControlCodes::cursor_position(1, 1),
-            term::control_codes().clear_screen,
+            reset_codes,
             term::Raw::from(" 12"),
             term::ControlCodes::cursor_position(1, 1),
             term::control_codes().clear_attrs
@@ -322,9 +294,7 @@ frag! {
        term::ControlCodes::cursor_position(1, 1),
        term::ControlCodes::insert_character(2)
     => ContentRegion::All =>
-            term::control_codes().clear_attrs,
-            term::ControlCodes::cursor_position(1, 1),
-            term::control_codes().clear_screen,
+            reset_codes,
             term::Raw::from("  123"),
             term::ControlCodes::cursor_position(1, 1),
             term::control_codes().clear_attrs
@@ -336,9 +306,7 @@ frag! {
        term::ControlCodes::cursor_position(1, 2),
        term::ControlCodes::delete_character(1)
     => ContentRegion::All =>
-            term::control_codes().clear_attrs,
-            term::ControlCodes::cursor_position(1, 1),
-            term::control_codes().clear_screen,
+            reset_codes,
             term::Raw::from("13   "),
             term::ControlCodes::cursor_position(1, 2),
             term::control_codes().clear_attrs
@@ -350,9 +318,7 @@ frag! {
        term::ControlCodes::cursor_position(1, 1),
        term::ControlCodes::delete_character(2)
     => ContentRegion::All =>
-            term::control_codes().clear_attrs,
-            term::ControlCodes::cursor_position(1, 1),
-            term::control_codes().clear_screen,
+            reset_codes,
             term::Raw::from("3    "),
             term::ControlCodes::cursor_position(1, 1),
             term::control_codes().clear_attrs
@@ -364,9 +330,7 @@ frag! {
        term::ControlCodes::cursor_position(1, 3),
        term::ControlCodes::delete_character(1)
     => ContentRegion::All =>
-            term::control_codes().clear_attrs,
-            term::ControlCodes::cursor_position(1, 1),
-            term::control_codes().clear_screen,
+            reset_codes,
             term::Raw::from("12   "),
             term::ControlCodes::cursor_position(1, 3),
             term::control_codes().clear_attrs
@@ -379,9 +343,7 @@ frag! {
        term::ControlCodes::fgcolor_idx(1),
        term::ControlCodes::delete_character(1)
     => ContentRegion::All =>
-            term::control_codes().clear_attrs,
-            term::ControlCodes::cursor_position(1, 1),
-            term::control_codes().clear_screen,
+            reset_codes,
             term::Raw::from("13  "),
             term::ControlCodes::fgcolor_idx(1),
             term::Raw::from(" "),
@@ -397,9 +359,7 @@ frag! {
        term::ControlCodes::cursor_position(1, 2),
        term::ControlCodes::erase_character(1)
     => ContentRegion::All =>
-            term::control_codes().clear_attrs,
-            term::ControlCodes::cursor_position(1, 1),
-            term::control_codes().clear_screen,
+            reset_codes,
             term::Raw::from("1 3"),
             term::ControlCodes::cursor_position(1, 2),
             term::control_codes().clear_attrs
@@ -411,9 +371,7 @@ frag! {
        term::ControlCodes::cursor_position(1, 2),
        term::ControlCodes::erase_character(3)
     => ContentRegion::All =>
-            term::control_codes().clear_attrs,
-            term::ControlCodes::cursor_position(1, 1),
-            term::control_codes().clear_screen,
+            reset_codes,
             term::Raw::from("1   5"),
             term::ControlCodes::cursor_position(1, 2),
             term::control_codes().clear_attrs
@@ -426,9 +384,7 @@ frag! {
        term::ControlCodes::fgcolor_idx(1),
        term::ControlCodes::erase_character(1)
     => ContentRegion::All =>
-            term::control_codes().clear_attrs,
-            term::ControlCodes::cursor_position(1, 1),
-            term::control_codes().clear_screen,
+            reset_codes,
             term::Raw::from("1"),
             term::ControlCodes::fgcolor_idx(1),
             term::Raw::from(" "),
@@ -444,9 +400,7 @@ frag! {
     <= term::Raw::from("12345"),
        term::ControlCodes::erase_character(1)
     => ContentRegion::All =>
-            term::control_codes().clear_attrs,
-            term::ControlCodes::cursor_position(1, 1),
-            term::control_codes().clear_screen,
+            reset_codes,
             term::Raw::from("12345"),
             term::ControlCodes::cursor_position(1, 6),
             term::control_codes().clear_attrs

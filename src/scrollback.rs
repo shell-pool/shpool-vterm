@@ -526,8 +526,8 @@ impl Scrollback {
             self.buf.push_front(std::mem::replace(&mut lines_below_cursor[take_idx], Line::new()));
         }
 
-        // Inject the blank lines we need to put in at the bottom of the scrollback
-        // region.
+        // Inject the blank lines we need to put in at the bottom of the
+        // scrollback region.
         for _ in 0..lines_to_delete {
             self.buf.push_front(Line::new());
         }
