@@ -562,6 +562,8 @@ test_pub! {
         pub save_cursor: ControlCode,
         pub restore_cursor: ControlCode,
         pub reverse_index: ControlCode,
+        pub cursor_backward_tab: ControlCode,
+        pub cursor_backwards_tab: ControlCode,
         pub insert_character: ControlCode,
         pub delete_character: ControlCode,
         pub erase_character: ControlCode,
@@ -985,6 +987,16 @@ test_pub! {
             save_cursor: ControlCode::ESC { intermediates: smallvec![], byte: b'7' },
             restore_cursor: ControlCode::ESC { intermediates: smallvec![], byte: b'8' },
             reverse_index: ControlCode::ESC { intermediates: smallvec![], byte: b'M' },
+            cursor_backward_tab: ControlCode::CSI {
+                params: smallvec![],
+                intermediates: smallvec![],
+                action: 'Z',
+            },
+            cursor_backwards_tab: ControlCode::CSI {
+                params: smallvec![],
+                intermediates: smallvec![],
+                action: 'Z',
+            },
             insert_character: ControlCode::CSI {
                 params: smallvec![smallvec![1]],
                 intermediates: smallvec![],
@@ -1272,6 +1284,14 @@ impl ControlCodes {
 
     pub fn cursor_backwards(n: u16) -> ControlCode {
         Self::move_cursor(n, 'D')
+    }
+
+    pub fn cursor_backward_tab(n: u16) -> ControlCode {
+        Self::move_cursor(n, 'Z')
+    }
+
+    pub fn cursor_backwards_tab(n: u16) -> ControlCode {
+        Self::cursor_backward_tab(n)
     }
 
     pub fn cursor_next_line(n: u16) -> ControlCode {

@@ -151,3 +151,116 @@ frag! {
             term::ControlCodes::cursor_position(1, 10),
             term::control_codes().clear_attrs
 }
+
+frag! {
+    backward_tab_from_middle { scrollback_lines: 100, width: 20, height: 10 }
+    <= term::Raw::from("0123456789"),
+       term::control_codes().cursor_backward_tab,
+       term::Raw::from("X")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("01234567X9"),
+            term::ControlCodes::cursor_position(1, 10),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    backward_tab_from_tabstop { scrollback_lines: 100, width: 20, height: 10 }
+    <= term::Raw::from("01234567"),
+       term::control_codes().cursor_backward_tab,
+       term::Raw::from("X")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("X1234567"),
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    backward_tab_multi { scrollback_lines: 100, width: 20, height: 10 }
+    <= term::Raw::from("012345678901234567"),
+       term::ControlCodes::cursor_backward_tab(2),
+       term::Raw::from("X")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("01234567X901234567"),
+            term::ControlCodes::cursor_position(1, 10),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    backward_tab_clamp_at_zero { scrollback_lines: 100, width: 20, height: 10 }
+    <= term::Raw::from("0123"),
+       term::ControlCodes::cursor_backward_tab(1),
+       term::Raw::from("X")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("X123"),
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    backward_tab_overshoot { scrollback_lines: 100, width: 20, height: 10 }
+    <= term::Raw::from("012345678901234567"),
+       term::ControlCodes::cursor_backward_tab(10),
+       term::Raw::from("X")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("X12345678901234567"),
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    backward_tab_already_at_zero { scrollback_lines: 100, width: 20, height: 10 }
+    <= term::control_codes().cursor_backward_tab,
+       term::Raw::from("X")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("X"),
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    backward_tab_explicit_zero_param { scrollback_lines: 100, width: 20, height: 10 }
+    <= term::Raw::from("0123456789"),
+       term::Raw::from("\x1b[0Z"),
+       term::Raw::from("X")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("01234567X9"),
+            term::ControlCodes::cursor_position(1, 10),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    backward_tab_custom_tabstops { scrollback_lines: 100, width: 20, height: 10 }
+    <= term::ControlCodes::cursor_horizontal_absolute(5),
+       term::control_codes().horizontal_tab_set,
+       term::ControlCodes::cursor_horizontal_absolute(9),
+       term::control_codes().cursor_backward_tab,
+       term::Raw::from("A"),
+       term::ControlCodes::cursor_horizontal_absolute(5),
+       term::ControlCodes::tab_clear(None)
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("    A"),
+            term::ControlCodes::cursor_position(1, 5),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    backward_tab_no_tabstops { scrollback_lines: 100, width: 20, height: 10 }
+    <= term::ControlCodes::tab_clear(Some(3)),
+       term::ControlCodes::cursor_horizontal_absolute(12),
+       term::control_codes().cursor_backward_tab,
+       term::Raw::from("A")
+    => ContentRegion::All =>
+            reset_codes,
+            term::ControlCodes::tab_clear(Some(3)),
+            term::Raw::from("A"),
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().clear_attrs
+}

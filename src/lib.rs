@@ -861,6 +861,24 @@ impl vte::Perform for State {
                     _ => warn!(self.logger, "unhandled 'CSI {:?} W'", code),
                 }
             }
+            // CBT (Cursor Backward Tabulation)
+            'Z' if intermediates.is_empty() => {
+                let n = param_or(&mut params_iter, 1) as usize;
+                let mut col = self.screen().cursor.col;
+                for _ in 0..n {
+                    if col == 0 {
+                        break;
+                    }
+                    col -= 1;
+                    while col > 0 && !self.tabstops.get(col).is_some_and(|b| *b) {
+                        col -= 1;
+                    }
+                }
+
+                let screen = self.screen_mut();
+                screen.cursor.col = col;
+                screen.clamp();
+            }
             // SD (Scroll Down)
             'T' => {
                 let n = param_or(&mut params_iter, 1) as usize;
