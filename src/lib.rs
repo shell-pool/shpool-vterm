@@ -213,6 +213,8 @@ struct State {
     report_focus: bool,
     /// Tracks paste mode. Controlled via `CSI ? 2004 {h,l}`.
     in_paste_mode: bool,
+    /// Tracks insertion / replacement mode (IRM). Controlled via `CSI 4 {h,l}`.
+    insert_mode: bool,
     /// Tab stop columns. By default, these are spaced 8 cols apart
     /// starting at col 9, but they can be directly manipulated by certain
     /// control codes as well.
@@ -260,6 +262,7 @@ impl State {
             application_keypad_mode_enabled: false,
             report_focus: false,
             in_paste_mode: false,
+            insert_mode: false,
             tabstops: bitvec![0; size.width],
             last_print_char: None,
             logger: log::Context::None,
@@ -446,6 +449,9 @@ impl State {
         if self.in_paste_mode {
             controls.enable_paste_mode.term_input_into(buf);
         }
+        if self.insert_mode {
+            controls.enable_insert_mode.term_input_into(buf);
+        }
 
         // Generate fused functional color commands from any runs in the
         // functional colors table.
@@ -506,6 +512,36 @@ impl State {
             self.icon_name_stack.push(icon_name);
         }
     }
+
+    fn write_char_at_cursor(&mut self, cell: Cell) {
+        let insert_mode = self.insert_mode;
+        let screen = self.screen_mut();
+        screen.snap_to_bottom();
+
+        // In insert mode (ECMA-48 IRM), incoming characters do not overwrite
+        // existing text under the cursor. Instead, existing characters are
+        // shifted to the right, dropping any characters that spill past the
+        // terminal width.
+        //
+        // `Line::insert_character` does not write `cell` itself; it inserts
+        // blank cells to make room for `cell.width()`. The subsequent
+        // call to `screen.write_at_cursor(cell)` then writes the actual
+        // character into the newly opened space at the cursor position
+        // and advances the cursor.
+        if insert_mode {
+            let width = screen.size.width;
+            let col = screen.cursor.col;
+            if col < width {
+                if let Some(l) = screen.get_line_mut() {
+                    l.insert_character(width, col, cell.width() as usize);
+                }
+            }
+        }
+
+        if let Err(e) = screen.write_at_cursor(cell) {
+            warn!(self.logger, "writing char at cursor: {:?}", e);
+        }
+    }
 }
 
 /// Indicates which screen mode is active.
@@ -519,11 +555,7 @@ impl vte::Perform for State {
         trace!(self.logger, "print: {}", c);
         self.last_print_char = Some(c);
         let attrs = self.cursor_attrs.clone();
-        let screen = self.screen_mut();
-        screen.snap_to_bottom();
-        if let Err(e) = screen.write_at_cursor(Cell::new(c, attrs)) {
-            warn!(self.logger, "writing char at cursor: {:?}", e);
-        }
+        self.write_char_at_cursor(Cell::new(c, attrs));
     }
 
     fn execute(&mut self, byte: u8) {
@@ -925,15 +957,10 @@ impl vte::Perform for State {
             // REP (Repeat Preceding Character)
             'b' if intermediates.is_empty() => if let Some(c) = self.last_print_char {
                 let n = param_or(&mut params_iter, 1) as usize;
-                let logger = self.logger.clone();
 
                 let cell = Cell::new(c, self.cursor_attrs.clone());
-                let screen = self.screen_mut();
-                screen.snap_to_bottom();
                 for _ in 0..n {
-                    if let Err(e) = screen.write_at_cursor(cell.clone()) {
-                        warn!(logger, "writing char at cursor: {:?}", e);
-                    }
+                    self.write_char_at_cursor(cell.clone());
                 }
             }
             'c' => debug!(self.logger, "CSI ... c - device attribute query"),
@@ -1013,9 +1040,24 @@ impl vte::Perform for State {
             }
 
             'h' => match intermediates {
+                [] => while let Some(code) = params_iter.next() {
+                    match code {
+                        [4] => self.insert_mode = true,
+                        _ => {
+                            warn!(
+                                self.logger,
+                                "Unhandled CSI h command: CSI {:?} {:?} h",
+                                intermediates,
+                                params.iter().collect::<Vec<&[u16]>>()
+                            );
+                            return;
+                        }
+                    }
+                }
                 [b'?'] => while let Some(code) = params_iter.next() {
                     match code {
                         [1] => self.application_keypad_mode_enabled = true,
+                        [4] => {},
                         [6] => self.screen_mut().set_origin_mode(OriginMode::ScrollRegion),
                         [12] => self.cursor_blinking = Some(true),
                         [25] => self.cursor_hidden = false,
@@ -1051,9 +1093,24 @@ impl vte::Perform for State {
                 ),
             }
             'l' => match intermediates {
+                [] => while let Some(code) = params_iter.next() {
+                    match code {
+                        [4] => self.insert_mode = false,
+                        _ => {
+                            warn!(
+                                self.logger,
+                                "Unhandled CSI l command: CSI {:?} {:?} l",
+                                intermediates,
+                                params.iter().collect::<Vec<&[u16]>>()
+                            );
+                            return;
+                        }
+                    }
+                }
                 [b'?'] => while let Some(code) = params_iter.next() {
                     match code {
                         [1] => self.application_keypad_mode_enabled = false,
+                        [4] => {},
                         [6] => self.screen_mut().set_origin_mode(OriginMode::Term),
                         [12] => self.cursor_blinking = Some(false),
                         [25] => self.cursor_hidden = true,
@@ -1206,6 +1263,7 @@ impl vte::Perform for State {
                     self.cursor_style = term::CursorStyle::Default;
                     self.cursor_attrs = term::Attrs::default();
                     self.cursor_blinking = None;
+                    self.insert_mode = false;
 
                     warn!(self.logger, "DECSTR only partially handled");
                 }
@@ -1315,6 +1373,7 @@ impl vte::Perform for State {
                 self.cursor_style = term::CursorStyle::Default;
                 self.cursor_attrs = term::Attrs::default();
                 self.cursor_blinking = None;
+                self.insert_mode = false;
 
                 warn!(self.logger, "RIS only partially handled");
             }

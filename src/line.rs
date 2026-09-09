@@ -146,6 +146,12 @@ impl Line {
     /// Insert n new blank cells at the current position, dropping
     /// any cells which spill over width.
     pub fn insert_character(&mut self, width: usize, col: usize, n: usize) {
+        if col >= width {
+            return;
+        }
+        while self.cells.len() < col {
+            self.cells.push(Cell::empty());
+        }
         let empties = vec![Cell::empty(); n];
         self.cells.splice(col..col, empties);
         self.cells.truncate(width);

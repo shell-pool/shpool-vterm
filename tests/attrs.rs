@@ -964,3 +964,65 @@ frag! {
             term::ControlCodes::cursor_position(1, 1),
             term::control_codes().clear_attrs
 }
+
+frag! {
+    enable_insert_mode { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::control_codes().enable_insert_mode
+    => ContentRegion::All =>
+            reset_codes,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs,
+            term::control_codes().enable_insert_mode
+}
+
+frag! {
+    disable_insert_mode { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::control_codes().enable_insert_mode,
+       term::control_codes().disable_insert_mode
+    => ContentRegion::All =>
+            reset_codes,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    insert_mode_with_text { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::control_codes().enable_insert_mode,
+       term::Raw::from("abc")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("abc"),
+            term::ControlCodes::cursor_position(1, 4),
+            term::control_codes().clear_attrs,
+            term::control_codes().enable_insert_mode
+}
+
+frag! {
+    decstr_resets_insert_mode { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::control_codes().enable_insert_mode,
+       term::control_codes().soft_reset
+    => ContentRegion::All =>
+            reset_codes,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    ris_resets_insert_mode { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::control_codes().enable_insert_mode,
+       term::control_codes().hard_reset
+    => ContentRegion::All =>
+            reset_codes,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    smooth_scroll_mode_ignored { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::Raw::from("\x1b[?4h"),
+       term::Raw::from("\x1b[?4l")
+    => ContentRegion::All =>
+            reset_codes,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs
+}

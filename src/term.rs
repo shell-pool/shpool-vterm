@@ -596,6 +596,8 @@ test_pub! {
         pub disable_report_focus: ControlCode,
         pub enable_paste_mode: ControlCode,
         pub disable_paste_mode: ControlCode,
+        pub enable_insert_mode: ControlCode,
+        pub disable_insert_mode: ControlCode,
         pub horizontal_tab_set: ControlCode,
         pub soft_reset: ControlCode,
         pub hard_reset: ControlCode,
@@ -1149,6 +1151,16 @@ test_pub! {
             disable_paste_mode: ControlCode::CSI {
                 params: smallvec![smallvec![2004]],
                 intermediates: smallvec![b'?'],
+                action: 'l',
+            },
+            enable_insert_mode: ControlCode::CSI {
+                params: smallvec![smallvec![4]],
+                intermediates: smallvec![],
+                action: 'h',
+            },
+            disable_insert_mode: ControlCode::CSI {
+                params: smallvec![smallvec![4]],
+                intermediates: smallvec![],
                 action: 'l',
             },
             horizontal_tab_set: ControlCode::ESC { intermediates: smallvec![], byte: b'H' },

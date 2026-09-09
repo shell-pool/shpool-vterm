@@ -405,3 +405,75 @@ frag! {
             term::ControlCodes::cursor_position(1, 6),
             term::control_codes().clear_attrs
 }
+
+frag! {
+    insert_mode_shifts_text { scrollback_lines: 100, width: 5, height: 4 }
+    <= term::Raw::from("123"),
+       term::ControlCodes::cursor_position(1, 2),
+       term::control_codes().enable_insert_mode,
+       term::Raw::from("X")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("1X23"),
+            term::ControlCodes::cursor_position(1, 3),
+            term::control_codes().clear_attrs,
+            term::control_codes().enable_insert_mode
+}
+
+frag! {
+    insert_mode_shifts_off_right_margin { scrollback_lines: 100, width: 5, height: 4 }
+    <= term::Raw::from("12345"),
+       term::ControlCodes::cursor_position(1, 2),
+       term::control_codes().enable_insert_mode,
+       term::Raw::from("X")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("1X234"),
+            term::ControlCodes::cursor_position(1, 3),
+            term::control_codes().clear_attrs,
+            term::control_codes().enable_insert_mode
+}
+
+frag! {
+    insert_mode_multi_char { scrollback_lines: 100, width: 5, height: 4 }
+    <= term::Raw::from("123"),
+       term::ControlCodes::cursor_position(1, 2),
+       term::control_codes().enable_insert_mode,
+       term::Raw::from("XY")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("1XY23"),
+            term::ControlCodes::cursor_position(1, 4),
+            term::control_codes().clear_attrs,
+            term::control_codes().enable_insert_mode
+}
+
+frag! {
+    insert_mode_switch_to_replace { scrollback_lines: 100, width: 5, height: 4 }
+    <= term::Raw::from("123"),
+       term::ControlCodes::cursor_position(1, 2),
+       term::control_codes().enable_insert_mode,
+       term::Raw::from("X"),
+       term::control_codes().disable_insert_mode,
+       term::Raw::from("Y")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("1XY3"),
+            term::ControlCodes::cursor_position(1, 4),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    insert_mode_repeat_char { scrollback_lines: 100, width: 6, height: 4 }
+    <= term::Raw::from("123"),
+       term::ControlCodes::cursor_position(1, 2),
+       term::control_codes().enable_insert_mode,
+       term::Raw::from("X"),
+       term::ControlCodes::repeat_character(2)
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("1XXX23"),
+            term::ControlCodes::cursor_position(1, 5),
+            term::control_codes().clear_attrs,
+            term::control_codes().enable_insert_mode
+}
