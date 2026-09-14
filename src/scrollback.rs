@@ -444,6 +444,7 @@ impl Scrollback {
             }
         };
 
+        let grid_start = self.lines_below_grid_start(*size);
         let row_idx = match self.idx_from_bottom(*size, cursor.row) {
             Some(r) => r,
             // If the cursor is pointing past the point where we have
@@ -470,7 +471,8 @@ impl Scrollback {
 
         // Up until the bottom of the scroll region, backfill
         // from the end of the lines_below_cursor vec.
-        let backfill_to_bottom = (bottom - cursor.row) - lines_to_insert;
+        let new_scroll_region_end = std::cmp::min(grid_start + lines_to_insert, bottom);
+        let backfill_to_bottom = (new_scroll_region_end - cursor.row) - lines_to_insert;
         for i in 0..backfill_to_bottom {
             let take_idx = lines_below_cursor.len() - 1 - i;
             self.buf.push_front(std::mem::replace(&mut lines_below_cursor[take_idx], Line::new()));
@@ -478,7 +480,7 @@ impl Scrollback {
 
         // Past the scroll region, backfill from the start of the
         // lines_below_cursor vec.
-        let backfill_past_scroll_region = size.height - bottom;
+        let backfill_past_scroll_region = grid_start.saturating_sub(bottom);
         for i in 0..backfill_past_scroll_region {
             let take_idx = backfill_past_scroll_region - 1 - i;
             self.buf.push_front(std::mem::replace(&mut lines_below_cursor[take_idx], Line::new()));
@@ -498,6 +500,7 @@ impl Scrollback {
             }
         };
 
+        let grid_start = self.lines_below_grid_start(*size);
         let row_idx = match self.idx_from_bottom(*size, cursor.row) {
             Some(r) => r,
             // If the cursor is pointing past the point where we have
@@ -517,10 +520,11 @@ impl Scrollback {
             }
         }
 
-        let lines_to_delete = std::cmp::min(n, bottom - cursor.row);
+        let effective_bottom = std::cmp::min(grid_start, bottom);
+        let lines_to_delete = std::cmp::min(n, effective_bottom - cursor.row);
 
         // Replace the undeleted lines from the scrollback region.
-        let undeleted_lines_in_scrollback_buf = (bottom - cursor.row) - lines_to_delete;
+        let undeleted_lines_in_scrollback_buf = (effective_bottom - cursor.row) - lines_to_delete;
         for i in 0..undeleted_lines_in_scrollback_buf {
             let take_idx = lines_below_cursor.len() - lines_to_delete - 1 - i;
             self.buf.push_front(std::mem::replace(&mut lines_below_cursor[take_idx], Line::new()));
@@ -534,7 +538,7 @@ impl Scrollback {
 
         // Past the scroll region, backfill from the start of the
         // lines_below_cursor vec.
-        let backfill_past_scroll_region = size.height - bottom;
+        let backfill_past_scroll_region = grid_start.saturating_sub(bottom);
         for i in 0..backfill_past_scroll_region {
             let take_idx = backfill_past_scroll_region - 1 - i;
             self.buf.push_front(std::mem::replace(&mut lines_below_cursor[take_idx], Line::new()));
