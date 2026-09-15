@@ -156,6 +156,24 @@ impl std::fmt::Display for Term {
     }
 }
 
+/// The mouse reporting modes we track, in the order they get replayed into
+/// a restore buffer.
+///
+/// 1000, 1002 and 1003 select how much the client reports (press only, press
+/// plus drag, or all motion). 1005, 1006, 1015 and 1016 select how those
+/// reports are encoded. All of them change what the client writes to the pty,
+/// so dropping them on reattach leaves the client and the application
+/// disagreeing about the wire format.
+const MOUSE_MODES: [u16; 7] = [1000, 1002, 1003, 1005, 1006, 1015, 1016];
+
+/// The index into `State::mouse_modes` for a DEC private mode parameter.
+fn mouse_mode_idx(param: &[u16]) -> Option<usize> {
+    match param {
+        [mode] => MOUSE_MODES.iter().position(|m| m == mode),
+        _ => None,
+    }
+}
+
 /// The size of the terminal.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct Size {
@@ -201,9 +219,23 @@ struct State {
     cursor_hidden: bool,
     /// Tracks cursor blinking mode. Controlled via `CSI ? 12 {h,l}`.
     cursor_blinking: Option<bool>,
-    /// Tracks application keypad mode state. Controlled via
-    /// `CSI ? 1 {h,l}`.
+    /// Tracks application cursor keys mode (DECCKM), which changes what the
+    /// arrow keys send. Controlled via `CSI ? 1 {h,l}`.
+    application_cursor_keys_enabled: bool,
+    /// Tracks application keypad mode (DECKPAM), which changes what the
+    /// numeric keypad sends. Controlled via `ESC =` and `ESC >`.
+    ///
+    /// This is a different mode to DECCKM above, covering a different group
+    /// of keys, so the two cannot share a flag.
     application_keypad_mode_enabled: bool,
+    /// Tracks the mouse reporting modes listed in `MOUSE_MODES`, indexed
+    /// in parallel with it.
+    ///
+    /// The tracking modes and the encoding modes are recorded independently
+    /// and replayed exactly as the application set them, rather than being
+    /// collapsed into a single effective mode, since the application will
+    /// expect everything it set to still be in force after a reattach.
+    mouse_modes: [bool; MOUSE_MODES.len()],
     /// When set, the underlying terminal is supposed to emit
     /// `\x1b[I` sentinals when the window gains focus. For our
     /// purposes we just need to know how to track and restore
@@ -259,7 +291,9 @@ impl State {
             functional_colors: [NONE_VEC; 10],
             cursor_hidden: false,
             cursor_blinking: None,
+            application_cursor_keys_enabled: false,
             application_keypad_mode_enabled: false,
+            mouse_modes: [false; MOUSE_MODES.len()],
             report_focus: false,
             in_paste_mode: false,
             insert_mode: false,
@@ -440,6 +474,9 @@ impl State {
                 controls.disable_cursor_blink.term_input_into(buf);
             }
         }
+        if self.application_cursor_keys_enabled {
+            controls.enable_application_cursor_keys.term_input_into(buf);
+        }
         if self.application_keypad_mode_enabled {
             controls.enable_application_keypad_mode.term_input_into(buf);
         }
@@ -451,6 +488,11 @@ impl State {
         }
         if self.insert_mode {
             controls.enable_insert_mode.term_input_into(buf);
+        }
+        for (idx, mode) in MOUSE_MODES.iter().enumerate() {
+            if self.mouse_modes[idx] {
+                ControlCodes::dec_private_modes_set(&[*mode]).term_input_into(buf);
+            }
         }
 
         // Generate fused functional color commands from any runs in the
@@ -1051,13 +1093,12 @@ impl vte::Perform for State {
                                 intermediates,
                                 params.iter().collect::<Vec<&[u16]>>()
                             );
-                            return;
                         }
                     }
                 }
                 [b'?'] => while let Some(code) = params_iter.next() {
                     match code {
-                        [1] => self.application_keypad_mode_enabled = true,
+                        [1] => self.application_cursor_keys_enabled = true,
                         // 132 Column Mode (DECCOLM). Terminal dimensions are controlled
                         // by the client window/multiplexer, not child process escape sequences.
                         [3] => {},
@@ -1081,13 +1122,16 @@ impl vte::Perform for State {
                         [2026] => {},
 
                         _ => {
-                            warn!(
-                                self.logger,
-                                "Unhandled CSI h command: CSI {:?} {:?} h",
-                                intermediates,
-                                params.iter().collect::<Vec<&[u16]>>()
-                            );
-                            return;
+                            if let Some(idx) = mouse_mode_idx(code) {
+                                self.mouse_modes[idx] = true;
+                            } else {
+                                warn!(
+                                    self.logger,
+                                    "Unhandled CSI h command: CSI {:?} {:?} h",
+                                    intermediates,
+                                    params.iter().collect::<Vec<&[u16]>>()
+                                );
+                            }
                         }
                     }
                 }
@@ -1109,13 +1153,12 @@ impl vte::Perform for State {
                                 intermediates,
                                 params.iter().collect::<Vec<&[u16]>>()
                             );
-                            return;
                         }
                     }
                 }
                 [b'?'] => while let Some(code) = params_iter.next() {
                     match code {
-                        [1] => self.application_keypad_mode_enabled = false,
+                        [1] => self.application_cursor_keys_enabled = false,
                         // 80 Column Mode (DECCOLM). Terminal dimensions are controlled
                         // by the client window/multiplexer. Standard terminfo `is2` sends
                         // `\E[?3;4l` on startup; resetting column width or clearing the screen
@@ -1134,13 +1177,16 @@ impl vte::Perform for State {
                         // not rendering anything visually so we don't care.
                         [2026] => {},
                         _ => {
-                            warn!(
-                                self.logger,
-                                "Unhandled CSI l command: CSI {:?} {:?} l",
-                                intermediates,
-                                params.iter().collect::<Vec<&[u16]>>()
-                            );
-                            return;
+                            if let Some(idx) = mouse_mode_idx(code) {
+                                self.mouse_modes[idx] = false;
+                            } else {
+                                warn!(
+                                    self.logger,
+                                    "Unhandled CSI l command: CSI {:?} {:?} l",
+                                    intermediates,
+                                    params.iter().collect::<Vec<&[u16]>>()
+                                );
+                            }
                         }
                     }
                 }
@@ -1391,6 +1437,7 @@ impl vte::Perform for State {
                 warn!(self.logger, "RIS only partially handled");
             }
 
+            // DECKPAM / DECKPNM (application and numeric keypad mode)
             ([], b'=') => self.application_keypad_mode_enabled = true,
             ([], b'>') => self.application_keypad_mode_enabled = false,
 

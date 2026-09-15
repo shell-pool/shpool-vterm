@@ -588,10 +588,10 @@ test_pub! {
         pub disable_cursor_blink: ControlCode,
         pub enable_cursor_blinking: ControlCode,
         pub disable_cursor_blinking: ControlCode,
+        pub enable_application_cursor_keys: ControlCode,
+        pub disable_application_cursor_keys: ControlCode,
         pub enable_application_keypad_mode: ControlCode,
         pub disable_application_keypad_mode: ControlCode,
-        pub enable_application_keypad_mode_esc: ControlCode,
-        pub disable_application_keypad_mode_esc: ControlCode,
         pub enable_report_focus: ControlCode,
         pub disable_report_focus: ControlCode,
         pub enable_paste_mode: ControlCode,
@@ -1123,21 +1123,21 @@ test_pub! {
                 intermediates: smallvec![b'?'],
                 action: 'l',
             },
-            enable_application_keypad_mode: ControlCode::CSI {
+            enable_application_cursor_keys: ControlCode::CSI {
                 params: smallvec![smallvec![1]],
                 intermediates: smallvec![b'?'],
                 action: 'h',
             },
-            disable_application_keypad_mode: ControlCode::CSI {
+            disable_application_cursor_keys: ControlCode::CSI {
                 params: smallvec![smallvec![1]],
                 intermediates: smallvec![b'?'],
                 action: 'l',
             },
-            enable_application_keypad_mode_esc: ControlCode::ESC {
+            enable_application_keypad_mode: ControlCode::ESC {
                 intermediates: smallvec![],
                 byte: b'=',
             },
-            disable_application_keypad_mode_esc: ControlCode::ESC {
+            disable_application_keypad_mode: ControlCode::ESC {
                 intermediates: smallvec![],
                 byte: b'>',
             },

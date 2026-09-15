@@ -411,6 +411,26 @@ frag! {
 }
 
 frag! {
+    application_cursor_keys { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::control_codes().enable_application_cursor_keys
+    => ContentRegion::All =>
+            reset_codes,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs,
+            term::control_codes().enable_application_cursor_keys
+}
+
+frag! {
+    disable_application_cursor_keys { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::control_codes().enable_application_cursor_keys,
+       term::control_codes().disable_application_cursor_keys
+    => ContentRegion::All =>
+            reset_codes,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs
+}
+
+frag! {
     application_keypad_mode { scrollback_lines: 10, width: 10, height: 10 }
     <= term::control_codes().enable_application_keypad_mode
     => ContentRegion::All =>
@@ -424,26 +444,6 @@ frag! {
     disable_application_keypad_mode { scrollback_lines: 10, width: 10, height: 10 }
     <= term::control_codes().enable_application_keypad_mode,
        term::control_codes().disable_application_keypad_mode
-    => ContentRegion::All =>
-            reset_codes,
-            term::ControlCodes::cursor_position(1, 1),
-            term::control_codes().clear_attrs
-}
-
-frag! {
-    application_keypad_mode_esc { scrollback_lines: 10, width: 10, height: 10 }
-    <= term::control_codes().enable_application_keypad_mode_esc
-    => ContentRegion::All =>
-            reset_codes,
-            term::ControlCodes::cursor_position(1, 1),
-            term::control_codes().clear_attrs,
-            term::control_codes().enable_application_keypad_mode
-}
-
-frag! {
-    disable_application_keypad_mode_esc { scrollback_lines: 10, width: 10, height: 10 }
-    <= term::control_codes().enable_application_keypad_mode,
-       term::control_codes().disable_application_keypad_mode_esc
     => ContentRegion::All =>
             reset_codes,
             term::ControlCodes::cursor_position(1, 1),
@@ -512,6 +512,125 @@ frag! {
             term::control_codes().clear_attrs,
             term::control_codes().enable_report_focus,
             term::control_codes().enable_paste_mode
+}
+
+// Mouse tracking and mouse encoding modes.
+//
+// These change how the client encodes mouse events onto the pty, so if a
+// reattach does not restore them the client and the application disagree
+// about the wire format: either the application stops seeing mouse input, or
+// the client sends reports the application decodes as keystrokes.
+//
+// 1000/1002/1003 select how much the client reports (press only, press plus
+// drag, or all motion) and 1006 selects SGR encoding, which is orthogonal to
+// the other three.
+
+frag! {
+    mouse_tracking_normal { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::ControlCodes::dec_private_modes_set(&[1000])
+    => ContentRegion::All =>
+            reset_codes,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs,
+            term::ControlCodes::dec_private_modes_set(&[1000])
+}
+
+frag! {
+    mouse_tracking_button_event { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::ControlCodes::dec_private_modes_set(&[1002])
+    => ContentRegion::All =>
+            reset_codes,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs,
+            term::ControlCodes::dec_private_modes_set(&[1002])
+}
+
+frag! {
+    mouse_tracking_any_event { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::ControlCodes::dec_private_modes_set(&[1003])
+    => ContentRegion::All =>
+            reset_codes,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs,
+            term::ControlCodes::dec_private_modes_set(&[1003])
+}
+
+frag! {
+    mouse_sgr_encoding { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::ControlCodes::dec_private_modes_set(&[1006])
+    => ContentRegion::All =>
+            reset_codes,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs,
+            term::ControlCodes::dec_private_modes_set(&[1006])
+}
+
+// The combination every modern full screen application actually sends.
+frag! {
+    mouse_tracking_and_sgr_encoding { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::ControlCodes::dec_private_modes_set(&[1002, 1006])
+    => ContentRegion::All =>
+            reset_codes,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs,
+            term::ControlCodes::dec_private_modes_set(&[1002]),
+            term::ControlCodes::dec_private_modes_set(&[1006])
+}
+
+frag! {
+    disable_mouse_tracking { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::ControlCodes::dec_private_modes_set(&[1002, 1006]),
+       term::ControlCodes::dec_private_modes_reset(&[1002, 1006])
+    => ContentRegion::All =>
+            reset_codes,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs
+}
+
+// An unrecognised parameter must not discard the rest of the list. The DECSET
+// handler bails out of the whole sequence on the first parameter it does not
+// know, so an unsupported mode silently takes every mode after it down too.
+// Here 1004 is supported and restored on its own, but is lost when it follows
+// a mode the handler does not recognise.
+frag! {
+    unknown_mode_does_not_discard_later_params { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::ControlCodes::dec_private_modes_set(&[1000, 1004])
+    => ContentRegion::All =>
+            reset_codes,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs,
+            term::control_codes().enable_report_focus,
+            term::ControlCodes::dec_private_modes_set(&[1000])
+}
+
+// DECCKM (CSI ? 1 h, application cursor keys) and DECKPAM (ESC =, application
+// keypad) are independent modes covering different key groups: DECCKM changes
+// what the arrow keys send, DECKPAM changes the numeric keypad. Setting or
+// clearing one must leave the other alone.
+frag! {
+    application_cursor_keys_and_keypad_are_independent
+        { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::control_codes().enable_application_cursor_keys,
+       term::control_codes().enable_application_keypad_mode
+    => ContentRegion::All =>
+            reset_codes,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs,
+            term::control_codes().enable_application_cursor_keys,
+            term::control_codes().enable_application_keypad_mode
+}
+
+// Resetting the keypad must not clear the cursor key mode as well.
+frag! {
+    disabling_keypad_leaves_cursor_keys_set { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::control_codes().enable_application_cursor_keys,
+       term::control_codes().enable_application_keypad_mode,
+       term::control_codes().disable_application_keypad_mode
+    => ContentRegion::All =>
+            reset_codes,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs,
+            term::control_codes().enable_application_cursor_keys
 }
 
 frag! {
