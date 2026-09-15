@@ -164,10 +164,18 @@ impl Line {
     ///
     /// This implements DCH (Delete Character).
     pub fn delete_character(&mut self, width: usize, col: usize, attrs: &term::Attrs, n: usize) {
-        let delete_to = std::cmp::min(self.cells.len(), col + n);
-        let num_to_delete = delete_to - col;
+        if col >= width {
+            return;
+        }
 
-        self.cells.drain(col..delete_to);
+        // Everything past the end of the cells buffer is implicitly blank, so
+        // when the cursor sits out there we have no physical cells to remove
+        // and the drain range collapses to an empty one at the end.
+        let delete_from = std::cmp::min(col, self.cells.len());
+        let delete_to = std::cmp::min(self.cells.len(), col + n);
+        let num_to_delete = delete_to - delete_from;
+
+        self.cells.drain(delete_from..delete_to);
 
         // Inject the empty cells that were logically already present
         // when the cells buffer was short.
