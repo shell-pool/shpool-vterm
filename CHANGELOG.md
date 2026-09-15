@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.5](https://github.com/shell-pool/shpool-vterm/compare/v0.2.4...v0.2.5) - 2026-09-15
+
+### Added
+
+- properly restore input modes
+
+### Fixed
+
+- delete char panic
+
 ## [0.2.4](https://github.com/shell-pool/shpool-vterm/compare/v0.2.3...v0.2.4) - 2026-09-14
 
 ### Fixed
