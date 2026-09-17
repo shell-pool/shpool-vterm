@@ -12,6 +12,7 @@ frag! {
        term::Raw::from("B")
     => ContentRegion::All =>
             reset_codes,
+            term::control_codes().enable_alt_screen,
             term::Raw::from("B"),
             term::Crlf::default(),
             term::ControlCodes::cursor_position(1, 2),
@@ -32,6 +33,18 @@ frag! {
 }
 
 frag! {
+    alt_screen_mode_restored { scrollback_lines: 100, width: 2, height: 2 }
+    <= term::Raw::from("A"),
+       term::control_codes().enable_alt_screen
+    => ContentRegion::All =>
+            reset_codes,
+            term::control_codes().enable_alt_screen,
+            term::Crlf::default(),
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs
+}
+
+frag! {
     alt_screen_clears { scrollback_lines: 100, width: 5, height: 2 }
     <= term::control_codes().enable_alt_screen,
        term::Raw::from("JUNK"),
@@ -39,6 +52,7 @@ frag! {
        term::control_codes().enable_alt_screen
     => ContentRegion::All =>
             reset_codes,
+            term::control_codes().enable_alt_screen,
             term::Crlf::default(),
             term::ControlCodes::cursor_position(1, 1),
             term::control_codes().clear_attrs
@@ -55,6 +69,7 @@ frag! {
        term::Raw::from("B")
     => ContentRegion::All =>
             reset_codes,
+            term::control_codes().enable_alt_screen,
             term::Raw::from("B"),
             term::Crlf::default(),
             term::ControlCodes::cursor_position(1, 2),
@@ -67,6 +82,7 @@ frag! {
        term::ControlCodes::set_scroll_region(2, 5)
     => ContentRegion::All =>
             reset_codes,
+            term::control_codes().enable_alt_screen,
             term::Crlf::default(),
             term::Crlf::default(),
             term::Crlf::default(),
@@ -83,6 +99,7 @@ frag! {
        term::ControlCodes::set_scroll_region(2, 5)
     => ContentRegion::All =>
             reset_codes,
+            term::control_codes().enable_alt_screen,
             term::Raw::from("A"),
             term::Crlf::default(),
             term::Crlf::default(),
@@ -100,6 +117,7 @@ frag! {
        term::control_codes().unset_scroll_region
     => ContentRegion::All =>
             reset_codes,
+            term::control_codes().enable_alt_screen,
             term::Crlf::default(),
             term::Crlf::default(),
             term::Crlf::default(),
@@ -131,6 +149,7 @@ frag! {
        term::control_codes().erase_to_end
     => ContentRegion::All =>
             reset_codes,
+            term::control_codes().enable_alt_screen,
             term::Raw::from("11111"),
             term::Crlf::default(),
             term::Raw::from("22"),
@@ -156,6 +175,7 @@ frag! {
        term::control_codes().erase_from_start
     => ContentRegion::All =>
             reset_codes,
+            term::control_codes().enable_alt_screen,
             term::Crlf::default(),
             term::Raw::from("   22"),
             term::Crlf::default(),
@@ -181,6 +201,7 @@ frag! {
        term::control_codes().erase_screen
     => ContentRegion::All =>
             reset_codes,
+            term::control_codes().enable_alt_screen,
             term::Crlf::default(),
             term::Crlf::default(),
             term::Crlf::default(),
@@ -208,6 +229,7 @@ frag! {
        term::control_codes().erase_to_end
     => ContentRegion::All =>
             reset_codes,
+            term::control_codes().enable_alt_screen,
             term::Raw::from("11111"),
             term::Crlf::default(),
             term::Raw::from("22222"),
@@ -241,6 +263,7 @@ frag! {
        term::control_codes().erase_from_start
     => ContentRegion::All =>
             reset_codes,
+            term::control_codes().enable_alt_screen,
             term::Raw::from("11111"),
             term::Crlf::default(),
             term::Crlf::default(),
@@ -274,6 +297,7 @@ frag! {
        term::control_codes().erase_screen
     => ContentRegion::All =>
             reset_codes,
+            term::control_codes().enable_alt_screen,
             term::Raw::from("11111"),
             term::Crlf::default(),
             term::Crlf::default(),
@@ -302,6 +326,7 @@ frag! {
        term::ControlCodes::insert_lines(1)
     => ContentRegion::All =>
             reset_codes,
+            term::control_codes().enable_alt_screen,
             term::Raw::from("11"),
             term::Crlf::default(),
             term::Crlf::default(),
@@ -326,6 +351,7 @@ frag! {
        term::ControlCodes::insert_lines(1)
     => ContentRegion::All =>
             reset_codes,
+            term::control_codes().enable_alt_screen,
             term::Raw::from("11"),
             term::Crlf::default(),
             term::Raw::from("22"),
@@ -350,6 +376,7 @@ frag! {
        term::ControlCodes::insert_lines(10)
     => ContentRegion::All =>
             reset_codes,
+            term::control_codes().enable_alt_screen,
             term::Raw::from("11"),
             term::Crlf::default(),
             term::Crlf::default(),
@@ -370,6 +397,7 @@ frag! {
        term::ControlCodes::insert_lines(2)
     => ContentRegion::All =>
             reset_codes,
+            term::control_codes().enable_alt_screen,
             term::Raw::from("11"),
             term::Crlf::default(),
             term::Crlf::default(),
@@ -394,6 +422,7 @@ frag! {
        term::ControlCodes::insert_lines(1)
     => ContentRegion::All =>
             reset_codes,
+            term::control_codes().enable_alt_screen,
             term::Raw::from("11"), term::Crlf::default(),
             term::Raw::from("22"), term::Crlf::default(),
             term::Raw::from("33"), term::Crlf::default(),
@@ -415,6 +444,7 @@ frag! {
        term::ControlCodes::delete_lines(1)
     => ContentRegion::All =>
             reset_codes,
+            term::control_codes().enable_alt_screen,
             term::Raw::from("11"), term::Crlf::default(),
             term::Raw::from("33"), term::Crlf::default(),
             term::Raw::from("44"), term::Crlf::default(),
@@ -436,6 +466,7 @@ frag! {
        term::ControlCodes::delete_lines(1)
     => ContentRegion::All =>
             reset_codes,
+            term::control_codes().enable_alt_screen,
             term::Raw::from("11"), term::Crlf::default(),
             term::Raw::from("22"), term::Crlf::default(),
             term::Raw::from("44"), term::Crlf::default(),
@@ -457,6 +488,7 @@ frag! {
        term::ControlCodes::delete_lines(10)
     => ContentRegion::All =>
             reset_codes,
+            term::control_codes().enable_alt_screen,
             term::Raw::from("11"),
             term::Crlf::default(),
             term::Crlf::default(),
@@ -478,6 +510,7 @@ frag! {
        term::ControlCodes::delete_lines(1)
     => ContentRegion::All =>
             reset_codes,
+            term::control_codes().enable_alt_screen,
             term::Raw::from("11"),
             term::Crlf::default(),
             term::Raw::from("22"),
@@ -500,6 +533,7 @@ frag! {
        term::ControlCodes::insert_character(1)
     => ContentRegion::All =>
             reset_codes,
+            term::control_codes().enable_alt_screen,
             term::Raw::from("1 23"),
             term::Crlf::default(),
             term::Crlf::default(),
@@ -516,6 +550,7 @@ frag! {
        term::ControlCodes::insert_character(1)
     => ContentRegion::All =>
             reset_codes,
+            term::control_codes().enable_alt_screen,
             term::Raw::from(" 12"),
             term::Crlf::default(),
             term::Crlf::default(),
@@ -532,6 +567,7 @@ frag! {
        term::ControlCodes::insert_character(2)
     => ContentRegion::All =>
             reset_codes,
+            term::control_codes().enable_alt_screen,
             term::Raw::from("  123"),
             term::Crlf::default(),
             term::Crlf::default(),
@@ -548,6 +584,7 @@ frag! {
        term::ControlCodes::delete_character(1)
     => ContentRegion::All =>
             reset_codes,
+            term::control_codes().enable_alt_screen,
             term::Raw::from("13   "),
             term::Crlf::default(),
             term::Crlf::default(),
@@ -564,6 +601,7 @@ frag! {
        term::ControlCodes::delete_character(2)
     => ContentRegion::All =>
             reset_codes,
+            term::control_codes().enable_alt_screen,
             term::Raw::from("3    "),
             term::Crlf::default(),
             term::Crlf::default(),
@@ -580,6 +618,7 @@ frag! {
        term::ControlCodes::delete_character(1)
     => ContentRegion::All =>
             reset_codes,
+            term::control_codes().enable_alt_screen,
             term::Raw::from("12   "),
             term::Crlf::default(),
             term::Crlf::default(),
@@ -597,6 +636,7 @@ frag! {
        term::ControlCodes::delete_character(1)
     => ContentRegion::All =>
             reset_codes,
+            term::control_codes().enable_alt_screen,
             term::Raw::from("13  "),
             term::ControlCodes::fgcolor_idx(1),
             term::Raw::from(" "),
@@ -617,6 +657,7 @@ frag! {
        term::ControlCodes::erase_character(1)
     => ContentRegion::All =>
             reset_codes,
+            term::control_codes().enable_alt_screen,
             term::Raw::from("1 3"),
             term::Crlf::default(),
             term::Crlf::default(),
@@ -633,6 +674,7 @@ frag! {
        term::ControlCodes::erase_character(3)
     => ContentRegion::All =>
             reset_codes,
+            term::control_codes().enable_alt_screen,
             term::Raw::from("1   5"),
             term::Crlf::default(),
             term::Crlf::default(),
@@ -650,6 +692,7 @@ frag! {
        term::ControlCodes::erase_character(1)
     => ContentRegion::All =>
             reset_codes,
+            term::control_codes().enable_alt_screen,
             term::Raw::from("1"),
             term::ControlCodes::fgcolor_idx(1),
             term::Raw::from(" "),
@@ -671,6 +714,7 @@ frag! {
        term::ControlCodes::erase_character(1)
     => ContentRegion::All =>
             reset_codes,
+            term::control_codes().enable_alt_screen,
             term::Raw::from("1234 "),
             term::Crlf::default(),
             term::Crlf::default(),
@@ -688,6 +732,7 @@ frag! {
        term::Raw::from("4")
     => ContentRegion::All =>
             reset_codes,
+            term::control_codes().enable_alt_screen,
             term::Raw::from("2"),
             term::Crlf::default(),
             term::Raw::from("3"),
@@ -711,6 +756,7 @@ frag! {
        term::Raw::from("X")
     => ContentRegion::All =>
             reset_codes,
+            term::control_codes().enable_alt_screen,
             term::Raw::from("0"),
             term::Crlf::default(),
             term::Raw::from("2"),
@@ -739,6 +785,7 @@ frag! {
        term::Raw::from("X")
     => ContentRegion::All =>
             reset_codes,
+            term::control_codes().enable_alt_screen,
             term::Raw::from("0"),
             term::Crlf::default(),
             term::Raw::from("1"),
@@ -767,6 +814,7 @@ frag! {
        term::Raw::from("X")
     => ContentRegion::All =>
             reset_codes,
+            term::control_codes().enable_alt_screen,
             term::Raw::from("0"),
             term::Crlf::default(),
             term::Raw::from("X"),

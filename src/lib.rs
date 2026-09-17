@@ -398,7 +398,13 @@ impl State {
 
         match self.screen_mode {
             ScreenMode::Scrollback => self.scrollback.dump_contents_into(buf, dump_region),
-            ScreenMode::Alt => self.altscreen.dump_contents_into(buf, dump_region),
+            ScreenMode::Alt => {
+                // The alt screen is a mode as well as a buffer, so we must
+                // re-enter it before painting or the contents land on the
+                // restoring terminal's primary screen.
+                term::control_codes().enable_alt_screen.term_input_into(buf);
+                self.altscreen.dump_contents_into(buf, dump_region)
+            }
         }
 
         let controls = term::control_codes();
