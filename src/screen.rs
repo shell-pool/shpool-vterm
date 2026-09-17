@@ -95,6 +95,10 @@ impl Screen {
     }
 
     pub fn set_scroll_region(&mut self, scroll_region: ScrollRegion) {
+        self.store_scroll_region(clamp_scroll_region(scroll_region, self.size));
+    }
+
+    fn store_scroll_region(&mut self, scroll_region: ScrollRegion) {
         match &mut self.grid {
             Grid::Scrollback(scrollback) => scrollback.scroll_region = scroll_region,
             Grid::AltScreen(altscreen) => altscreen.scroll_region = scroll_region,
@@ -155,6 +159,9 @@ impl Screen {
             Grid::AltScreen(altscreen) => altscreen.resize(new_size),
         }
         self.size = new_size;
+
+        let scroll_region = self.grid.scroll_region().clone();
+        self.store_scroll_region(clamp_scroll_region(scroll_region, self.size));
 
         self.cursor.clamp_to(self.size);
         self.saved_cursor.pos.clamp_to(self.size);
@@ -280,6 +287,26 @@ impl Screen {
             Grid::AltScreen(alt) => alt.delete_lines(&self.cursor, n),
         }
     }
+}
+
+/// Bring a scroll region back onto the grid.
+///
+/// DECSTBM lets a client name a bottom past the last row, and a shrinking
+/// resize can strand a region that was in range when it was set. Everything
+/// downstream assumes `bottom` is a real row: the scrolling code indexes the
+/// grid with it, and LF walks the cursor off the screen chasing a bottom it
+/// can never reach. A region with no rows left in it is dropped.
+fn clamp_scroll_region(scroll_region: ScrollRegion, size: crate::Size) -> ScrollRegion {
+    let ScrollRegion::Window { top, bottom } = scroll_region else {
+        return ScrollRegion::TrackSize;
+    };
+
+    let bottom = std::cmp::min(bottom, size.height);
+    if top >= bottom {
+        return ScrollRegion::TrackSize;
+    }
+
+    ScrollRegion::Window { top, bottom }
 }
 
 impl std::fmt::Display for Screen {

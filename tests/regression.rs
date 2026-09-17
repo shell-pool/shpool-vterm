@@ -228,3 +228,203 @@ frag! {
             term::ControlCodes::cursor_position(2, 1),
             term::control_codes().clear_attrs
 }
+
+//
+// Scroll region bottom past the last row of the screen.
+//
+// DECSTBM stores the requested bottom verbatim, so `CSI 1;5r` on a three row
+// screen leaves a region extending past the grid. LF only scrolls once the
+// cursor reaches the bottom of the region, so from the last row it walks the
+// cursor off the screen instead. Real terminals clamp the bottom to the
+// screen height, which is what these tests assert.
+//
+// With the cursor below the last row, `bottom - cursor.row` underflows in
+// both Scrollback::insert_lines and Scrollback::delete_lines. The SU is
+// needed to get there: it pushes the grid start up into the scrollback so the
+// off screen rows still resolve to lines, otherwise both bail out early.
+
+// Control case: an in-range bottom, where LF scrolls and the cursor stays on
+// the last row. Anchors the expected output of the three cases below.
+frag! {
+    scroll_region_bottom_at_last_row { scrollback_lines: 100, width: 5, height: 3 }
+    <= term::Raw::from("aa"), term::Crlf::default(),
+       term::Raw::from("bb"), term::Crlf::default(),
+       term::Raw::from("cc"), term::Crlf::default(),
+       term::Raw::from("dd"), term::Crlf::default(),
+       term::Raw::from("ee"),
+       term::ControlCodes::scroll_up(2),
+       term::ControlCodes::set_scroll_region(1, 3),
+       term::ControlCodes::cursor_position(3, 1),
+       term::Crlf::default(),
+       term::Crlf::default(),
+       term::control_codes().unset_scroll_region
+    => ContentRegion::Screen =>
+            reset_codes,
+            term::Raw::from("cc"),
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::ControlCodes::cursor_position(3, 1),
+            term::control_codes().clear_attrs
+}
+
+// An out of range bottom must behave exactly like the control. Today nothing
+// scrolls and the restore buffer ends with a CUP to row 5 of a three row
+// screen, which is the mid screen cursor users see on reattach.
+frag! {
+    scroll_region_bottom_past_last_row { scrollback_lines: 100, width: 5, height: 3 }
+    <= term::Raw::from("aa"), term::Crlf::default(),
+       term::Raw::from("bb"), term::Crlf::default(),
+       term::Raw::from("cc"), term::Crlf::default(),
+       term::Raw::from("dd"), term::Crlf::default(),
+       term::Raw::from("ee"),
+       term::ControlCodes::scroll_up(2),
+       term::ControlCodes::set_scroll_region(1, 5),
+       term::ControlCodes::cursor_position(3, 1),
+       term::Crlf::default(),
+       term::Crlf::default(),
+       term::control_codes().unset_scroll_region
+    => ContentRegion::Screen =>
+            reset_codes,
+            term::Raw::from("cc"),
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::ControlCodes::cursor_position(3, 1),
+            term::control_codes().clear_attrs
+}
+
+// IL with the cursor below the last row. Once the cursor is back on the
+// screen the insert has nothing to push down, so the output matches the
+// control.
+frag! {
+    insert_lines_with_cursor_past_last_row { scrollback_lines: 100, width: 5, height: 3 }
+    <= term::Raw::from("aa"), term::Crlf::default(),
+       term::Raw::from("bb"), term::Crlf::default(),
+       term::Raw::from("cc"), term::Crlf::default(),
+       term::Raw::from("dd"), term::Crlf::default(),
+       term::Raw::from("ee"),
+       term::ControlCodes::scroll_up(2),
+       term::ControlCodes::set_scroll_region(1, 5),
+       term::ControlCodes::cursor_position(3, 1),
+       term::Crlf::default(),
+       term::Crlf::default(),
+       term::control_codes().unset_scroll_region,
+       term::ControlCodes::insert_lines(1)
+    => ContentRegion::Screen =>
+            reset_codes,
+            term::Raw::from("cc"),
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::ControlCodes::cursor_position(3, 1),
+            term::control_codes().clear_attrs
+}
+
+// The same for DL, which has its own copy of the underflowing arithmetic.
+frag! {
+    delete_lines_with_cursor_past_last_row { scrollback_lines: 100, width: 5, height: 3 }
+    <= term::Raw::from("aa"), term::Crlf::default(),
+       term::Raw::from("bb"), term::Crlf::default(),
+       term::Raw::from("cc"), term::Crlf::default(),
+       term::Raw::from("dd"), term::Crlf::default(),
+       term::Raw::from("ee"),
+       term::ControlCodes::scroll_up(2),
+       term::ControlCodes::set_scroll_region(1, 5),
+       term::ControlCodes::cursor_position(3, 1),
+       term::Crlf::default(),
+       term::Crlf::default(),
+       term::control_codes().unset_scroll_region,
+       term::ControlCodes::delete_lines(1)
+    => ContentRegion::Screen =>
+            reset_codes,
+            term::Raw::from("cc"),
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::ControlCodes::cursor_position(3, 1),
+            term::control_codes().clear_attrs
+}
+
+// The alt screen keeps its grid in a buffer exactly one screen tall, so an out
+// of range bottom indexes off the end of it rather than underflowing. The
+// expected output here is what the in-range `CSI 1;3r` produces.
+frag! {
+    alt_screen_scroll_region_past_last_row { scrollback_lines: 100, width: 5, height: 3 }
+    <= term::control_codes().enable_alt_screen,
+       term::Raw::from("aa"), term::Crlf::default(),
+       term::Raw::from("bb"), term::Crlf::default(),
+       term::Raw::from("cc"),
+       term::ControlCodes::set_scroll_region(1, 9),
+       term::ControlCodes::scroll_down(1)
+    => ContentRegion::All =>
+            reset_codes,
+            term::control_codes().enable_alt_screen,
+            term::Raw::from("bb"),
+            term::Crlf::default(),
+            term::Raw::from("cc"),
+            term::Crlf::default(),
+            term::ControlCodes::set_scroll_region(1, 3),
+            term::ControlCodes::cursor_position(3, 3),
+            term::control_codes().clear_attrs
+}
+
+// Clamping the bottom can pull it up to or above the top, leaving a region
+// that describes no rows at all. There is nothing to scroll, so it is dropped.
+frag! {
+    scroll_region_clamped_away { scrollback_lines: 100, width: 5, height: 3 }
+    <= term::ControlCodes::set_scroll_region(5, 9)
+    => ContentRegion::All =>
+            reset_codes,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs
+}
+
+// A shrinking resize strands a region that was in range when it was set, so
+// the clamp has to be reapplied there too. shpool resizes the spool on every
+// reattach, which is how a long lived session gets into this state.
+#[test]
+fn scroll_region_clamped_on_shrinking_resize() {
+    use shpool_vterm::term::AsTermInput;
+
+    let mut input = vec![];
+    term::ControlCodes::set_scroll_region(1, 6).term_input_into(&mut input);
+
+    let mut term = shpool_vterm::Term::new(100, shpool_vterm::Size { width: 5, height: 6 });
+    term.process(input.as_slice());
+    term.resize(shpool_vterm::Size { width: 5, height: 3 });
+
+    let mut expected = vec![];
+    crate::support::frag::reset_codes.term_input_into(&mut expected);
+    term::ControlCodes::set_scroll_region(1, 3).term_input_into(&mut expected);
+    term::ControlCodes::cursor_position(1, 1).term_input_into(&mut expected);
+    term::control_codes().clear_attrs.term_input_into(&mut expected);
+
+    assert_eq!(term.contents(ContentRegion::All), expected);
+}
+
+// Same, on the alt screen, where the stranded region also takes the session
+// down on the next scroll.
+#[test]
+fn alt_screen_scroll_region_clamped_on_shrinking_resize() {
+    use shpool_vterm::term::AsTermInput;
+
+    let mut input = vec![];
+    term::control_codes().enable_alt_screen.term_input_into(&mut input);
+    term::ControlCodes::set_scroll_region(1, 6).term_input_into(&mut input);
+
+    let mut term = shpool_vterm::Term::new(100, shpool_vterm::Size { width: 5, height: 6 });
+    term.process(input.as_slice());
+    term.resize(shpool_vterm::Size { width: 5, height: 3 });
+
+    let mut scroll = vec![];
+    term::ControlCodes::scroll_down(1).term_input_into(&mut scroll);
+    term.process(scroll.as_slice());
+
+    let mut expected = vec![];
+    crate::support::frag::reset_codes.term_input_into(&mut expected);
+    term::control_codes().enable_alt_screen.term_input_into(&mut expected);
+    term::Crlf::default().term_input_into(&mut expected);
+    term::Crlf::default().term_input_into(&mut expected);
+    term::ControlCodes::set_scroll_region(1, 3).term_input_into(&mut expected);
+    term::ControlCodes::cursor_position(1, 1).term_input_into(&mut expected);
+    term::control_codes().clear_attrs.term_input_into(&mut expected);
+
+    assert_eq!(term.contents(ContentRegion::All), expected);
+}
