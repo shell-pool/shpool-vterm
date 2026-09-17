@@ -234,7 +234,7 @@ impl Screen {
     pub fn get_line_mut(&mut self) -> Option<&mut Line> {
         match &mut self.grid {
             Grid::Scrollback(s) => s.get_line_mut(self.size, self.cursor.row),
-            Grid::AltScreen(alt) => Some(alt.get_line_mut(self.cursor.row)),
+            Grid::AltScreen(alt) => alt.get_line_mut(self.cursor.row),
         }
     }
 
@@ -377,6 +377,22 @@ mod tests {
     use super::*;
     use crate::term::Attrs;
     use crate::Size;
+
+    #[test]
+    fn altscreen_get_line_mut_at_end_of_buf() {
+        let mut screen = Screen::alt(Size { width: 5, height: 3 });
+        screen.cursor = Pos { row: 3, col: 0 };
+
+        assert!(screen.get_line_mut().is_none());
+    }
+
+    #[test]
+    fn altscreen_get_line_mut_past_end_of_buf() {
+        let mut screen = Screen::alt(Size { width: 5, height: 3 });
+        screen.cursor = Pos { row: 7, col: 0 };
+
+        assert!(screen.get_line_mut().is_none());
+    }
 
     #[test]
     fn altscreen_resize_grow_height() {
