@@ -150,3 +150,81 @@ frag! {
             term::ControlCodes::cursor_position(2, 5),
             term::control_codes().clear_attrs
 }
+
+//
+// Zero width codepoints.
+//
+
+// Control case: the precomposed form of the same glyph, which takes the
+// ordinary width-1 path today. It anchors the expected rendering of
+// combining_mark_after_ascii below.
+frag! {
+    precomposed_char_needs_no_modifier { scrollback_lines: 100, width: 10, height: 10 }
+    <= term::Raw::from("\u{e9}")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("\u{e9}"),
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().clear_attrs
+}
+
+// 'e' followed by a combining acute accent. One cell, one column.
+frag! {
+    combining_mark_after_ascii { scrollback_lines: 100, width: 10, height: 10 }
+    <= term::Raw::from("e\u{301}")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("e\u{301}"),
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().clear_attrs
+}
+
+// VS16 requests the emoji presentation of the preceding symbol. We keep the
+// base char's width here rather than promoting the cell to width 2: terminals
+// disagree about the promotion, and getting the bytes back out intact is what
+// session restore actually needs.
+frag! {
+    variation_selector_after_symbol { scrollback_lines: 100, width: 10, height: 10 }
+    <= term::Raw::from("\u{2714}\u{fe0f}")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("\u{2714}\u{fe0f}"),
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().clear_attrs
+}
+
+// A ZWJ sequence. The joiner attaches to the cell before it, and the emoji
+// after the joiner starts a fresh width-2 cell, so the pair spans 4 columns.
+frag! {
+    zwj_emoji_sequence { scrollback_lines: 100, width: 10, height: 10 }
+    <= term::Raw::from("\u{1f9d1}\u{200d}\u{1f4bb}")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("\u{1f9d1}\u{200d}\u{1f4bb}"),
+            term::ControlCodes::cursor_position(1, 5),
+            term::control_codes().clear_attrs
+}
+
+// A combining mark with no cell to modify. There is nothing sensible to
+// attach it to, so it gets dropped, but it must not take the session down.
+frag! {
+    combining_mark_with_no_preceding_cell { scrollback_lines: 100, width: 10, height: 10 }
+    <= term::Raw::from("\u{301}")
+    => ContentRegion::All =>
+            reset_codes,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs
+}
+
+// Same, but the cursor has moved to a fresh row. The mark must not reach back
+// up to the last cell of the previous line.
+frag! {
+    combining_mark_at_start_of_line { scrollback_lines: 100, width: 10, height: 10 }
+    <= term::Raw::from("ab"), term::Crlf::default(),
+       term::Raw::from("\u{301}")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("ab"),
+            term::ControlCodes::cursor_position(2, 1),
+            term::control_codes().clear_attrs
+}

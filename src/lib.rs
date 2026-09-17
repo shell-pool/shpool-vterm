@@ -25,6 +25,7 @@ use crate::{
 
 use bitvec::{bitvec, vec::BitVec};
 use smallvec::SmallVec;
+use unicode_width::UnicodeWidthChar;
 
 #[macro_use]
 mod visibility;
@@ -590,6 +591,39 @@ impl State {
             warn!(self.logger, "writing char at cursor: {:?}", e);
         }
     }
+
+    /// Attach a zero width char to the grapheme cluster it modifies.
+    ///
+    /// A zero width char describes the glyph to its left, which lives in the
+    /// cell the cursor most recently moved past. Wide chars leave padding
+    /// cells behind them, so we skip back over those to reach the cell that
+    /// actually owns the glyph. If there is no glyph to the left of the
+    /// cursor there is nothing to modify and we drop the char, which is what
+    /// xterm does.
+    fn add_modifier_char(&mut self, c: char) {
+        let screen = self.screen_mut();
+        let width = screen.size.width;
+        let Some(mut col) = screen.cursor.col.checked_sub(1) else {
+            return;
+        };
+
+        let Some(line) = screen.get_line_mut() else {
+            return;
+        };
+
+        while line.get_cell(width, col).is_some_and(|cell| cell.is_wide_padding()) {
+            match col.checked_sub(1) {
+                Some(prev) => col = prev,
+                None => return,
+            }
+        }
+
+        match line.get_cell_mut(width, col) {
+            // An empty cell renders as a space and has no cluster to extend.
+            Some(cell) if !cell.is_empty() => cell.add_char(c),
+            _ => {}
+        }
+    }
 }
 
 /// Indicates which screen mode is active.
@@ -601,6 +635,24 @@ enum ScreenMode {
 impl vte::Perform for State {
     fn print(&mut self, c: char) {
         trace!(self.logger, "print: {}", c);
+
+        match UnicodeWidthChar::width(c) {
+            // Control chars have no printable form. vte routes the C0 set to
+            // `execute`, but anything else that lands here would corrupt the
+            // restore buffer if we stored it in a cell.
+            None => {
+                warn!(self.logger, "print: dropping control char {:?}", c);
+                return;
+            }
+            // Combining marks, variation selectors and ZWJ modify the cluster
+            // to their left instead of occupying a column of their own.
+            Some(0) => {
+                self.add_modifier_char(c);
+                return;
+            }
+            Some(_) => {}
+        }
+
         self.last_print_char = Some(c);
         let attrs = self.cursor_attrs.clone();
         self.write_char_at_cursor(Cell::new(c, attrs));

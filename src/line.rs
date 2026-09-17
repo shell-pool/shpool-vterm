@@ -87,7 +87,6 @@ impl Line {
     }
 
     /// Get the cell at the given grid position.
-    #[allow(dead_code)]
     pub fn get_cell(&self, width: usize, col: usize) -> Option<&Cell> {
         if col >= width {
             return None;
@@ -98,6 +97,19 @@ impl Line {
         }
 
         return Some(&self.cells[col]);
+    }
+
+    /// Get a mutable reference to the cell at the given grid position.
+    ///
+    /// Unlike `get_cell` this does not conjure up a blank cell for positions
+    /// past the end of the stored cells, since there is nothing there to
+    /// modify.
+    pub fn get_cell_mut(&mut self, width: usize, col: usize) -> Option<&mut Cell> {
+        if col >= width || col >= self.cells.len() {
+            return None;
+        }
+
+        Some(&mut self.cells[col])
     }
 
     /// Set the given column to the given cell.

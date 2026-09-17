@@ -101,9 +101,17 @@ impl Cell {
         }
     }
 
-    /// Append a modifier char to the grapheme_cluster.
+    /// Append a zero width modifier char to the grapheme cluster.
+    ///
+    /// Combining marks, variation selectors and ZWJ all describe the glyph
+    /// they follow rather than occupying a column of their own, so they ride
+    /// along in the cluster of the cell they modify.
     pub fn add_char(&mut self, c: char) {
-        assert!(UnicodeWidthChar::width(c).unwrap_or(0) > 0, "non-zero width char added to cell");
+        debug_assert_eq!(
+            UnicodeWidthChar::width(c),
+            Some(0),
+            "only zero width chars may be added to an existing cell"
+        );
 
         self.grapheme_cluster.push(c);
     }
@@ -114,6 +122,12 @@ impl Cell {
 
     pub fn is_empty(&self) -> bool {
         self.empty
+    }
+
+    /// True if this cell is the trailing padding of a wide char rather than
+    /// a glyph in its own right.
+    pub fn is_wide_padding(&self) -> bool {
+        self.wide_padding
     }
 
     pub fn attrs(&self) -> &term::Attrs {
