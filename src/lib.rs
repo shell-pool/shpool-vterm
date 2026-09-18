@@ -400,10 +400,26 @@ impl State {
         match self.screen_mode {
             ScreenMode::Scrollback => self.scrollback.dump_contents_into(buf, dump_region),
             ScreenMode::Alt => {
-                // The alt screen is a mode as well as a buffer, so we must
-                // re-enter it before painting or the contents land on the
-                // restoring terminal's primary screen.
+                // Restore the regular scrollback first so that after the user
+                // exits their curses app, they can still see shell history.
+                self.scrollback.dump_contents_into(buf, dump_region.clone());
+
+                // Re-enable alt screen, then dump the contents. This is
+                // not actually super important in practice because basically
+                // every curses app respects SIGWINCH. We may even want to
+                // consider exposing a knob to disable alt-screen dumping
+                // since it might make things less flickery. Not worth doing
+                // for now though.
                 term::control_codes().enable_alt_screen.term_input_into(buf);
+
+                // Switching screens does not clear the scroll region or
+                // origin mode the scrollback restore just set, and neither
+                // is per-screen in a real terminal, so we have to clear them
+                // ourselves. This has to happen before the contents get
+                // painted, since it is the paint that a stranded scroll
+                // region corrupts.
+                self.scrollback.dump_global_state_reset_into(buf);
+
                 self.altscreen.dump_contents_into(buf, dump_region)
             }
         }

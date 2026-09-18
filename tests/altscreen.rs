@@ -12,6 +12,10 @@ frag! {
        term::Raw::from("B")
     => ContentRegion::All =>
             reset_codes,
+            // The scrollback is restored first, so that the shell history
+            // is still there when the user exits the alt screen.
+            term::Raw::from("A"),
+            term::ControlCodes::cursor_position(1, 2),
             term::control_codes().enable_alt_screen,
             term::Raw::from("B"),
             term::Crlf::default(),
@@ -38,6 +42,8 @@ frag! {
        term::control_codes().enable_alt_screen
     => ContentRegion::All =>
             reset_codes,
+            term::Raw::from("A"),
+            term::ControlCodes::cursor_position(1, 2),
             term::control_codes().enable_alt_screen,
             term::Crlf::default(),
             term::ControlCodes::cursor_position(1, 1),
@@ -52,6 +58,7 @@ frag! {
        term::control_codes().enable_alt_screen
     => ContentRegion::All =>
             reset_codes,
+            empty_scrollback,
             term::control_codes().enable_alt_screen,
             term::Crlf::default(),
             term::ControlCodes::cursor_position(1, 1),
@@ -69,6 +76,8 @@ frag! {
        term::Raw::from("B")
     => ContentRegion::All =>
             reset_codes,
+            term::Raw::from("A"),
+            term::ControlCodes::cursor_position(1, 2),
             term::control_codes().enable_alt_screen,
             term::Raw::from("B"),
             term::Crlf::default(),
@@ -82,6 +91,7 @@ frag! {
        term::ControlCodes::set_scroll_region(2, 5)
     => ContentRegion::All =>
             reset_codes,
+            empty_scrollback,
             term::control_codes().enable_alt_screen,
             term::Crlf::default(),
             term::Crlf::default(),
@@ -99,6 +109,7 @@ frag! {
        term::ControlCodes::set_scroll_region(2, 5)
     => ContentRegion::All =>
             reset_codes,
+            empty_scrollback,
             term::control_codes().enable_alt_screen,
             term::Raw::from("A"),
             term::Crlf::default(),
@@ -117,6 +128,7 @@ frag! {
        term::control_codes().unset_scroll_region
     => ContentRegion::All =>
             reset_codes,
+            empty_scrollback,
             term::control_codes().enable_alt_screen,
             term::Crlf::default(),
             term::Crlf::default(),
@@ -149,6 +161,7 @@ frag! {
        term::control_codes().erase_to_end
     => ContentRegion::All =>
             reset_codes,
+            empty_scrollback,
             term::control_codes().enable_alt_screen,
             term::Raw::from("11111"),
             term::Crlf::default(),
@@ -175,6 +188,7 @@ frag! {
        term::control_codes().erase_from_start
     => ContentRegion::All =>
             reset_codes,
+            empty_scrollback,
             term::control_codes().enable_alt_screen,
             term::Crlf::default(),
             term::Raw::from("   22"),
@@ -201,6 +215,7 @@ frag! {
        term::control_codes().erase_screen
     => ContentRegion::All =>
             reset_codes,
+            empty_scrollback,
             term::control_codes().enable_alt_screen,
             term::Crlf::default(),
             term::Crlf::default(),
@@ -229,6 +244,7 @@ frag! {
        term::control_codes().erase_to_end
     => ContentRegion::All =>
             reset_codes,
+            empty_scrollback,
             term::control_codes().enable_alt_screen,
             term::Raw::from("11111"),
             term::Crlf::default(),
@@ -263,6 +279,7 @@ frag! {
        term::control_codes().erase_from_start
     => ContentRegion::All =>
             reset_codes,
+            empty_scrollback,
             term::control_codes().enable_alt_screen,
             term::Raw::from("11111"),
             term::Crlf::default(),
@@ -297,6 +314,7 @@ frag! {
        term::control_codes().erase_screen
     => ContentRegion::All =>
             reset_codes,
+            empty_scrollback,
             term::control_codes().enable_alt_screen,
             term::Raw::from("11111"),
             term::Crlf::default(),
@@ -326,6 +344,7 @@ frag! {
        term::ControlCodes::insert_lines(1)
     => ContentRegion::All =>
             reset_codes,
+            empty_scrollback,
             term::control_codes().enable_alt_screen,
             term::Raw::from("11"),
             term::Crlf::default(),
@@ -351,6 +370,7 @@ frag! {
        term::ControlCodes::insert_lines(1)
     => ContentRegion::All =>
             reset_codes,
+            empty_scrollback,
             term::control_codes().enable_alt_screen,
             term::Raw::from("11"),
             term::Crlf::default(),
@@ -376,6 +396,7 @@ frag! {
        term::ControlCodes::insert_lines(10)
     => ContentRegion::All =>
             reset_codes,
+            empty_scrollback,
             term::control_codes().enable_alt_screen,
             term::Raw::from("11"),
             term::Crlf::default(),
@@ -397,6 +418,7 @@ frag! {
        term::ControlCodes::insert_lines(2)
     => ContentRegion::All =>
             reset_codes,
+            empty_scrollback,
             term::control_codes().enable_alt_screen,
             term::Raw::from("11"),
             term::Crlf::default(),
@@ -422,6 +444,7 @@ frag! {
        term::ControlCodes::insert_lines(1)
     => ContentRegion::All =>
             reset_codes,
+            empty_scrollback,
             term::control_codes().enable_alt_screen,
             term::Raw::from("11"), term::Crlf::default(),
             term::Raw::from("22"), term::Crlf::default(),
@@ -444,6 +467,7 @@ frag! {
        term::ControlCodes::delete_lines(1)
     => ContentRegion::All =>
             reset_codes,
+            empty_scrollback,
             term::control_codes().enable_alt_screen,
             term::Raw::from("11"), term::Crlf::default(),
             term::Raw::from("33"), term::Crlf::default(),
@@ -466,6 +490,7 @@ frag! {
        term::ControlCodes::delete_lines(1)
     => ContentRegion::All =>
             reset_codes,
+            empty_scrollback,
             term::control_codes().enable_alt_screen,
             term::Raw::from("11"), term::Crlf::default(),
             term::Raw::from("22"), term::Crlf::default(),
@@ -488,6 +513,7 @@ frag! {
        term::ControlCodes::delete_lines(10)
     => ContentRegion::All =>
             reset_codes,
+            empty_scrollback,
             term::control_codes().enable_alt_screen,
             term::Raw::from("11"),
             term::Crlf::default(),
@@ -510,6 +536,7 @@ frag! {
        term::ControlCodes::delete_lines(1)
     => ContentRegion::All =>
             reset_codes,
+            empty_scrollback,
             term::control_codes().enable_alt_screen,
             term::Raw::from("11"),
             term::Crlf::default(),
@@ -533,6 +560,7 @@ frag! {
        term::ControlCodes::insert_character(1)
     => ContentRegion::All =>
             reset_codes,
+            empty_scrollback,
             term::control_codes().enable_alt_screen,
             term::Raw::from("1 23"),
             term::Crlf::default(),
@@ -550,6 +578,7 @@ frag! {
        term::ControlCodes::insert_character(1)
     => ContentRegion::All =>
             reset_codes,
+            empty_scrollback,
             term::control_codes().enable_alt_screen,
             term::Raw::from(" 12"),
             term::Crlf::default(),
@@ -567,6 +596,7 @@ frag! {
        term::ControlCodes::insert_character(2)
     => ContentRegion::All =>
             reset_codes,
+            empty_scrollback,
             term::control_codes().enable_alt_screen,
             term::Raw::from("  123"),
             term::Crlf::default(),
@@ -584,6 +614,7 @@ frag! {
        term::ControlCodes::delete_character(1)
     => ContentRegion::All =>
             reset_codes,
+            empty_scrollback,
             term::control_codes().enable_alt_screen,
             term::Raw::from("13   "),
             term::Crlf::default(),
@@ -601,6 +632,7 @@ frag! {
        term::ControlCodes::delete_character(2)
     => ContentRegion::All =>
             reset_codes,
+            empty_scrollback,
             term::control_codes().enable_alt_screen,
             term::Raw::from("3    "),
             term::Crlf::default(),
@@ -618,6 +650,7 @@ frag! {
        term::ControlCodes::delete_character(1)
     => ContentRegion::All =>
             reset_codes,
+            empty_scrollback,
             term::control_codes().enable_alt_screen,
             term::Raw::from("12   "),
             term::Crlf::default(),
@@ -636,6 +669,7 @@ frag! {
        term::ControlCodes::delete_character(1)
     => ContentRegion::All =>
             reset_codes,
+            empty_scrollback,
             term::control_codes().enable_alt_screen,
             term::Raw::from("13  "),
             term::ControlCodes::fgcolor_idx(1),
@@ -657,6 +691,7 @@ frag! {
        term::ControlCodes::erase_character(1)
     => ContentRegion::All =>
             reset_codes,
+            empty_scrollback,
             term::control_codes().enable_alt_screen,
             term::Raw::from("1 3"),
             term::Crlf::default(),
@@ -674,6 +709,7 @@ frag! {
        term::ControlCodes::erase_character(3)
     => ContentRegion::All =>
             reset_codes,
+            empty_scrollback,
             term::control_codes().enable_alt_screen,
             term::Raw::from("1   5"),
             term::Crlf::default(),
@@ -692,6 +728,7 @@ frag! {
        term::ControlCodes::erase_character(1)
     => ContentRegion::All =>
             reset_codes,
+            empty_scrollback,
             term::control_codes().enable_alt_screen,
             term::Raw::from("1"),
             term::ControlCodes::fgcolor_idx(1),
@@ -714,6 +751,7 @@ frag! {
        term::ControlCodes::erase_character(1)
     => ContentRegion::All =>
             reset_codes,
+            empty_scrollback,
             term::control_codes().enable_alt_screen,
             term::Raw::from("1234 "),
             term::Crlf::default(),
@@ -732,6 +770,7 @@ frag! {
        term::Raw::from("4")
     => ContentRegion::All =>
             reset_codes,
+            empty_scrollback,
             term::control_codes().enable_alt_screen,
             term::Raw::from("2"),
             term::Crlf::default(),
@@ -756,6 +795,7 @@ frag! {
        term::Raw::from("X")
     => ContentRegion::All =>
             reset_codes,
+            empty_scrollback,
             term::control_codes().enable_alt_screen,
             term::Raw::from("0"),
             term::Crlf::default(),
@@ -785,6 +825,7 @@ frag! {
        term::Raw::from("X")
     => ContentRegion::All =>
             reset_codes,
+            empty_scrollback,
             term::control_codes().enable_alt_screen,
             term::Raw::from("0"),
             term::Crlf::default(),
@@ -814,6 +855,7 @@ frag! {
        term::Raw::from("X")
     => ContentRegion::All =>
             reset_codes,
+            empty_scrollback,
             term::control_codes().enable_alt_screen,
             term::Raw::from("0"),
             term::Crlf::default(),
@@ -826,5 +868,33 @@ frag! {
             term::Raw::from("4"),
             term::ControlCodes::set_scroll_region(2, 4),
             term::ControlCodes::cursor_position(2, 2),
+            term::control_codes().clear_attrs
+}
+
+// Ensure that the alt screen wins when margins conflict.
+frag! {
+    alt_screen_resets_scrollback_scroll_region_and_origin_mode
+        { scrollback_lines: 100, width: 5, height: 5 }
+    <= term::ControlCodes::set_scroll_region(2, 4),
+       term::control_codes().enable_scroll_region_origin_mode,
+       term::control_codes().enable_alt_screen,
+       term::Raw::from("X")
+    => ContentRegion::All =>
+            reset_codes,
+            // The scrollback restore leaves the terminal with margins and
+            // origin mode set.
+            term::ControlCodes::set_scroll_region(2, 4),
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().enable_scroll_region_origin_mode,
+            term::control_codes().enable_alt_screen,
+            // The alt screen has neither, so it must say so explicitly.
+            term::control_codes().unset_scroll_region,
+            term::control_codes().disable_scroll_region_origin_mode,
+            term::Raw::from("X"),
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::ControlCodes::cursor_position(1, 2),
             term::control_codes().clear_attrs
 }

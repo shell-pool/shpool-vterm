@@ -355,6 +355,7 @@ frag! {
        term::ControlCodes::scroll_down(1)
     => ContentRegion::All =>
             reset_codes,
+            empty_scrollback,
             term::control_codes().enable_alt_screen,
             term::Raw::from("bb"),
             term::Crlf::default(),
@@ -419,6 +420,7 @@ fn alt_screen_scroll_region_clamped_on_shrinking_resize() {
 
     let mut expected = vec![];
     crate::support::frag::reset_codes.term_input_into(&mut expected);
+    crate::support::frag::empty_scrollback.term_input_into(&mut expected);
     term::control_codes().enable_alt_screen.term_input_into(&mut expected);
     term::Crlf::default().term_input_into(&mut expected);
     term::Crlf::default().term_input_into(&mut expected);

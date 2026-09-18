@@ -153,6 +153,24 @@ impl Screen {
         }
     }
 
+    /// Emit the codes needed to undo the global terminal state that
+    /// `dump_contents_into` leaves set.
+    ///
+    /// We track the scroll region and origin mode per screen, but a real
+    /// terminal only has one of each, so a dump that restores more than one
+    /// screen has to clean up after the earlier screens. We only emit the
+    /// codes we actually need because restore buffers get written to the
+    /// wire on every reattach.
+    pub fn dump_global_state_reset_into(&self, buf: &mut Vec<u8>) {
+        if matches!(self.grid.scroll_region(), ScrollRegion::Window { .. }) {
+            term::control_codes().unset_scroll_region.term_input_into(buf);
+        }
+
+        if matches!(self.grid.origin_mode(), OriginMode::ScrollRegion) {
+            term::control_codes().disable_scroll_region_origin_mode.term_input_into(buf);
+        }
+    }
+
     pub fn resize(&mut self, new_size: crate::Size) {
         match &mut self.grid {
             Grid::Scrollback(scrollback) => scrollback.reflow(new_size.width),

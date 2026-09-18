@@ -16,6 +16,22 @@ impl shpool_vterm::term::AsTermInput for reset_codes {
     }
 }
 
+/// The codes a dump emits for a completely empty scrollback screen.
+///
+/// Alt screen dumps restore the scrollback screen before switching to the
+/// alt screen so that shell history is still there once the user exits
+/// their curses app, so every alt screen dump is prefixed with a scrollback
+/// dump. For an untouched scrollback that is just the cursor position.
+#[allow(non_camel_case_types)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct empty_scrollback;
+
+impl shpool_vterm::term::AsTermInput for empty_scrollback {
+    fn term_input_into(&self, buf: &mut Vec<u8>) {
+        shpool_vterm::term::ControlCodes::cursor_position(1, 1).term_input_into(buf);
+    }
+}
+
 macro_rules! frag {
     {
         $test_name:ident
@@ -32,6 +48,8 @@ macro_rules! frag {
             use shpool_vterm::term::AsTermInput;
             #[allow(unused_imports)]
             use crate::support::frag::reset_codes;
+            #[allow(unused_imports)]
+            use crate::support::frag::empty_scrollback;
             let mut input: Vec<u8> = vec![];
             $(
                 $input_expr.term_input_into(&mut input);
