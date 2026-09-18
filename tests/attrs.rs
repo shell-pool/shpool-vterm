@@ -804,10 +804,7 @@ fn link_dump_resets_link_at_start() {
 
     let term = shpool_vterm::Term::new(10, shpool_vterm::Size { width: 10, height: 10 });
     let mut want = vec![];
-    term::control_codes().end_link.term_input_into(&mut want);
-    term::control_codes().clear_attrs.term_input_into(&mut want);
-    term::ControlCodes::cursor_position(1, 1).term_input_into(&mut want);
-    term::control_codes().clear_screen.term_input_into(&mut want);
+    crate::support::frag::reset_codes.term_input_into(&mut want);
     term::ControlCodes::cursor_position(1, 1).term_input_into(&mut want);
     term::control_codes().clear_attrs.term_input_into(&mut want);
 

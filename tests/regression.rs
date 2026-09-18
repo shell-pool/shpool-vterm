@@ -459,3 +459,32 @@ frag! {
             term::ControlCodes::cursor_position(2, 3),
             term::control_codes().clear_attrs
 }
+
+// A dump has to land correctly on a terminal in any state, so the prefix
+// clears margins and origin mode before it homes the cursor and erases.
+//
+// Spelled out rather than built from `reset_codes` so that the helper cannot
+// quietly track a regression here.
+#[test]
+fn dump_prefix_clears_scroll_region_and_origin_mode() {
+    use shpool_vterm::term::AsTermInput;
+
+    let mut expected = vec![];
+    term::control_codes().end_link.term_input_into(&mut expected);
+    term::control_codes().clear_attrs.term_input_into(&mut expected);
+    term::control_codes().unset_scroll_region.term_input_into(&mut expected);
+    term::control_codes().disable_scroll_region_origin_mode.term_input_into(&mut expected);
+    term::ControlCodes::cursor_position(1, 1).term_input_into(&mut expected);
+    term::control_codes().clear_screen.term_input_into(&mut expected);
+    term::Raw::from("hi").term_input_into(&mut expected);
+    term::ControlCodes::cursor_position(1, 3).term_input_into(&mut expected);
+    term::control_codes().clear_attrs.term_input_into(&mut expected);
+
+    crate::support::frag::round_trip_frag(
+        b"hi",
+        expected.as_slice(),
+        100,
+        shpool_vterm::Size { width: 5, height: 3 },
+        ContentRegion::All,
+    );
+}

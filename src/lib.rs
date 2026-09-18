@@ -132,6 +132,14 @@ impl Term {
         term::control_codes().end_link.term_input_into(&mut buf);
 
         term::control_codes().clear_attrs.term_input_into(&mut buf);
+
+        // We cannot know what state the terminal we are restoring into is
+        // in, and a leftover scroll region or origin mode would scroll the
+        // contents we are about to paint. Clear them before homing the
+        // cursor, since origin mode moves where home is.
+        term::control_codes().unset_scroll_region.term_input_into(&mut buf);
+        term::control_codes().disable_scroll_region_origin_mode.term_input_into(&mut buf);
+
         term::ControlCodes::cursor_position(1, 1).term_input_into(&mut buf);
         term::control_codes().clear_screen.term_input_into(&mut buf);
         self.state.dump_contents_into(&mut buf, dump_region);

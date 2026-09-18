@@ -11,6 +11,8 @@ impl shpool_vterm::term::AsTermInput for reset_codes {
     fn term_input_into(&self, buf: &mut Vec<u8>) {
         shpool_vterm::term::control_codes().end_link.term_input_into(buf);
         shpool_vterm::term::control_codes().clear_attrs.term_input_into(buf);
+        shpool_vterm::term::control_codes().unset_scroll_region.term_input_into(buf);
+        shpool_vterm::term::control_codes().disable_scroll_region_origin_mode.term_input_into(buf);
         shpool_vterm::term::ControlCodes::cursor_position(1, 1).term_input_into(buf);
         shpool_vterm::term::control_codes().clear_screen.term_input_into(buf);
     }
