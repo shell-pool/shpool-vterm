@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.5](https://github.com/shell-pool/shpool-vterm/compare/v0.2.4...v0.2.5) - 2026-09-18
+
+### Added
+
+- restore scrollback when in altscreen mode
+- restore alt mode
+- properly restore input modes
+
+### Fixed
+
+- flesh out reset sequence some more
+- origin mode homing bug
+- guard against some panics
+- scroll region resize bug
+- zero width char panic
+- delete char panic
+
 ## [0.2.4](https://github.com/shell-pool/shpool-vterm/compare/v0.2.3...v0.2.4) - 2026-09-14
 
 ### Fixed
