@@ -430,3 +430,32 @@ fn alt_screen_scroll_region_clamped_on_shrinking_resize() {
 
     assert_eq!(term.contents(ContentRegion::All), expected);
 }
+
+// Enabling origin mode homes the cursor, so it has to be restored before the
+// cursor position, which is then relative to the top of the scroll region.
+frag! {
+    origin_mode_restored_before_cursor { scrollback_lines: 100, width: 5, height: 5 }
+    <= term::Raw::from("11111"), term::Crlf::default(),
+       term::Raw::from("22222"), term::Crlf::default(),
+       term::Raw::from("33333"), term::Crlf::default(),
+       term::Raw::from("44444"), term::Crlf::default(),
+       term::Raw::from("55555"),
+       term::ControlCodes::set_scroll_region(2, 4),
+       term::control_codes().enable_scroll_region_origin_mode,
+       term::ControlCodes::cursor_position(2, 3)
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("11111"),
+            term::Crlf::default(),
+            term::Raw::from("22222"),
+            term::Crlf::default(),
+            term::Raw::from("33333"),
+            term::Crlf::default(),
+            term::Raw::from("44444"),
+            term::Crlf::default(),
+            term::Raw::from("55555"),
+            term::ControlCodes::set_scroll_region(2, 4),
+            term::control_codes().enable_scroll_region_origin_mode,
+            term::ControlCodes::cursor_position(2, 3),
+            term::control_codes().clear_attrs
+}

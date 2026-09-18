@@ -260,8 +260,8 @@ frag! {
             term::Crlf::default(),
             term::Crlf::default(),
             term::ControlCodes::set_scroll_region(2, 4),
-            term::ControlCodes::cursor_position(3, 3),
             term::control_codes().enable_scroll_region_origin_mode,
+            term::ControlCodes::cursor_position(2, 3),
             term::control_codes().clear_attrs
 }
 
@@ -295,8 +295,8 @@ frag! {
             term::Crlf::default(),
             term::Crlf::default(),
             term::ControlCodes::set_scroll_region(2, 4),
-            term::ControlCodes::cursor_position(3, 3),
             term::control_codes().enable_scroll_region_origin_mode,
+            term::ControlCodes::cursor_position(2, 3),
             term::control_codes().clear_attrs
 }
 
@@ -328,8 +328,8 @@ frag! {
             term::Crlf::default(),
             term::Crlf::default(),
             term::ControlCodes::set_scroll_region(2, 4),
-            term::ControlCodes::cursor_position(3, 3),
             term::control_codes().enable_scroll_region_origin_mode,
+            term::ControlCodes::cursor_position(2, 3),
             term::control_codes().clear_attrs
 }
 
@@ -884,8 +884,8 @@ frag! {
             // The scrollback restore leaves the terminal with margins and
             // origin mode set.
             term::ControlCodes::set_scroll_region(2, 4),
-            term::ControlCodes::cursor_position(1, 1),
             term::control_codes().enable_scroll_region_origin_mode,
+            term::ControlCodes::cursor_position(1, 1),
             term::control_codes().enable_alt_screen,
             // The alt screen has neither, so it must say so explicitly.
             term::control_codes().unset_scroll_region,

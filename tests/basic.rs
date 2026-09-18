@@ -242,8 +242,8 @@ frag! {
             term::Crlf::default(),
             term::Raw::from("55555"),
             term::ControlCodes::set_scroll_region(2, 4),
-            term::ControlCodes::cursor_position(3, 3),
             term::control_codes().enable_scroll_region_origin_mode,
+            term::ControlCodes::cursor_position(2, 3),
             term::control_codes().clear_attrs
 }
 
@@ -269,8 +269,8 @@ frag! {
             term::Crlf::default(),
             term::Raw::from("55555"),
             term::ControlCodes::set_scroll_region(2, 4),
-            term::ControlCodes::cursor_position(3, 3),
             term::control_codes().enable_scroll_region_origin_mode,
+            term::ControlCodes::cursor_position(2, 3),
             term::control_codes().clear_attrs
 }
 
@@ -294,8 +294,8 @@ frag! {
             term::Crlf::default(),
             term::Raw::from("55555"),
             term::ControlCodes::set_scroll_region(2, 4),
-            term::ControlCodes::cursor_position(3, 3),
             term::control_codes().enable_scroll_region_origin_mode,
+            term::ControlCodes::cursor_position(2, 3),
             term::control_codes().clear_attrs
 }
 

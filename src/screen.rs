@@ -142,15 +142,24 @@ impl Screen {
             Grid::AltScreen(altscreen) => altscreen.term_input_into(buf),
         }
 
-        term::ControlCodes::cursor_position(
-            (self.cursor.row + 1) as u16,
-            (self.cursor.col + 1) as u16,
-        )
-        .term_input_into(buf);
-
-        if matches!(self.grid.origin_mode(), OriginMode::ScrollRegion) {
+        // Origin mode has to be restored before the cursor, since enabling
+        // it homes the cursor.
+        let origin_mode = self.grid.origin_mode();
+        if matches!(origin_mode, OriginMode::ScrollRegion) {
             term::control_codes().enable_scroll_region_origin_mode.term_input_into(buf);
         }
+
+        // Rows are relative to the top of the scroll region once origin
+        // mode is on, mirroring `set_cursor`.
+        let row = match (origin_mode, self.grid.scroll_region()) {
+            (OriginMode::ScrollRegion, ScrollRegion::Window { top, .. }) => {
+                self.cursor.row.saturating_sub(*top)
+            }
+            _ => self.cursor.row,
+        };
+
+        term::ControlCodes::cursor_position((row + 1) as u16, (self.cursor.col + 1) as u16)
+            .term_input_into(buf);
     }
 
     /// Emit the codes needed to undo the global terminal state that
