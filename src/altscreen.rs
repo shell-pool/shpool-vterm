@@ -86,7 +86,7 @@ impl AltScreen {
             // to disable scrolling, we should instead leave the cursor
             // where it is in this case.
             if cursor.row >= size.height {
-                self.scroll_down(1);
+                self.scroll_up(1);
             }
         }
         cursor.clamp_to(size);
@@ -108,7 +108,10 @@ impl AltScreen {
         }
     }
 
-    pub fn scroll_down(&mut self, rows: usize) {
+    /// SU (CSI S). Move the content of the scroll region up by `rows`,
+    /// opening blank rows at the bottom. Also what a linefeed at the bottom
+    /// of the scroll region does.
+    pub fn scroll_up(&mut self, rows: usize) {
         if let ScrollRegion::TrackSize = self.scroll_region {
             for _ in 0..rows {
                 self.buf.pop_front();
@@ -138,6 +141,15 @@ impl AltScreen {
         for i in 0..rows {
             self.buf[top + to_shuffle + i] = Line::new();
         }
+    }
+
+    /// SD (CSI T). Move the content of the scroll region down by `rows`,
+    /// opening blank rows at the top. Rows pushed past the bottom of the
+    /// region are lost. Also what a reverse index at the top of the scroll
+    /// region does.
+    pub fn scroll_down(&mut self, rows: usize) {
+        let (top, _) = self.scroll_region_rows();
+        self.insert_lines(&Pos { row: top, col: 0 }, rows);
     }
 
     pub fn clamp_to_scroll_region(&self, cursor: &mut Pos, size: &crate::Size) {
@@ -318,13 +330,23 @@ mod tests {
 
     // A scroll region is free to name rows the grid does not have.
     #[test]
+    fn scroll_up_with_region_past_end_of_buf() {
+        let mut alt = alt_screen();
+        alt.scroll_region = ScrollRegion::Window { top: 0, bottom: SIZE.height + 6 };
+
+        alt.scroll_up(1);
+
+        assert_eq!(first_col(&alt), "bc.");
+    }
+
+    #[test]
     fn scroll_down_with_region_past_end_of_buf() {
         let mut alt = alt_screen();
         alt.scroll_region = ScrollRegion::Window { top: 0, bottom: SIZE.height + 6 };
 
         alt.scroll_down(1);
 
-        assert_eq!(first_col(&alt), "bc.");
+        assert_eq!(first_col(&alt), ".ab");
     }
 
     #[test]

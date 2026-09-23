@@ -36,9 +36,6 @@ pub(crate) struct Scrollback {
     /// The bottom of the terminal is stored at the front of the deque
     /// and the top is stored at the back of the deque.
     pub buf: VecDeque<Line>,
-    /// How far above the bottom of the buffer the visible window
-    /// is.
-    scroll_offset: usize,
     /// The number of lines of scrollback to store, independent of the
     /// size of the grid that is in view.
     lines: usize,
@@ -95,7 +92,6 @@ impl Scrollback {
     pub fn new(scrollback_lines: usize) -> Self {
         Scrollback {
             buf: VecDeque::new(),
-            scroll_offset: 0,
             lines: scrollback_lines,
             scroll_region: ScrollRegion::default(),
             origin_mode: OriginMode::default(),
@@ -143,10 +139,6 @@ impl Scrollback {
         }
     }
 
-    pub fn snap_to_bottom(&mut self) {
-        self.scroll_offset = 0;
-    }
-
     pub fn clamp_to_scroll_region(&self, cursor: &mut Pos, size: &crate::Size) {
         match self.origin_mode {
             OriginMode::Term => cursor.clamp_to(*size),
@@ -156,8 +148,8 @@ impl Scrollback {
 
     /// Pin the cursor to the buffer contents rather than to a screen row.
     ///
-    /// A row is derived from the buffer length, the height and the scroll
-    /// offset, so it does not mean the same thing before and after a resize.
+    /// A row is derived from the buffer length and the height, so it does not
+    /// mean the same thing before and after a resize.
     /// A position relative to the stored lines does, which is what lets the
     /// cursor stay on the line it was on.
     pub fn anchor_cursor(&self, size: crate::Size, cursor: Pos) -> CursorAnchor {
@@ -194,9 +186,7 @@ impl Scrollback {
     ) {
         let lines_iter: Box<dyn Iterator<Item = (usize, &Line)>> = match dump_region {
             ContentRegion::All => Box::new(self.buf.iter().enumerate().rev()),
-            ContentRegion::Screen => Box::new(
-                self.buf.iter().skip(self.scroll_offset).take(size.height).enumerate().rev(),
-            ),
+            ContentRegion::Screen => Box::new(self.buf.iter().take(size.height).enumerate().rev()),
             ContentRegion::BottomLines(nlines) => {
                 Box::new(self.buf.iter().take(nlines).enumerate().rev())
             }
@@ -210,17 +200,6 @@ impl Scrollback {
         }
 
         self.scroll_region.term_input_into(buf);
-
-        let generate_scroll = self.scroll_offset > 0
-            && matches!(self.scroll_region, ScrollRegion::TrackSize)
-            && match dump_region {
-                ContentRegion::All => true,
-                ContentRegion::Screen => false,
-                ContentRegion::BottomLines(n) => n >= size.height + self.scroll_offset,
-            };
-        if generate_scroll {
-            term::ControlCodes::scroll_up(self.scroll_offset as u16).term_input_into(buf);
-        }
     }
 
     /// Re-chop the buffer into grid lines of `new_width`, moving each of
@@ -357,12 +336,7 @@ impl Scrollback {
     /// are actually in view and are not just in the hidden scrollback
     /// region.
     pub fn lines_below_grid_start(&self, size: crate::Size) -> usize {
-        let grid_start = size.height + self.scroll_offset;
-        if self.buf.len() < grid_start {
-            self.buf.len()
-        } else {
-            grid_start
-        }
+        std::cmp::min(self.buf.len(), size.height)
     }
 
     /// Return the index from the bottom of the scrollback buffer (the
@@ -503,20 +477,19 @@ impl Scrollback {
         }
     }
 
-    pub fn scroll_up(&mut self, n: usize) {
-        self.scroll_offset += n;
-        if self.scroll_offset > self.lines {
-            self.scroll_offset = self.lines;
-        }
-    }
-
-    pub fn scroll_down(&mut self, size: &crate::Size, n: usize) {
+    /// SU (CSI S). Move the content of the scroll region up by `n` rows,
+    /// opening blank rows at the bottom. Also what a linefeed at the bottom
+    /// of the scroll region does.
+    ///
+    /// With no scroll region the rows that leave the top of the screen stay
+    /// in the buffer as scrollback, which is why this is not just
+    /// `delete_lines` at the top of the screen.
+    pub fn scroll_up(&mut self, size: &crate::Size, n: usize) {
         match self.scroll_region {
             ScrollRegion::TrackSize => {
-                for _ in 0..n.saturating_sub(self.scroll_offset) {
+                for _ in 0..n {
                     self.add_line(Line::new());
                 }
-                self.scroll_offset = self.scroll_offset.saturating_sub(n);
             }
             ScrollRegion::Window { top, bottom } => {
                 if bottom - top < n {
@@ -537,19 +510,32 @@ impl Scrollback {
                                 to_line.erase(line::Section::Whole);
                             }
                         } else {
-                            warn!(self.logger, "scrollback::scroll_down: out of bounds shuffle");
+                            warn!(self.logger, "scrollback::scroll_up: out of bounds shuffle");
                         }
                     }
                     for i in 0..n {
                         if let Some(line) = self.get_line_mut(*size, top + to_shuffle + i) {
                             line.erase(line::Section::Whole);
                         } else {
-                            warn!(self.logger, "scrollback::scroll_down: out of bounds backfill");
+                            warn!(self.logger, "scrollback::scroll_up: out of bounds backfill");
                         }
                     }
                 }
             }
         }
+    }
+
+    /// SD (CSI T). Move the content of the scroll region down by `n` rows,
+    /// opening blank rows at the top. Rows pushed past the bottom of the
+    /// region are lost. Also what a reverse index at the top of the scroll
+    /// region does.
+    pub fn scroll_down(&mut self, size: &crate::Size, n: usize) {
+        let top = match self.scroll_region {
+            ScrollRegion::TrackSize => 0,
+            ScrollRegion::Window { top, .. } => top,
+        };
+
+        self.insert_lines(&Pos { row: top, col: 0 }, size, n);
     }
 
     pub fn insert_lines(&mut self, cursor: &Pos, size: &crate::Size, n: usize) {

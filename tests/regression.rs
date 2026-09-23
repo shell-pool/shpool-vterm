@@ -238,10 +238,11 @@ frag! {
 // cursor off the screen instead. Real terminals clamp the bottom to the
 // screen height, which is what these tests assert.
 //
-// With the cursor below the last row, `bottom - cursor.row` underflows in
-// both Scrollback::insert_lines and Scrollback::delete_lines. The SU is
-// needed to get there: it pushes the grid start up into the scrollback so the
-// off screen rows still resolve to lines, otherwise both bail out early.
+// These used to prime the buffer with an SU, back when SU moved the viewport
+// rather than the grid, so that rows below the screen still resolved to lines
+// and `bottom - cursor.row` underflowed in Scrollback::insert_lines and
+// Scrollback::delete_lines. The viewport is gone, so the grid always starts at
+// the bottom of the buffer and that underflow is no longer reachable.
 
 // Control case: an in-range bottom, where LF scrolls and the cursor stays on
 // the last row. Anchors the expected output of the three cases below.
@@ -252,7 +253,6 @@ frag! {
        term::Raw::from("cc"), term::Crlf::default(),
        term::Raw::from("dd"), term::Crlf::default(),
        term::Raw::from("ee"),
-       term::ControlCodes::scroll_up(2),
        term::ControlCodes::set_scroll_region(1, 3),
        term::ControlCodes::cursor_position(3, 1),
        term::Crlf::default(),
@@ -260,7 +260,7 @@ frag! {
        term::control_codes().unset_scroll_region
     => ContentRegion::Screen =>
             reset_codes,
-            term::Raw::from("cc"),
+            term::Raw::from("ee"),
             term::Crlf::default(),
             term::Crlf::default(),
             term::ControlCodes::cursor_position(3, 1),
@@ -277,7 +277,6 @@ frag! {
        term::Raw::from("cc"), term::Crlf::default(),
        term::Raw::from("dd"), term::Crlf::default(),
        term::Raw::from("ee"),
-       term::ControlCodes::scroll_up(2),
        term::ControlCodes::set_scroll_region(1, 5),
        term::ControlCodes::cursor_position(3, 1),
        term::Crlf::default(),
@@ -285,7 +284,7 @@ frag! {
        term::control_codes().unset_scroll_region
     => ContentRegion::Screen =>
             reset_codes,
-            term::Raw::from("cc"),
+            term::Raw::from("ee"),
             term::Crlf::default(),
             term::Crlf::default(),
             term::ControlCodes::cursor_position(3, 1),
@@ -302,7 +301,6 @@ frag! {
        term::Raw::from("cc"), term::Crlf::default(),
        term::Raw::from("dd"), term::Crlf::default(),
        term::Raw::from("ee"),
-       term::ControlCodes::scroll_up(2),
        term::ControlCodes::set_scroll_region(1, 5),
        term::ControlCodes::cursor_position(3, 1),
        term::Crlf::default(),
@@ -311,7 +309,7 @@ frag! {
        term::ControlCodes::insert_lines(1)
     => ContentRegion::Screen =>
             reset_codes,
-            term::Raw::from("cc"),
+            term::Raw::from("ee"),
             term::Crlf::default(),
             term::Crlf::default(),
             term::ControlCodes::cursor_position(3, 1),
@@ -326,7 +324,6 @@ frag! {
        term::Raw::from("cc"), term::Crlf::default(),
        term::Raw::from("dd"), term::Crlf::default(),
        term::Raw::from("ee"),
-       term::ControlCodes::scroll_up(2),
        term::ControlCodes::set_scroll_region(1, 5),
        term::ControlCodes::cursor_position(3, 1),
        term::Crlf::default(),
@@ -335,7 +332,7 @@ frag! {
        term::ControlCodes::delete_lines(1)
     => ContentRegion::Screen =>
             reset_codes,
-            term::Raw::from("cc"),
+            term::Raw::from("ee"),
             term::Crlf::default(),
             term::Crlf::default(),
             term::ControlCodes::cursor_position(3, 1),
@@ -352,7 +349,7 @@ frag! {
        term::Raw::from("bb"), term::Crlf::default(),
        term::Raw::from("cc"),
        term::ControlCodes::set_scroll_region(1, 9),
-       term::ControlCodes::scroll_down(1)
+       term::ControlCodes::scroll_up(1)
     => ContentRegion::All =>
             reset_codes,
             empty_scrollback,
@@ -593,10 +590,10 @@ fn full_width_line_does_not_gain_a_blank_on_reflow() {
 }
 
 // The row a line occupies is derived, not stored: it falls out of the buffer
-// length, the height and the scroll offset. `cursor.row` is an absolute row,
-// so a resize that moves every line has to move the cursor with them. Clamping
-// to the new size is not enough, because the cursor can stay in range while the
-// line it was sitting on slides out from under it.
+// length and the height. `cursor.row` is an absolute row, so a resize that
+// moves every line has to move the cursor with them. Clamping to the new size
+// is not enough, because the cursor can stay in range while the line it was
+// sitting on slides out from under it.
 //
 // Here the buffer is longer than the screen, so it is anchored to the bottom
 // and growing the height pulls scrollback down into view. The cursor is on the
@@ -734,4 +731,94 @@ fn saved_cursor_follows_its_row_across_a_resize() {
     term::control_codes().clear_attrs.term_input_into(&mut expected);
 
     assert_eq!(term.contents(ContentRegion::Screen), expected);
+}
+
+// SU (CSI S) moves the content toward the top of the screen and opens blank
+// rows at the bottom. It is what terminfo calls `indn`, and it is what a pager
+// emits to advance a page. The cursor does not move, so it ends up on a
+// different line than the one it started on.
+//
+// These assert against the screen rather than the whole buffer, so they say
+// nothing about where a scrolled off line is kept. That is up to the
+// implementation.
+frag! {
+    scroll_up_moves_content_toward_the_top { scrollback_lines: 100, width: 5, height: 3 }
+    <= term::Raw::from("aa"), term::Crlf::default(),
+       term::Raw::from("bb"), term::Crlf::default(),
+       term::Raw::from("cc"),
+       term::ControlCodes::scroll_up(1)
+    => ContentRegion::Screen =>
+            reset_codes,
+            term::Raw::from("bb"),
+            term::Crlf::default(),
+            term::Raw::from("cc"),
+            term::Crlf::default(),
+            term::ControlCodes::cursor_position(3, 3),
+            term::control_codes().clear_attrs
+}
+
+// SD (CSI T) is the mirror image: content moves toward the bottom, blank rows
+// open at the top, and whatever falls off the bottom is gone. This is `rin`.
+frag! {
+    scroll_down_moves_content_toward_the_bottom { scrollback_lines: 100, width: 5, height: 3 }
+    <= term::Raw::from("aa"), term::Crlf::default(),
+       term::Raw::from("bb"), term::Crlf::default(),
+       term::Raw::from("cc"),
+       term::ControlCodes::scroll_down(1)
+    => ContentRegion::Screen =>
+            reset_codes,
+            term::Crlf::default(),
+            term::Raw::from("aa"),
+            term::Crlf::default(),
+            term::Raw::from("bb"),
+            term::ControlCodes::cursor_position(3, 3),
+            term::control_codes().clear_attrs
+}
+
+// SU edits the grid, so a later write has to leave it alone. This is what the
+// viewport implementation got wrong: it looked right until the next printed
+// character snapped the window back to the bottom of the buffer.
+frag! {
+    scroll_up_is_not_undone_by_the_next_write { scrollback_lines: 100, width: 5, height: 3 }
+    <= term::Raw::from("aa"), term::Crlf::default(),
+       term::Raw::from("bb"), term::Crlf::default(),
+       term::Raw::from("cc"),
+       term::ControlCodes::scroll_up(1),
+       term::ControlCodes::cursor_position(1, 1),
+       term::Raw::from("X")
+    => ContentRegion::Screen =>
+            reset_codes,
+            term::Raw::from("Xb"),
+            term::Crlf::default(),
+            term::Raw::from("cc"),
+            term::Crlf::default(),
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().clear_attrs
+}
+
+// With DECSTBM set, SU scrolls the region and nothing else. The rows above and
+// below it stay put.
+frag! {
+    scroll_up_only_touches_the_scroll_region { scrollback_lines: 100, width: 5, height: 5 }
+    <= term::Raw::from("11"), term::Crlf::default(),
+       term::Raw::from("22"), term::Crlf::default(),
+       term::Raw::from("33"), term::Crlf::default(),
+       term::Raw::from("44"), term::Crlf::default(),
+       term::Raw::from("55"),
+       term::ControlCodes::set_scroll_region(2, 4),
+       term::ControlCodes::cursor_position(1, 1),
+       term::ControlCodes::scroll_up(1)
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("11"),
+            term::Crlf::default(),
+            term::Raw::from("33"),
+            term::Crlf::default(),
+            term::Raw::from("44"),
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::Raw::from("55"),
+            term::ControlCodes::set_scroll_region(2, 4),
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs
 }

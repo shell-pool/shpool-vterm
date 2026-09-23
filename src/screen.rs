@@ -220,12 +220,6 @@ impl Screen {
         }
     }
 
-    pub fn snap_to_bottom(&mut self) {
-        if let Grid::Scrollback(scrollback) = &mut self.grid {
-            scrollback.snap_to_bottom();
-        }
-    }
-
     //
     // Control Code Handlers
     //
@@ -280,15 +274,17 @@ impl Screen {
         }
     }
 
+    /// SU (CSI S). Move the content of the scroll region up by `n` rows,
+    /// opening blank rows at the bottom. The cursor does not move.
     pub fn scroll_up(&mut self, n: usize) {
         match &mut self.grid {
-            Grid::Scrollback(s) => s.scroll_up(n),
-            _ => {}
+            Grid::Scrollback(s) => s.scroll_up(&self.size, n),
+            Grid::AltScreen(alt) => alt.scroll_up(n),
         }
     }
 
-    // Scroll the screen down by the given number of rows, adding blank lines
-    // to the bottom if needed. The cursor position does not change.
+    /// SD (CSI T). Move the content of the scroll region down by `n` rows,
+    /// opening blank rows at the top. The cursor does not move.
     pub fn scroll_down(&mut self, n: usize) {
         match &mut self.grid {
             Grid::Scrollback(s) => s.scroll_down(&self.size, n),

@@ -589,7 +589,6 @@ impl State {
     fn write_char_at_cursor(&mut self, cell: Cell) {
         let insert_mode = self.insert_mode;
         let screen = self.screen_mut();
-        screen.snap_to_bottom();
 
         // In insert mode (ECMA-48 IRM), incoming characters do not overwrite
         // existing text under the cursor. Instead, existing characters are
@@ -695,7 +694,7 @@ impl vte::Perform for State {
                 screen.cursor.row += 1;
                 if within_scroll {
                     if screen.cursor.row >= scroll_bottom {
-                        screen.scroll_down(1);
+                        screen.scroll_up(1);
                         screen.cursor.row -= 1;
                     }
                 } else {

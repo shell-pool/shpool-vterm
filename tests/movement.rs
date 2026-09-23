@@ -342,6 +342,9 @@ frag! {
             term::control_codes().clear_attrs
 }
 
+// SU pushes the top row of the screen into the scrollback and opens a blank
+// row at the bottom, so the whole buffer keeps every line while the screen
+// shows one fewer.
 frag! {
     scroll_up { scrollback_lines: 100, width: 10, height: 2 }
     <= term::Raw::from("A"),
@@ -357,7 +360,7 @@ frag! {
             term::Raw::from("B"),
             term::Crlf::default(),
             term::Raw::from("C"),
-            term::ControlCodes::scroll_up(1),
+            term::Crlf::default(),
             term::ControlCodes::cursor_position(2, 2),
             term::control_codes().clear_attrs
     => ContentRegion::BottomLines(50) =>
@@ -367,22 +370,23 @@ frag! {
             term::Raw::from("B"),
             term::Crlf::default(),
             term::Raw::from("C"),
-            term::ControlCodes::scroll_up(1),
+            term::Crlf::default(),
             term::ControlCodes::cursor_position(2, 2),
             term::control_codes().clear_attrs
     => ContentRegion::Screen =>
             reset_codes,
-            term::Raw::from("A"),
+            term::Raw::from("C"),
             term::Crlf::default(),
-            term::Raw::from("B"),
             term::ControlCodes::cursor_position(2, 2),
             term::control_codes().clear_attrs
 }
 
+// SD goes the other way, and it does not pull anything back out of the
+// scrollback: it opens a blank row at the top of the screen and drops the row
+// that falls off the bottom.
 frag! {
     scroll_down { scrollback_lines: 100, width: 10, height: 2 }
     <= term::Raw::from("A\n\rB\n\rC\n\rD"),
-       term::ControlCodes::scroll_up(2),
        term::ControlCodes::scroll_down(1)
     => ContentRegion::All =>
             reset_codes,
@@ -390,10 +394,8 @@ frag! {
             term::Crlf::default(),
             term::Raw::from("B"),
             term::Crlf::default(),
-            term::Raw::from("C"),
             term::Crlf::default(),
-            term::Raw::from("D"),
-            term::ControlCodes::scroll_up(1),
+            term::Raw::from("C"),
             term::ControlCodes::cursor_position(2, 2),
             term::control_codes().clear_attrs
     => ContentRegion::BottomLines(50) =>
@@ -402,15 +404,12 @@ frag! {
             term::Crlf::default(),
             term::Raw::from("B"),
             term::Crlf::default(),
-            term::Raw::from("C"),
             term::Crlf::default(),
-            term::Raw::from("D"),
-            term::ControlCodes::scroll_up(1),
+            term::Raw::from("C"),
             term::ControlCodes::cursor_position(2, 2),
             term::control_codes().clear_attrs
     => ContentRegion::Screen =>
             reset_codes,
-            term::Raw::from("B"),
             term::Crlf::default(),
             term::Raw::from("C"),
             term::ControlCodes::cursor_position(2, 2),
