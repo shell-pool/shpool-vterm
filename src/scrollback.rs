@@ -49,6 +49,37 @@ pub(crate) struct Scrollback {
     logger: log::Context,
 }
 
+/// Where the cursor sits relative to the buffer contents.
+///
+/// A screen row is derived from the buffer length and the height, so it does
+/// not survive a resize. A position relative to the stored lines does.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) struct CursorAnchor {
+    pub row: AnchorRow,
+    pub col: usize,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum AnchorRow {
+    /// On a stored line, counted up from the bottom of the buffer.
+    Line(usize),
+    /// This many rows below the last stored line, where a program has moved
+    /// the cursor down without writing anything.
+    BelowContent(usize),
+}
+
+/// Follows a single anchor through a reflow.
+struct AnchorTracker {
+    /// The anchored line, counted from the top so that we can spot it as we
+    /// drain the old buffer. Its index from the bottom is no use here:
+    /// splitting a line below it renumbers the buffer underneath us.
+    line: Option<usize>,
+    /// How far into the logical line the anchored cell sits.
+    offset: Option<usize>,
+    /// Which of the new grid lines it came out on, counted from the top.
+    grid_line: Option<usize>,
+}
+
 impl std::fmt::Display for Scrollback {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         for line in self.buf.iter().rev() {
@@ -123,6 +154,38 @@ impl Scrollback {
         }
     }
 
+    /// Pin the cursor to the buffer contents rather than to a screen row.
+    ///
+    /// A row is derived from the buffer length, the height and the scroll
+    /// offset, so it does not mean the same thing before and after a resize.
+    /// A position relative to the stored lines does, which is what lets the
+    /// cursor stay on the line it was on.
+    pub fn anchor_cursor(&self, size: crate::Size, cursor: Pos) -> CursorAnchor {
+        let row = match self.idx_from_bottom(size, cursor.row) {
+            Some(idx) => AnchorRow::Line(idx),
+            // A program can walk the cursor below the last line we have data
+            // for by emitting newlines without writing anything, so remember
+            // how big the gap was.
+            None => AnchorRow::BelowContent(cursor.row - self.lines_below_grid_start(size)),
+        };
+
+        CursorAnchor { row, col: cursor.col }
+    }
+
+    /// Turn an anchor back into a screen position against the current buffer.
+    pub fn resolve_cursor(&self, size: crate::Size, anchor: CursorAnchor) -> Pos {
+        let grid_start = self.lines_below_grid_start(size);
+        let row = match anchor.row {
+            // A shrinking resize can push the anchored line up off the top of
+            // the screen, and there is no right answer once that happens. Park
+            // the cursor on the nearest visible row.
+            AnchorRow::Line(idx) => grid_start.saturating_sub(idx + 1),
+            AnchorRow::BelowContent(gap) => grid_start + gap,
+        };
+
+        Pos { row, col: anchor.col }
+    }
+
     pub fn dump_contents_into(
         &self,
         buf: &mut Vec<u8>,
@@ -160,10 +223,38 @@ impl Scrollback {
         }
     }
 
-    pub fn reflow(&mut self, new_width: usize) {
+    /// Re-chop the buffer into grid lines of `new_width`, moving each of
+    /// `anchors` along with the cell it names.
+    pub fn reflow(&mut self, new_width: usize, anchors: &mut [CursorAnchor]) {
         let mut new_scrollback = VecDeque::with_capacity(self.buf.len());
         let mut logical_line = VecDeque::new();
+
+        let mut trackers: Vec<AnchorTracker> = anchors
+            .iter()
+            .map(|anchor| AnchorTracker {
+                line: match anchor.row {
+                    AnchorRow::Line(idx) => Some(self.buf.len() - 1 - idx),
+                    // Nothing is stored at the cursor, so there is no cell to
+                    // follow and the gap carries over untouched.
+                    AnchorRow::BelowContent(_) => None,
+                },
+                offset: None,
+                grid_line: None,
+            })
+            .collect();
+        let mut logical_len = 0;
+        let mut drained = 0;
+
         while let Some(grid_line) = self.buf.pop_back() {
+            for (tracker, anchor) in trackers.iter_mut().zip(anchors.iter()) {
+                if tracker.line == Some(drained) {
+                    tracker.offset = Some(logical_len + anchor.col);
+                    tracker.line = None;
+                }
+            }
+            drained += 1;
+            logical_len += grid_line.cells.len();
+
             let is_wrapped = grid_line.is_wrapped;
             logical_line.push_back(grid_line);
 
@@ -213,6 +304,31 @@ impl Scrollback {
                 if !line.cells.is_empty() || new_scrollback.len() == lines_before {
                     new_scrollback.push_front(line);
                 }
+
+                for (tracker, anchor) in trackers.iter_mut().zip(anchors.iter_mut()) {
+                    if let Some(offset) = tracker.offset.take() {
+                        let produced = new_scrollback.len() - lines_before;
+                        let nth = offset / new_width;
+                        anchor.col = if nth < produced {
+                            offset % new_width
+                        } else {
+                            // Parked past the end of its own logical line, so
+                            // there is no cell to follow down. Settle on the
+                            // last row the line produced and let the caller
+                            // clamp the column.
+                            new_width
+                        };
+                        tracker.grid_line =
+                            Some(lines_before + nth.min(produced.saturating_sub(1)));
+                    }
+                }
+                logical_len = 0;
+            }
+        }
+
+        for (tracker, anchor) in trackers.iter().zip(anchors.iter_mut()) {
+            if let Some(nth) = tracker.grid_line {
+                anchor.row = AnchorRow::Line(new_scrollback.len() - 1 - nth);
             }
         }
 

@@ -591,3 +591,147 @@ fn full_width_line_does_not_gain_a_blank_on_reflow() {
 
     assert_eq!(term.contents(ContentRegion::Screen), expected);
 }
+
+// The row a line occupies is derived, not stored: it falls out of the buffer
+// length, the height and the scroll offset. `cursor.row` is an absolute row,
+// so a resize that moves every line has to move the cursor with them. Clamping
+// to the new size is not enough, because the cursor can stay in range while the
+// line it was sitting on slides out from under it.
+//
+// Here the buffer is longer than the screen, so it is anchored to the bottom
+// and growing the height pulls scrollback down into view. The cursor is on the
+// last line and has to stay there.
+#[test]
+fn cursor_follows_its_row_when_the_height_grows() {
+    use shpool_vterm::term::AsTermInput;
+
+    let mut input = vec![];
+    for row in ["11", "22", "33", "44"] {
+        term::Raw::from(row).term_input_into(&mut input);
+        term::Crlf::default().term_input_into(&mut input);
+    }
+    term::Raw::from("55").term_input_into(&mut input);
+
+    let mut term = shpool_vterm::Term::new(100, shpool_vterm::Size { width: 5, height: 3 });
+    term.process(input.as_slice());
+    term.resize(shpool_vterm::Size { width: 5, height: 5 });
+
+    let mut expected = vec![];
+    crate::support::frag::reset_codes.term_input_into(&mut expected);
+    term::Raw::from("11").term_input_into(&mut expected);
+    term::Crlf::default().term_input_into(&mut expected);
+    term::Raw::from("22").term_input_into(&mut expected);
+    term::Crlf::default().term_input_into(&mut expected);
+    term::Raw::from("33").term_input_into(&mut expected);
+    term::Crlf::default().term_input_into(&mut expected);
+    term::Raw::from("44").term_input_into(&mut expected);
+    term::Crlf::default().term_input_into(&mut expected);
+    term::Raw::from("55").term_input_into(&mut expected);
+    term::ControlCodes::cursor_position(5, 3).term_input_into(&mut expected);
+    term::control_codes().clear_attrs.term_input_into(&mut expected);
+
+    assert_eq!(term.contents(ContentRegion::Screen), expected);
+}
+
+// The height is not the only input that moves lines around. Here the screen is
+// anchored to the top and the height never changes, but narrowing splits
+// "abcdef" across two rows, which pushes "gh" and the cursor on it down one.
+#[test]
+fn cursor_follows_its_row_when_reflow_adds_rows() {
+    use shpool_vterm::term::AsTermInput;
+
+    let mut input = vec![];
+    term::Raw::from("abcdef").term_input_into(&mut input);
+    term::Crlf::default().term_input_into(&mut input);
+    term::Raw::from("gh").term_input_into(&mut input);
+
+    let mut term = shpool_vterm::Term::new(100, shpool_vterm::Size { width: 6, height: 8 });
+    term.process(input.as_slice());
+    term.resize(shpool_vterm::Size { width: 3, height: 8 });
+
+    let mut expected = vec![];
+    crate::support::frag::reset_codes.term_input_into(&mut expected);
+    term::Raw::from("abc").term_input_into(&mut expected);
+    term::Crlf::default().term_input_into(&mut expected);
+    term::Raw::from("def").term_input_into(&mut expected);
+    term::Crlf::default().term_input_into(&mut expected);
+    term::Raw::from("gh").term_input_into(&mut expected);
+    term::ControlCodes::cursor_position(3, 3).term_input_into(&mut expected);
+    term::control_codes().clear_attrs.term_input_into(&mut expected);
+
+    assert_eq!(term.contents(ContentRegion::Screen), expected);
+}
+
+// Shrinking the height walks the bottom anchored screen the other way, and the
+// clamp already lands the cursor in the right place. Pinned so that teaching
+// resize to re-anchor does not overshoot the case it happens to get right.
+#[test]
+fn cursor_stays_on_the_bottom_row_when_the_height_shrinks() {
+    use shpool_vterm::term::AsTermInput;
+
+    let mut input = vec![];
+    for row in ["11", "22", "33", "44"] {
+        term::Raw::from(row).term_input_into(&mut input);
+        term::Crlf::default().term_input_into(&mut input);
+    }
+    term::Raw::from("55").term_input_into(&mut input);
+
+    let mut term = shpool_vterm::Term::new(100, shpool_vterm::Size { width: 5, height: 5 });
+    term.process(input.as_slice());
+    term.resize(shpool_vterm::Size { width: 5, height: 3 });
+
+    let mut expected = vec![];
+    crate::support::frag::reset_codes.term_input_into(&mut expected);
+    term::Raw::from("33").term_input_into(&mut expected);
+    term::Crlf::default().term_input_into(&mut expected);
+    term::Raw::from("44").term_input_into(&mut expected);
+    term::Crlf::default().term_input_into(&mut expected);
+    term::Raw::from("55").term_input_into(&mut expected);
+    term::ControlCodes::cursor_position(3, 3).term_input_into(&mut expected);
+    term::control_codes().clear_attrs.term_input_into(&mut expected);
+
+    assert_eq!(term.contents(ContentRegion::Screen), expected);
+}
+
+// DECSC stores a row too, so it has the same problem as the live cursor: a
+// resize between the save and the restore moves the line out from under it.
+// Save on "55", park the live cursor elsewhere so a fix cannot get this right
+// by accident, grow the height, then restore and write.
+#[test]
+fn saved_cursor_follows_its_row_across_a_resize() {
+    use shpool_vterm::term::AsTermInput;
+
+    let mut input = vec![];
+    for row in ["11", "22", "33", "44"] {
+        term::Raw::from(row).term_input_into(&mut input);
+        term::Crlf::default().term_input_into(&mut input);
+    }
+    term::Raw::from("55").term_input_into(&mut input);
+    term::control_codes().save_cursor.term_input_into(&mut input);
+    term::ControlCodes::cursor_position(1, 1).term_input_into(&mut input);
+
+    let mut term = shpool_vterm::Term::new(100, shpool_vterm::Size { width: 5, height: 3 });
+    term.process(input.as_slice());
+    term.resize(shpool_vterm::Size { width: 5, height: 5 });
+
+    let mut restore = vec![];
+    term::control_codes().restore_cursor.term_input_into(&mut restore);
+    term::Raw::from("X").term_input_into(&mut restore);
+    term.process(restore.as_slice());
+
+    let mut expected = vec![];
+    crate::support::frag::reset_codes.term_input_into(&mut expected);
+    term::Raw::from("11").term_input_into(&mut expected);
+    term::Crlf::default().term_input_into(&mut expected);
+    term::Raw::from("22").term_input_into(&mut expected);
+    term::Crlf::default().term_input_into(&mut expected);
+    term::Raw::from("33").term_input_into(&mut expected);
+    term::Crlf::default().term_input_into(&mut expected);
+    term::Raw::from("44").term_input_into(&mut expected);
+    term::Crlf::default().term_input_into(&mut expected);
+    term::Raw::from("55X").term_input_into(&mut expected);
+    term::ControlCodes::cursor_position(5, 4).term_input_into(&mut expected);
+    term::control_codes().clear_attrs.term_input_into(&mut expected);
+
+    assert_eq!(term.contents(ContentRegion::Screen), expected);
+}

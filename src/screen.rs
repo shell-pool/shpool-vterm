@@ -181,8 +181,23 @@ impl Screen {
     }
 
     pub fn resize(&mut self, new_size: crate::Size) {
+        let old_size = self.size;
+        let cursor = self.cursor;
+        let saved_cursor = self.saved_cursor.pos;
         match &mut self.grid {
-            Grid::Scrollback(scrollback) => scrollback.reflow(new_size.width),
+            Grid::Scrollback(scrollback) => {
+                // A row is derived from the buffer length and the height, both
+                // of which this changes, so the cursor has to be re-derived
+                // rather than just clamped. The saved cursor is a row too, and
+                // a resize between DECSC and DECRC moves it just the same.
+                let mut anchors = [
+                    scrollback.anchor_cursor(old_size, cursor),
+                    scrollback.anchor_cursor(old_size, saved_cursor),
+                ];
+                scrollback.reflow(new_size.width, &mut anchors);
+                self.cursor = scrollback.resolve_cursor(new_size, anchors[0]);
+                self.saved_cursor.pos = scrollback.resolve_cursor(new_size, anchors[1]);
+            }
             Grid::AltScreen(altscreen) => altscreen.resize(new_size),
         }
         self.size = new_size;
