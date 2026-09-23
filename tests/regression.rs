@@ -488,3 +488,106 @@ fn dump_prefix_clears_scroll_region_and_origin_mode() {
         ContentRegion::All,
     );
 }
+
+// Reflow rebuilds the scrollback out of logical lines, and a blank line is a
+// logical line with nothing in it. Dropping those silently deletes rows out of
+// the middle of the screen and slides everything below them up, while the
+// cursor stays on the row it was already on.
+//
+// shpool resizes the spool on every reattach whether or not the size actually
+// changed, so a resize that does nothing still has to leave the dump alone.
+#[test]
+fn blank_lines_survive_a_noop_resize() {
+    use shpool_vterm::term::AsTermInput;
+
+    let size = shpool_vterm::Size { width: 5, height: 8 };
+
+    let mut input = vec![];
+    term::Raw::from("aa").term_input_into(&mut input);
+    term::Crlf::default().term_input_into(&mut input);
+    term::Crlf::default().term_input_into(&mut input);
+    term::Raw::from("bb").term_input_into(&mut input);
+    term::Crlf::default().term_input_into(&mut input);
+    term::Crlf::default().term_input_into(&mut input);
+    term::Raw::from("cc").term_input_into(&mut input);
+
+    let mut term = shpool_vterm::Term::new(100, size);
+    term.process(input.as_slice());
+    term.resize(size);
+
+    let mut expected = vec![];
+    crate::support::frag::reset_codes.term_input_into(&mut expected);
+    term::Raw::from("aa").term_input_into(&mut expected);
+    term::Crlf::default().term_input_into(&mut expected);
+    term::Crlf::default().term_input_into(&mut expected);
+    term::Raw::from("bb").term_input_into(&mut expected);
+    term::Crlf::default().term_input_into(&mut expected);
+    term::Crlf::default().term_input_into(&mut expected);
+    term::Raw::from("cc").term_input_into(&mut expected);
+    term::ControlCodes::cursor_position(5, 3).term_input_into(&mut expected);
+    term::control_codes().clear_attrs.term_input_into(&mut expected);
+
+    // Screen rather than All because that is the region shpool restores.
+    assert_eq!(term.contents(ContentRegion::Screen), expected);
+}
+
+// The same, for a resize that actually reflows. The widths are picked so that
+// "abcdef" occupies two grid lines either side of the resize, which keeps the
+// row count stable and isolates the blank line from cursor re-anchoring.
+#[test]
+fn blank_lines_survive_a_reflowing_resize() {
+    use shpool_vterm::term::AsTermInput;
+
+    let mut input = vec![];
+    term::Raw::from("abcdef").term_input_into(&mut input);
+    term::Crlf::default().term_input_into(&mut input);
+    term::Crlf::default().term_input_into(&mut input);
+    term::Raw::from("gh").term_input_into(&mut input);
+
+    let mut term = shpool_vterm::Term::new(100, shpool_vterm::Size { width: 4, height: 8 });
+    term.process(input.as_slice());
+    term.resize(shpool_vterm::Size { width: 3, height: 8 });
+
+    let mut expected = vec![];
+    crate::support::frag::reset_codes.term_input_into(&mut expected);
+    term::Raw::from("abc").term_input_into(&mut expected);
+    term::Crlf::default().term_input_into(&mut expected);
+    term::Raw::from("def").term_input_into(&mut expected);
+    term::Crlf::default().term_input_into(&mut expected);
+    term::Crlf::default().term_input_into(&mut expected);
+    term::Raw::from("gh").term_input_into(&mut expected);
+    term::ControlCodes::cursor_position(4, 3).term_input_into(&mut expected);
+    term::control_codes().clear_attrs.term_input_into(&mut expected);
+
+    assert_eq!(term.contents(ContentRegion::Screen), expected);
+}
+
+// The other side of the same coin: a logical line that ends exactly on the
+// width boundary fills its last grid line completely and must not pick up a
+// trailing blank one. Reflow cannot simply emit a row for every logical line
+// it starts.
+#[test]
+fn full_width_line_does_not_gain_a_blank_on_reflow() {
+    use shpool_vterm::term::AsTermInput;
+
+    let size = shpool_vterm::Size { width: 3, height: 5 };
+
+    let mut input = vec![];
+    term::Raw::from("abc").term_input_into(&mut input);
+    term::Crlf::default().term_input_into(&mut input);
+    term::Raw::from("d").term_input_into(&mut input);
+
+    let mut term = shpool_vterm::Term::new(100, size);
+    term.process(input.as_slice());
+    term.resize(size);
+
+    let mut expected = vec![];
+    crate::support::frag::reset_codes.term_input_into(&mut expected);
+    term::Raw::from("abc").term_input_into(&mut expected);
+    term::Crlf::default().term_input_into(&mut expected);
+    term::Raw::from("d").term_input_into(&mut expected);
+    term::ControlCodes::cursor_position(2, 2).term_input_into(&mut expected);
+    term::control_codes().clear_attrs.term_input_into(&mut expected);
+
+    assert_eq!(term.contents(ContentRegion::Screen), expected);
+}

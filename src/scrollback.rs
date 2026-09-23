@@ -170,6 +170,7 @@ impl Scrollback {
             if !is_wrapped {
                 // We've gotten to the end of the logical line. We now
                 // need to chop it up into grid lines by the new width.
+                let lines_before = new_scrollback.len();
                 let mut line = Line::new();
                 while let Some(chunk) = logical_line.pop_front() {
                     let remainder = new_width - line.cells.len();
@@ -205,7 +206,11 @@ impl Scrollback {
                     }
                 }
 
-                if line.cells.len() != 0 {
+                // A logical line that ended exactly on the width boundary has
+                // already been fully flushed, so the leftover is not a row. A
+                // logical line that flushed nothing at all was blank, and a
+                // blank line still occupies a row.
+                if !line.cells.is_empty() || new_scrollback.len() == lines_before {
                     new_scrollback.push_front(line);
                 }
             }

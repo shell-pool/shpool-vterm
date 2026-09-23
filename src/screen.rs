@@ -683,8 +683,10 @@ mod tests {
     fn scrollback_reflow_roundtrip() -> anyhow::Result<()> {
         // Parameterized-style test
         let shapes = vec![
-            (10, 20), // Start wide, go narrow
-            (5, 10),  // Start narrow, go wide
+            (20, 10), // Start wide, go narrow
+            (10, 5),
+            (10, 20), // Start narrow, go wide
+            (5, 10),
             (10, 10), // No change
         ];
 
