@@ -67,7 +67,10 @@ frag! {
             term::Raw::from("A"),
             term::Crlf::default(),
             term::Raw::from("😊"),
-            term::ControlCodes::cursor_position(2, 3),
+            // The cursor is waiting to wrap after the emoji, which we can
+            // only reproduce by printing it again.
+            term::ControlCodes::cursor_position(2, 1),
+            term::Raw::from("😊"),
             term::control_codes().clear_attrs
 }
 
