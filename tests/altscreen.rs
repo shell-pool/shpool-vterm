@@ -117,7 +117,7 @@ frag! {
             term::Crlf::default(),
             term::Crlf::default(),
             term::ControlCodes::set_scroll_region(2, 5),
-            term::ControlCodes::cursor_position(1, 2),
+            term::ControlCodes::cursor_position(1, 1),
             term::control_codes().clear_attrs
 }
 
