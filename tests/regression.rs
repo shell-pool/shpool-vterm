@@ -256,8 +256,7 @@ frag! {
        term::ControlCodes::set_scroll_region(1, 3),
        term::ControlCodes::cursor_position(3, 1),
        term::Crlf::default(),
-       term::Crlf::default(),
-       term::control_codes().unset_scroll_region
+       term::Crlf::default()
     => ContentRegion::Screen =>
             reset_codes,
             term::Raw::from("ee"),
@@ -280,8 +279,7 @@ frag! {
        term::ControlCodes::set_scroll_region(1, 5),
        term::ControlCodes::cursor_position(3, 1),
        term::Crlf::default(),
-       term::Crlf::default(),
-       term::control_codes().unset_scroll_region
+       term::Crlf::default()
     => ContentRegion::Screen =>
             reset_codes,
             term::Raw::from("ee"),
@@ -305,7 +303,6 @@ frag! {
        term::ControlCodes::cursor_position(3, 1),
        term::Crlf::default(),
        term::Crlf::default(),
-       term::control_codes().unset_scroll_region,
        term::ControlCodes::insert_lines(1)
     => ContentRegion::Screen =>
             reset_codes,
@@ -328,7 +325,6 @@ frag! {
        term::ControlCodes::cursor_position(3, 1),
        term::Crlf::default(),
        term::Crlf::default(),
-       term::control_codes().unset_scroll_region,
        term::ControlCodes::delete_lines(1)
     => ContentRegion::Screen =>
             reset_codes,
@@ -358,13 +354,12 @@ frag! {
             term::Crlf::default(),
             term::Raw::from("cc"),
             term::Crlf::default(),
-            term::ControlCodes::set_scroll_region(1, 3),
-            term::ControlCodes::cursor_position(3, 3),
+            term::ControlCodes::cursor_position(1, 1),
             term::control_codes().clear_attrs
 }
 
 // Clamping the bottom can pull it up to or above the top, leaving a region
-// that describes no rows at all. There is nothing to scroll, so it is dropped.
+// that describes no rows at all. Like in xterm, the whole command is ignored.
 frag! {
     scroll_region_clamped_away { scrollback_lines: 100, width: 5, height: 3 }
     <= term::ControlCodes::set_scroll_region(5, 9)
@@ -382,7 +377,7 @@ fn scroll_region_clamped_on_shrinking_resize() {
     use shpool_vterm::term::AsTermInput;
 
     let mut input = vec![];
-    term::ControlCodes::set_scroll_region(1, 6).term_input_into(&mut input);
+    term::ControlCodes::set_scroll_region(2, 6).term_input_into(&mut input);
 
     let mut term = shpool_vterm::Term::new(100, shpool_vterm::Size { width: 5, height: 6 });
     term.process(input.as_slice());
@@ -390,7 +385,7 @@ fn scroll_region_clamped_on_shrinking_resize() {
 
     let mut expected = vec![];
     crate::support::frag::reset_codes.term_input_into(&mut expected);
-    term::ControlCodes::set_scroll_region(1, 3).term_input_into(&mut expected);
+    term::ControlCodes::set_scroll_region(2, 3).term_input_into(&mut expected);
     term::ControlCodes::cursor_position(1, 1).term_input_into(&mut expected);
     term::control_codes().clear_attrs.term_input_into(&mut expected);
 
@@ -405,7 +400,7 @@ fn alt_screen_scroll_region_clamped_on_shrinking_resize() {
 
     let mut input = vec![];
     term::control_codes().enable_alt_screen.term_input_into(&mut input);
-    term::ControlCodes::set_scroll_region(1, 6).term_input_into(&mut input);
+    term::ControlCodes::set_scroll_region(2, 6).term_input_into(&mut input);
 
     let mut term = shpool_vterm::Term::new(100, shpool_vterm::Size { width: 5, height: 6 });
     term.process(input.as_slice());
@@ -421,7 +416,7 @@ fn alt_screen_scroll_region_clamped_on_shrinking_resize() {
     term::control_codes().enable_alt_screen.term_input_into(&mut expected);
     term::Crlf::default().term_input_into(&mut expected);
     term::Crlf::default().term_input_into(&mut expected);
-    term::ControlCodes::set_scroll_region(1, 3).term_input_into(&mut expected);
+    term::ControlCodes::set_scroll_region(2, 3).term_input_into(&mut expected);
     term::ControlCodes::cursor_position(1, 1).term_input_into(&mut expected);
     term::control_codes().clear_attrs.term_input_into(&mut expected);
 
