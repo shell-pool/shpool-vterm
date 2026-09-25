@@ -234,14 +234,26 @@ impl Screen {
     /// screen has to clean up after the earlier screens. We only emit the
     /// codes we actually need because restore buffers get written to the
     /// wire on every reattach.
-    pub fn dump_global_state_reset_into(&self, buf: &mut Vec<u8>) {
+    ///
+    /// Both codes home the cursor, so this returns whether it emitted any.
+    pub fn dump_global_state_reset_into(&self, buf: &mut Vec<u8>) -> bool {
+        let mut homed = false;
         if matches!(self.grid.scroll_region(), ScrollRegion::Window { .. }) {
             term::control_codes().unset_scroll_region.term_input_into(buf);
+            homed = true;
         }
 
         if matches!(self.grid.origin_mode(), OriginMode::ScrollRegion) {
             term::control_codes().disable_scroll_region_origin_mode.term_input_into(buf);
+            homed = true;
         }
+
+        homed
+    }
+
+    /// Whether `dump_contents_into` leaves the cursor in the top left corner.
+    pub fn dump_leaves_cursor_home(&self) -> bool {
+        self.cursor == Pos { row: 0, col: 0 } && !self.pending_wrap
     }
 
     pub fn resize(&mut self, new_size: crate::Size) {

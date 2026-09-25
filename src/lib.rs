@@ -487,7 +487,13 @@ impl State {
                 // ourselves. This has to happen before the contents get
                 // painted, since it is the paint that a stranded scroll
                 // region corrupts.
-                self.scrollback.dump_global_state_reset_into(buf);
+                let homed = self.scrollback.dump_global_state_reset_into(buf);
+
+                // Switching screens doesn't move the cursor either, but the
+                // alt screen gets painted from the top left corner down.
+                if !homed && !self.scrollback.dump_leaves_cursor_home() {
+                    ControlCodes::cursor_position(1, 1).term_input_into(buf);
+                }
 
                 self.altscreen.dump_contents_into(buf, dump_region)
             }
