@@ -822,3 +822,67 @@ frag! {
             term::ControlCodes::cursor_position(1, 1),
             term::control_codes().clear_attrs
 }
+
+// The main screen only stores the rows that have been written to, but the
+// rows below them are still on the screen. A linefeed on the bottom row has
+// to scroll everything up past those blank rows, not just open another blank
+// row right below the content.
+frag! {
+    linefeed_at_the_bottom_scrolls_a_partially_filled_screen { scrollback_lines: 100, width: 5, height: 3 }
+    <= term::Raw::from("aa"), term::Crlf::default(),
+       term::Raw::from("bb"),
+       term::ControlCodes::cursor_position(3, 1),
+       term::Raw::from("\nX")
+    => ContentRegion::Screen =>
+            reset_codes,
+            term::Raw::from("bb"),
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::Raw::from("X"),
+            term::ControlCodes::cursor_position(3, 2),
+            term::control_codes().clear_attrs
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("aa"),
+            term::Crlf::default(),
+            term::Raw::from("bb"),
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::Raw::from("X"),
+            term::ControlCodes::cursor_position(3, 2),
+            term::control_codes().clear_attrs
+}
+
+// Same for SU.
+frag! {
+    scroll_up_moves_a_partially_filled_screen { scrollback_lines: 100, width: 5, height: 3 }
+    <= term::Raw::from("aa"), term::Crlf::default(),
+       term::Raw::from("bb"),
+       term::ControlCodes::scroll_up(1)
+    => ContentRegion::Screen =>
+            reset_codes,
+            term::Raw::from("bb"),
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::ControlCodes::cursor_position(2, 3),
+            term::control_codes().clear_attrs
+}
+
+// Scrolling by more than a screenful blanks the screen. The lines that were
+// on it go into the scrollback, but there is no need to follow them up with
+// thousands of blank lines.
+frag! {
+    huge_scroll_up_only_pushes_a_screenful { scrollback_lines: 100, width: 5, height: 2 }
+    <= term::Raw::from("aa"), term::Crlf::default(),
+       term::Raw::from("bb"),
+       term::ControlCodes::scroll_up(1000)
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("aa"),
+            term::Crlf::default(),
+            term::Raw::from("bb"),
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::ControlCodes::cursor_position(2, 3),
+            term::control_codes().clear_attrs
+}

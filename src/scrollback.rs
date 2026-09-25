@@ -487,7 +487,19 @@ impl Scrollback {
     pub fn scroll_up(&mut self, size: &crate::Size, n: usize) {
         match self.scroll_region {
             ScrollRegion::TrackSize => {
-                for _ in 0..n {
+                // The rows below the last stored line have no storage, but
+                // they are still on the screen and the content has to move
+                // up past them. Fill them in so that the new lines really
+                // land at the bottom of the screen rather than right below
+                // the content.
+                while self.buf.len() < size.height {
+                    self.add_line(Line::new());
+                }
+
+                // Scrolling by more than a screenful just blanks the screen,
+                // so there is no point in pushing even more blank lines into
+                // the scrollback.
+                for _ in 0..std::cmp::min(n, size.height) {
                     self.add_line(Line::new());
                 }
             }
