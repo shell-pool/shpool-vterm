@@ -246,6 +246,13 @@ impl Screen {
     }
 
     pub fn resize(&mut self, new_size: crate::Size) {
+        // shpool resizes the terminal on every reattach, usually to the size
+        // it already is. The kernel only sends SIGWINCH when the size changes,
+        // so the app won't redraw, and nothing about the screen, like the
+        // scroll region, should change either.
+        if new_size == self.size {
+            return;
+        }
         let old_size = self.size;
         // A cursor with a wrap pending is logically just past the char in
         // the last column, and that is the spot it should keep following.
@@ -282,8 +289,10 @@ impl Screen {
         };
         self.size = new_size;
 
-        let scroll_region = self.grid.scroll_region().clone();
-        self.store_scroll_region(clamp_scroll_region(scroll_region, self.size));
+        // Like in other terminals, a resize drops the scroll region. The rows
+        // it covered have moved or might not even be there anymore, and apps
+        // set up a new one when they redraw for the new size.
+        self.store_scroll_region(ScrollRegion::TrackSize);
 
         (self.cursor, self.pending_wrap) = settle_cursor(cursor, pending_wrap, self.size);
         (self.saved_cursor.pos, self.saved_cursor.pending_wrap) =
@@ -543,11 +552,9 @@ impl Screen {
 
 /// Bring a scroll region back onto the grid.
 ///
-/// DECSTBM lets a client name a bottom past the last row, and a shrinking
-/// resize can strand a region that was in range when it was set. Everything
-/// downstream assumes `bottom` is a real row: the scrolling code indexes the
-/// grid with it, and LF walks the cursor off the screen chasing a bottom it
-/// can never reach. A region with no rows left in it is dropped.
+/// Everything downstream assumes `bottom` is a real row: the scrolling code
+/// indexes the grid with it, and LF walks the cursor off the screen chasing a
+/// bottom it can never reach. A region with no rows left in it is dropped.
 fn clamp_scroll_region(scroll_region: ScrollRegion, size: crate::Size) -> ScrollRegion {
     let ScrollRegion::Window { top, bottom } = scroll_region else {
         return ScrollRegion::TrackSize;
