@@ -569,9 +569,13 @@ test_pub! {
         pub save_cursor: ControlCode,
         pub restore_cursor: ControlCode,
         pub reverse_index: ControlCode,
+        pub index: ControlCode,
+        pub next_line: ControlCode,
         pub backspace: ControlCode,
         pub shift_in: ControlCode,
         pub shift_out: ControlCode,
+        pub vertical_tab: ControlCode,
+        pub form_feed: ControlCode,
         pub cursor_backward_tab: ControlCode,
         pub cursor_backwards_tab: ControlCode,
         pub insert_character: ControlCode,
@@ -1046,9 +1050,13 @@ test_pub! {
             save_cursor: ControlCode::ESC { intermediates: smallvec![], byte: b'7' },
             restore_cursor: ControlCode::ESC { intermediates: smallvec![], byte: b'8' },
             reverse_index: ControlCode::ESC { intermediates: smallvec![], byte: b'M' },
+            index: ControlCode::ESC { intermediates: smallvec![], byte: b'D' },
+            next_line: ControlCode::ESC { intermediates: smallvec![], byte: b'E' },
             backspace: ControlCode::C0 { byte: 0x08 },
             shift_in: ControlCode::C0 { byte: SHIFT_IN },
             shift_out: ControlCode::C0 { byte: SHIFT_OUT },
+            vertical_tab: ControlCode::C0 { byte: 0x0b },
+            form_feed: ControlCode::C0 { byte: 0x0c },
             cursor_backward_tab: ControlCode::CSI {
                 params: smallvec![],
                 intermediates: smallvec![],
@@ -1440,6 +1448,10 @@ impl ControlCodes {
         Self::cursor_backward_tab(n)
     }
 
+    pub fn cursor_forward_tab(n: u16) -> ControlCode {
+        Self::move_cursor(n, 'I')
+    }
+
     pub fn cursor_next_line(n: u16) -> ControlCode {
         Self::move_cursor(n, 'E')
     }
@@ -1494,6 +1506,14 @@ impl ControlCodes {
             intermediates: smallvec![],
             action: 'd',
         }
+    }
+
+    pub fn horizontal_position_relative(n: u16) -> ControlCode {
+        Self::move_cursor(n, 'a')
+    }
+
+    pub fn vertical_position_relative(n: u16) -> ControlCode {
+        Self::move_cursor(n, 'e')
     }
 
     fn move_cursor(n: u16, action: char) -> ControlCode {
