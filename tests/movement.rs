@@ -245,6 +245,28 @@ frag! {
             term::control_codes().clear_attrs
 }
 
+// Like in xterm, CSI s and CSI u save and restore everything that DECSC and
+// DECRC do, not just the position.
+frag! {
+    scp_rcp_restore_attrs_and_charsets { scrollback_lines: 100, width: 10, height: 3 }
+    <= term::control_codes().bold,
+       term::ControlCodes::designate_charset(0, b'0'),
+       term::control_codes().save_cursor_position,
+       term::control_codes().clear_attrs,
+       term::control_codes().designate_g0_us_ascii,
+       term::control_codes().restore_cursor_position,
+       term::Raw::from("q")
+    => ContentRegion::All =>
+            reset_codes,
+            term::control_codes().bold,
+            term::Raw::from("─"),
+            term::control_codes().reset_font_weight,
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().clear_attrs,
+            term::control_codes().bold,
+            term::ControlCodes::designate_charset(0, b'0')
+}
+
 frag! {
     cursor_horizontal_absolute { scrollback_lines: 100, width: 10, height: 10 }
     <= term::Raw::from("A"),

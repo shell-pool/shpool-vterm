@@ -1325,12 +1325,9 @@ impl vte::Perform for State {
                 screen.clamp();
             }
 
-            // SCP (Save Cursor Position)
-            's' if plain => {
-                let screen = self.screen_mut();
-                let cursor = screen.cursor.clone();
-                screen.saved_cursor.pos = cursor;
-            }
+            // SCOSC (Save Cursor, CSI s). Like in xterm, this saves the same
+            // state as DECSC, not just the position.
+            's' if plain => self.save_cursor(),
             // Window Title Operations
             't' if plain => while let Some(code) = params_iter.next() {
                 match code {
@@ -1370,12 +1367,8 @@ impl vte::Perform for State {
                     _ => warn!(self.logger, "unhandled CSI ... {:?} t", code),
                 }
             }
-            // RCP (Restore Cursor Position)
-            'u' if plain => {
-                let screen = self.screen_mut();
-                screen.cursor = screen.saved_cursor.pos;
-                screen.clamp();
-            }
+            // SCORC (Restore Cursor, CSI u), which is DECRC all over again.
+            'u' if plain => self.restore_cursor(),
 
             // TBC (Tabulation Clear, CSI 3 g, CSI 0 g, CSI g)
             'g' if plain => {
