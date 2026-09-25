@@ -1042,3 +1042,23 @@ frag! {
             term::Raw::from("C"),
             term::control_codes().clear_attrs
 }
+
+// The alt screen keeps its own saved cursor while the main screen is up.
+frag! {
+    alt_screen_saved_cursor_survives_exit { scrollback_lines: 100, width: 5, height: 2 }
+    <= term::control_codes().enable_alt_screen,
+       term::ControlCodes::cursor_position(2, 3),
+       term::control_codes().save_cursor,
+       term::control_codes().disable_alt_screen,
+       term::control_codes().enable_alt_screen,
+       term::control_codes().restore_cursor,
+       term::Raw::from("X")
+    => ContentRegion::All =>
+            reset_codes,
+            empty_scrollback,
+            term::control_codes().enable_alt_screen,
+            term::Crlf::default(),
+            term::Raw::from("  X"),
+            term::ControlCodes::cursor_position(2, 4),
+            term::control_codes().clear_attrs
+}

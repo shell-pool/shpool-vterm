@@ -103,15 +103,9 @@ impl Screen {
         self.grids.alt_active
     }
 
-    /// Switch to the alt screen, which starts out blank and with nothing
-    /// saved in its slot for DECSC. Like erasing the screen, this cancels a
-    /// pending wrap.
+    /// Switch to the alt screen.
     pub fn enter_alt_screen(&mut self) {
-        self.grids.altscreen = AltScreen::new(self.size);
-        self.grids.altscreen.set_logger(self.logger.clone());
-        self.grids.altscreen_saved_cursor = SavedCursor::new(Pos { row: 0, col: 0 });
         self.grids.alt_active = true;
-        self.pending_wrap = false;
     }
 
     /// Switch back to the main screen.

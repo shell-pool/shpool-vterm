@@ -652,6 +652,33 @@ impl State {
         self.charsets = charsets;
     }
 
+    /// Switch to the alt screen. With `erase`, the alt screen gets erased
+    /// with the current background color too, even if it was already active.
+    ///
+    /// Like in xterm, the alt screen otherwise keeps whatever it held the
+    /// last time it was active.
+    fn enter_alt_screen(&mut self, erase: bool) {
+        let fill = self.cursor_attrs.bgcolor;
+        let screen = &mut self.screen;
+        screen.enter_alt_screen();
+        if erase {
+            screen.erase(fill);
+        }
+    }
+
+    /// Switch back to the main screen. With `erase`, the alt screen gets
+    /// erased with the current background color on the way out.
+    fn exit_alt_screen(&mut self, erase: bool) {
+        let fill = self.cursor_attrs.bgcolor;
+        let screen = &mut self.screen;
+        if screen.alt_active() {
+            if erase {
+                screen.erase(fill);
+            }
+            screen.exit_alt_screen();
+        }
+    }
+
     fn write_char_at_cursor(&mut self, cell: Cell) {
         let modes = self.modes & Screen::WRITE_MODES;
         if let Err(e) = self.screen.write_at_cursor(cell, modes) {
@@ -1287,7 +1314,7 @@ impl vte::Perform for State {
                         // first and starting out with a blank screen.
                         [1049] => {
                             self.save_cursor();
-                            self.screen.enter_alt_screen();
+                            self.enter_alt_screen(true);
                         }
                         [2004] => self.modes.insert(Modes::BRACKETED_PASTE),
                         // Means "pause visual rendering." We are not rendering
@@ -1346,7 +1373,7 @@ impl vte::Perform for State {
                         [25] => self.modes.insert(Modes::CURSOR_HIDDEN),
                         [1004] => self.modes.remove(Modes::REPORT_FOCUS),
                         [1049] => {
-                            self.screen.exit_alt_screen();
+                            self.exit_alt_screen(false);
                             self.restore_cursor();
                         }
                         [2004] => self.modes.remove(Modes::BRACKETED_PASTE),
