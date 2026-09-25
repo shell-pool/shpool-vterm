@@ -21,8 +21,10 @@ use crate::{
     line::Line,
     log,
     scrollback::Scrollback,
-    term::{self, AsTermInput, OriginMode, Pos, ScrollRegion},
+    term::{self, AsTermInput, OriginMode, Pos, Region, ScrollRegion},
 };
+
+use anyhow::{anyhow, Context};
 
 /// A screen containts some kind of grid of cells, plus top
 /// level fields that are common to all screen variants.
@@ -37,6 +39,15 @@ pub struct Screen {
     /// The current position of the cursor within the in-view window described
     /// by `size`. (0,0) is the upper left.
     pub cursor: Pos,
+    /// Set when a char has just been written into the last column.
+    ///
+    /// The cursor stays on the last column rather than moving down to the
+    /// next line right away, and the wrap only happens if another char gets
+    /// printed. This is what lets a program write into the bottom right cell
+    /// without scrolling, or end a full width line with CRLF without leaving
+    /// a blank line behind. Anything that explicitly moves the cursor cancels
+    /// the pending wrap. DEC calls this the "last column flag".
+    pub pending_wrap: bool,
     // The slot where cursor position info is saved by the SCP/RCP
     // and ESC 7 / ESC 8 commands.
     pub saved_cursor: SavedCursor,
@@ -54,6 +65,7 @@ impl Screen {
             grid: Grid::Scrollback(Scrollback::new(scrollback_lines)),
             size,
             cursor: Pos { row: 0, col: 0 },
+            pending_wrap: false,
             saved_cursor: SavedCursor::new(Pos { row: 0, col: 0 }),
             logger: log::Context::None,
         }
@@ -65,6 +77,7 @@ impl Screen {
             grid: Grid::AltScreen(AltScreen::new(size)),
             size,
             cursor: Pos { row: 0, col: 0 },
+            pending_wrap: false,
             saved_cursor: SavedCursor::new(Pos { row: 0, col: 0 }),
             logger: log::Context::None,
         }
@@ -158,8 +171,58 @@ impl Screen {
             _ => self.cursor.row,
         };
 
-        term::ControlCodes::cursor_position((row + 1) as u16, (self.cursor.col + 1) as u16)
+        if self.pending_wrap {
+            self.dump_pending_wrap_into(buf, row);
+        } else {
+            term::ControlCodes::cursor_position((row + 1) as u16, (self.cursor.col + 1) as u16)
+                .term_input_into(buf);
+        }
+    }
+
+    /// Leave the cursor on the last column with a wrap pending.
+    ///
+    /// There is no control code that sets the pending wrap flag, so we get
+    /// the terminal into that state the same way the application did, by
+    /// printing the char that sits at the end of the line. It is already on
+    /// the screen, so printing it again over itself changes nothing else.
+    /// `row` is the cursor row as `dump_contents_into` addresses it.
+    fn dump_pending_wrap_into(&self, buf: &mut Vec<u8>, row: usize) {
+        let width = self.size.width;
+        let line = self.grid.get_line(self.size, self.cursor.row);
+        let cell_at = |col: usize| line.and_then(|l| l.get_cell(width, col));
+
+        // The last column might be the padding half of a wide char, in which
+        // case the char to print starts one column further left.
+        let mut col = width.saturating_sub(1);
+        while col > 0 && cell_at(col).is_some_and(|c| c.is_wide_padding()) {
+            col -= 1;
+        }
+        let cell = match cell_at(col) {
+            Some(cell)
+                if !cell.is_wide_padding()
+                    && col + std::cmp::max(cell.width() as usize, 1) == width =>
+            {
+                cell.clone()
+            }
+            // The last column is not covered by anything we can print, which
+            // happens when a wide char has been partly overwritten. A blank
+            // looks the same.
+            _ => {
+                col = width.saturating_sub(1);
+                Cell::empty()
+            }
+        };
+
+        term::ControlCodes::cursor_position((row + 1) as u16, (col + 1) as u16)
             .term_input_into(buf);
+        let blank_attrs = term::Attrs::default();
+        for code in blank_attrs.transition_to(cell.attrs()) {
+            code.term_input_into(buf);
+        }
+        cell.term_input_into(buf);
+        for code in cell.attrs().transition_to(&blank_attrs) {
+            code.term_input_into(buf);
+        }
     }
 
     /// Emit the codes needed to undo the global terminal state that
@@ -182,9 +245,11 @@ impl Screen {
 
     pub fn resize(&mut self, new_size: crate::Size) {
         let old_size = self.size;
-        let cursor = self.cursor;
-        let saved_cursor = self.saved_cursor.pos;
-        match &mut self.grid {
+        // A cursor with a wrap pending is logically just past the char in
+        // the last column, and that is the spot it should keep following.
+        let cursor = past_pending_wrap(self.cursor, self.pending_wrap);
+        let saved_cursor = past_pending_wrap(self.saved_cursor.pos, self.saved_cursor.pending_wrap);
+        let (cursor, saved_cursor) = match &mut self.grid {
             Grid::Scrollback(scrollback) => {
                 // A row is derived from the buffer length and the height, both
                 // of which this changes, so the cursor has to be re-derived
@@ -195,21 +260,33 @@ impl Screen {
                     scrollback.anchor_cursor(old_size, saved_cursor),
                 ];
                 scrollback.reflow(new_size.width, &mut anchors);
-                self.cursor = scrollback.resolve_cursor(new_size, anchors[0]);
-                self.saved_cursor.pos = scrollback.resolve_cursor(new_size, anchors[1]);
+                (
+                    scrollback.resolve_cursor(new_size, anchors[0]),
+                    scrollback.resolve_cursor(new_size, anchors[1]),
+                )
             }
-            Grid::AltScreen(altscreen) => altscreen.resize(new_size),
-        }
+            Grid::AltScreen(altscreen) => {
+                altscreen.resize(new_size);
+                (cursor, saved_cursor)
+            }
+        };
         self.size = new_size;
 
         let scroll_region = self.grid.scroll_region().clone();
         self.store_scroll_region(clamp_scroll_region(scroll_region, self.size));
 
-        self.cursor.clamp_to(self.size);
-        self.saved_cursor.pos.clamp_to(self.size);
+        (self.cursor, self.pending_wrap) = settle_cursor(cursor, self.pending_wrap, self.size);
+        (self.saved_cursor.pos, self.saved_cursor.pending_wrap) =
+            settle_cursor(saved_cursor, self.saved_cursor.pending_wrap, self.size);
     }
 
+    /// Bring the cursor back within the region it may occupy after it has
+    /// been explicitly moved.
+    ///
+    /// Every explicit cursor movement ends up here, and moving the cursor
+    /// cancels any pending wrap, so this clears it as well.
     pub fn clamp(&mut self) {
+        self.pending_wrap = false;
         match &self.grid {
             Grid::Scrollback(scrollback) => {
                 scrollback.clamp_to_scroll_region(&mut self.cursor, &self.size)
@@ -224,22 +301,90 @@ impl Screen {
     // Control Code Handlers
     //
 
-    pub fn write_at_cursor(&mut self, cell: Cell) -> anyhow::Result<()> {
-        self.cursor = match &mut self.grid {
-            Grid::Scrollback(scrollback) => {
-                scrollback.write_at_cursor(self.size, self.cursor, cell)?
-            }
-            Grid::AltScreen(altscreen) => {
-                altscreen.write_at_cursor(self.size, self.cursor, cell)?
-            }
+    /// Write a cell at the cursor and advance the cursor past it, wrapping
+    /// onto the next line first if a wrap is pending or the cell does not
+    /// fit in what is left of the current line.
+    ///
+    /// In insert mode (IRM) the rest of the line gets shifted right to make
+    /// room for the cell rather than being overwritten.
+    pub fn write_at_cursor(&mut self, cell: Cell, insert_mode: bool) -> anyhow::Result<()> {
+        let width = self.size.width;
+        if width == 0 || self.size.height == 0 {
+            return Err(anyhow!("cannot write to a zero sized screen"));
+        }
+        let cell_width = cell.width() as usize;
+        if cell_width > width {
+            return Err(anyhow!("{} column wide char does not fit on the screen", cell_width));
+        }
+        self.cursor.clamp_to(self.size);
+
+        if self.pending_wrap {
+            self.wrap();
+        }
+        // A wide char never gets split across lines. If it does not fit, it
+        // goes on the next line and the columns it did not use stay blank.
+        if self.cursor.col + cell_width > width {
+            self.wrap();
+        }
+
+        let col = self.cursor.col;
+        let Some(line) = self.grid.materialize_line(self.size, self.cursor.row) else {
+            return Err(anyhow!("no line for cursor row {}", self.cursor.row));
         };
+        if insert_mode {
+            line.insert_character(width, col, cell_width);
+        }
+        line.set_cell(width, col, cell).context("setting main cell")?;
+        for pad_col in col + 1..col + cell_width {
+            line.set_cell(width, pad_col, Cell::wide_pad()).context("padding after wide char")?;
+        }
+
+        if col + cell_width < width {
+            self.cursor.col = col + cell_width;
+        } else {
+            self.cursor.col = width - 1;
+            self.pending_wrap = true;
+        }
 
         Ok(())
+    }
+
+    /// Move to the start of the next line because the current one is full.
+    fn wrap(&mut self) {
+        // The line only continues onto the next one if the cursor is really
+        // going to get there. Below the scroll region on the last row it has
+        // nowhere to go, so the next char just overwrites this line.
+        let (_, bottom) = self.grid.scroll_region().as_region(&self.size).row_bounds();
+        if self.cursor.row + 1 == bottom || self.cursor.row + 1 < self.size.height {
+            if let Some(line) = self.grid.materialize_line(self.size, self.cursor.row) {
+                line.is_wrapped = true;
+            }
+        }
+
+        self.linefeed();
+        self.cursor.col = 0;
+    }
+
+    /// Move the cursor down a row, scrolling the content of the scroll region
+    /// up instead if the cursor is on its bottom row. This implements LF and
+    /// is also how the cursor gets to the next line when wrapping.
+    ///
+    /// The cursor can sit outside of the scroll region, in which case it
+    /// just moves down until it reaches the bottom of the screen.
+    pub fn linefeed(&mut self) {
+        self.pending_wrap = false;
+        let (_, bottom) = self.grid.scroll_region().as_region(&self.size).row_bounds();
+        if self.cursor.row + 1 == bottom {
+            self.scroll_up(1);
+        } else if self.cursor.row + 1 < self.size.height {
+            self.cursor.row += 1;
+        }
     }
 
     /// Erase whichever screen is currently active from the cursor
     /// position to the bottom. Used to implement 'CSI 0 J'
     pub fn erase_to_end(&mut self) {
+        self.pending_wrap = false;
         match &mut self.grid {
             Grid::Scrollback(s) => s.erase_to_end(self.size, self.cursor),
             Grid::AltScreen(alt) => alt.erase_to_end(self.cursor),
@@ -249,6 +394,7 @@ impl Screen {
     /// Erase whichever screen is currently active from the top to the
     /// cursor position. Used to implement 'CSI 1 J'
     pub fn erase_from_start(&mut self) {
+        self.pending_wrap = false;
         match &mut self.grid {
             Grid::Scrollback(s) => s.erase_from_start(self.size, self.cursor),
             Grid::AltScreen(alt) => alt.erase_from_start(self.cursor),
@@ -259,6 +405,7 @@ impl Screen {
     /// Used to implement 'CSI 2 J' and 'CSI 3 J' (which includes the
     /// scrollback).
     pub fn erase(&mut self, include_scrollback: bool) {
+        self.pending_wrap = false;
         match &mut self.grid {
             Grid::Scrollback(s) => s.erase(self.size, include_scrollback),
             Grid::AltScreen(alt) => alt.erase(),
@@ -308,6 +455,7 @@ impl Screen {
     /// n lines are inserted above the current line, dropping any lines that
     /// get pushed out of the current scroll region.
     pub fn insert_lines(&mut self, n: usize) {
+        self.pending_wrap = false;
         match &mut self.grid {
             Grid::Scrollback(s) => s.insert_lines(&self.cursor, &self.size, n),
             Grid::AltScreen(alt) => alt.insert_lines(&self.cursor, n),
@@ -320,6 +468,7 @@ impl Screen {
     /// sucking any lines below the current line up. New blank lines are
     /// inserted at the bottom of the scroll region.
     pub fn delete_lines(&mut self, n: usize) {
+        self.pending_wrap = false;
         match &mut self.grid {
             Grid::Scrollback(s) => s.delete_lines(&self.cursor, &self.size, n),
             Grid::AltScreen(alt) => alt.delete_lines(&self.cursor, n),
@@ -345,6 +494,23 @@ fn clamp_scroll_region(scroll_region: ScrollRegion, size: crate::Size) -> Scroll
     }
 
     ScrollRegion::Window { top, bottom }
+}
+
+/// Where a cursor logically is. A pending wrap means it is just past the char
+/// in the last column, even though it is displayed on top of it.
+fn past_pending_wrap(pos: Pos, pending_wrap: bool) -> Pos {
+    Pos { row: pos.row, col: pos.col + pending_wrap as usize }
+}
+
+/// Bring a cursor that has been through a resize back onto the screen.
+///
+/// A cursor that was waiting to wrap can come out of a reflow just past the
+/// end of a line, and then it should still be waiting to wrap. Anywhere else
+/// on the line there is no wrap left to do.
+fn settle_cursor(mut pos: Pos, pending_wrap: bool, size: crate::Size) -> (Pos, bool) {
+    let pending_wrap = pending_wrap && pos.col >= size.width;
+    pos.clamp_to(size);
+    (pos, pending_wrap)
 }
 
 impl std::fmt::Display for Screen {
@@ -373,11 +539,15 @@ impl std::fmt::Display for Screen {
 pub struct SavedCursor {
     pub pos: Pos,
     pub attrs: term::Attrs,
+    /// Whether a wrap was pending. DECSC saves the flag and DECRC puts it
+    /// back, so a program that saves the cursor right after filling the last
+    /// column still wraps once it restores it and keeps printing.
+    pub pending_wrap: bool,
 }
 
 impl SavedCursor {
     pub fn new(pos: Pos) -> Self {
-        SavedCursor { pos, attrs: term::Attrs::default() }
+        SavedCursor { pos, attrs: term::Attrs::default(), pending_wrap: false }
     }
 }
 
@@ -406,6 +576,23 @@ impl Grid {
         match self {
             Grid::Scrollback(s) => s.set_logger(logger),
             Grid::AltScreen(alt) => alt.set_logger(logger),
+        }
+    }
+
+    /// The line at the given screen row, if there is one stored.
+    fn get_line(&self, size: crate::Size, row: usize) -> Option<&Line> {
+        match self {
+            Grid::Scrollback(s) => s.get_line(size, row),
+            Grid::AltScreen(alt) => alt.buf.get(row),
+        }
+    }
+
+    /// The line at the given screen row, ready to be written to. Returns
+    /// None if the row is not on the screen.
+    fn materialize_line(&mut self, size: crate::Size, row: usize) -> Option<&mut Line> {
+        match self {
+            Grid::Scrollback(s) => s.materialize_line(size, row),
+            Grid::AltScreen(alt) => alt.get_line_mut(row),
         }
     }
 }
@@ -524,7 +711,7 @@ mod tests {
         let mut screen = Screen::scrollback(5, size);
         let c = Cell::new('x', term::Attrs::default());
 
-        screen.write_at_cursor(c.clone())?;
+        screen.write_at_cursor(c.clone(), false)?;
 
         let pos = Pos { row: 0, col: 0 };
         assert_eq!(
@@ -543,11 +730,11 @@ mod tests {
         let mut screen = Screen::scrollback(5, size);
 
         // Fill first line
-        screen.write_at_cursor(Cell::new('1', term::Attrs::default()))?;
-        screen.write_at_cursor(Cell::new('2', term::Attrs::default()))?;
+        screen.write_at_cursor(Cell::new('1', term::Attrs::default()), false)?;
+        screen.write_at_cursor(Cell::new('2', term::Attrs::default()), false)?;
 
         // This should wrap to next line
-        screen.write_at_cursor(Cell::new('3', term::Attrs::default()))?;
+        screen.write_at_cursor(Cell::new('3', term::Attrs::default()), false)?;
 
         assert_eq!(
             get_screen_cell(&screen, 0, 0),
@@ -578,7 +765,7 @@ mod tests {
 
         // Populate an initial line that will get pushed off
         for _ in 0..10 {
-            screen.write_at_cursor(Cell::new('X', term::Attrs::default()))?;
+            screen.write_at_cursor(Cell::new('X', term::Attrs::default()), false)?;
         }
 
         let c_top = Cell::new('T', term::Attrs::default());
@@ -586,13 +773,13 @@ mod tests {
         let c_bot = Cell::new('B', term::Attrs::default());
 
         for _ in 0..10 {
-            screen.write_at_cursor(c_top.clone())?;
+            screen.write_at_cursor(c_top.clone(), false)?;
         }
         for _ in 0..10 {
-            screen.write_at_cursor(c_mid.clone())?;
+            screen.write_at_cursor(c_mid.clone(), false)?;
         }
         for _ in 0..10 {
-            screen.write_at_cursor(c_bot.clone())?;
+            screen.write_at_cursor(c_bot.clone(), false)?;
         }
 
         for r in 0..3 {
@@ -617,10 +804,10 @@ mod tests {
 
         // Create a line: "0123456789"
         for i in 0..10 {
-            screen.write_at_cursor(Cell::new(
-                char::from_digit(i, 10).unwrap(),
-                term::Attrs::default(),
-            ))?;
+            screen.write_at_cursor(
+                Cell::new(char::from_digit(i, 10).unwrap(), term::Attrs::default()),
+                false,
+            )?;
         }
 
         // Resize to width 5. Should split into "01234" and "56789"
@@ -655,10 +842,10 @@ mod tests {
 
         // Create two wrapped lines: "01234" (wrapped) -> "56789"
         for i in 0..10 {
-            screen.write_at_cursor(Cell::new(
-                char::from_digit(i, 10).unwrap(),
-                term::Attrs::default(),
-            ))?;
+            screen.write_at_cursor(
+                Cell::new(char::from_digit(i, 10).unwrap(), term::Attrs::default()),
+                false,
+            )?;
         }
 
         // Verify initial state
@@ -708,10 +895,10 @@ mod tests {
             // Fill with deterministic data
             let count = 30;
             for i in 0..count {
-                screen.write_at_cursor(Cell::new(
-                    char::from_u32(65 + i % 26).unwrap(),
-                    term::Attrs::default(),
-                ))?;
+                screen.write_at_cursor(
+                    Cell::new(char::from_u32(65 + i % 26).unwrap(), term::Attrs::default()),
+                    false,
+                )?;
             }
 
             // Resize
@@ -723,10 +910,10 @@ mod tests {
             // Verify content is identical to if we just pushed it
             let mut expected_screen = Screen::scrollback(100, start_size);
             for i in 0..count {
-                expected_screen.write_at_cursor(Cell::new(
-                    char::from_u32(65 + i % 26).unwrap(),
-                    term::Attrs::default(),
-                ))?;
+                expected_screen.write_at_cursor(
+                    Cell::new(char::from_u32(65 + i % 26).unwrap(), term::Attrs::default()),
+                    false,
+                )?;
             }
 
             match (&screen.grid, &expected_screen.grid) {

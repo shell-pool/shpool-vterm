@@ -25,7 +25,8 @@ frag! {
             term::Raw::from("       "), // 7 spaces
             term::Raw::from("B"),
             term::Raw::from("C"),
-            term::ControlCodes::cursor_position(1, 11),
+            term::ControlCodes::cursor_position(1, 10),
+            term::Raw::from("C"),
             term::control_codes().clear_attrs
 }
 
@@ -109,7 +110,8 @@ frag! {
             term::ControlCodes::tab_clear(Some(3)),
             term::Raw::from("                   "), // 19 spaces
             term::Raw::from("A"),
-            term::ControlCodes::cursor_position(1, 21),
+            term::ControlCodes::cursor_position(1, 20),
+            term::Raw::from("A"),
             term::control_codes().clear_attrs
 }
 
@@ -122,7 +124,8 @@ frag! {
             term::ControlCodes::tab_clear(Some(3)),
             term::Raw::from("                   "), // 19 spaces
             term::Raw::from("A"),
-            term::ControlCodes::cursor_position(1, 21),
+            term::ControlCodes::cursor_position(1, 20),
+            term::Raw::from("A"),
             term::control_codes().clear_attrs
 }
 

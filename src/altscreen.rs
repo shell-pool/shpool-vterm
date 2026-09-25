@@ -17,13 +17,10 @@
 use std::collections::VecDeque;
 
 use crate::{
-    cell::Cell,
     line::{self, Line},
     log,
     term::{self, AsTermInput, OriginMode, Pos, ScrollRegion},
 };
-
-use anyhow::{anyhow, Context};
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub(crate) struct AltScreen {
@@ -56,42 +53,6 @@ impl AltScreen {
 
     pub fn set_logger(&mut self, logger: log::Context) {
         self.logger = logger;
-    }
-
-    /// Write the given cell to the given cursor position, returning the next
-    /// cursor position.
-    pub fn write_at_cursor(
-        &mut self,
-        size: crate::Size,
-        mut cursor: Pos,
-        cell: Cell,
-    ) -> anyhow::Result<Pos> {
-        if size.width < 1 {
-            return Err(anyhow!("cannot write to zero width terminal grid"));
-        }
-
-        let cell_width = cell.width() as usize;
-        let Some(line) = self.buf.get_mut(cursor.row) else {
-            return Err(anyhow!("row {} out of bounds (height={})", cursor.row, self.buf.len()));
-        };
-        line.set_cell(size.width, cursor.col, cell).context("setting cell in alt screen")?;
-
-        cursor.col += cell_width;
-        if cursor.col >= size.width {
-            cursor.row += 1;
-            cursor.col = 0;
-
-            // If we are the very end, scroll by a line.
-            // TODO: if `CSI ? 7 1` has been sent by the application
-            // to disable scrolling, we should instead leave the cursor
-            // where it is in this case.
-            if cursor.row >= size.height {
-                self.scroll_up(1);
-            }
-        }
-        cursor.clamp_to(size);
-
-        Ok(cursor)
     }
 
     /// The half open range of rows that scrolling operates on.
@@ -305,6 +266,7 @@ impl AsTermInput for AltScreen {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cell::Cell;
 
     const SIZE: crate::Size = crate::Size { width: 5, height: 3 };
 
@@ -358,16 +320,6 @@ mod tests {
         alt.erase();
 
         assert_eq!(first_col(&alt), "...");
-    }
-
-    #[test]
-    fn write_at_cursor_past_last_row() {
-        let mut alt = alt_screen();
-        let cursor = Pos { row: SIZE.height, col: 0 };
-        let cell = Cell::new('x', term::Attrs::default());
-
-        assert!(alt.write_at_cursor(SIZE, cursor, cell).is_err());
-        assert_eq!(first_col(&alt), "abc");
     }
 
     #[test]

@@ -401,8 +401,10 @@ frag! {
        term::ControlCodes::erase_character(1)
     => ContentRegion::All =>
             reset_codes,
-            term::Raw::from("12345"),
-            term::ControlCodes::cursor_position(1, 6),
+            // Filling the line leaves the cursor on the last column, so that
+            // is the char that gets erased.
+            term::Raw::from("1234 "),
+            term::ControlCodes::cursor_position(1, 5),
             term::control_codes().clear_attrs
 }
 

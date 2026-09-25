@@ -17,15 +17,12 @@
 //! a complete terminal representation in lib.rs.
 
 use crate::{
-    cell::Cell,
     line::{self, Line},
     log,
     term::{self, AsTermInput, OriginMode, Pos, ScrollRegion},
     ContentRegion,
 };
 use std::collections::VecDeque;
-
-use anyhow::{anyhow, Context};
 
 // A scrollback stores the termianal state for the main screen.
 // Alt screen state is stored seperately.
@@ -121,15 +118,6 @@ impl Scrollback {
             self.buf.pop_back();
         }
         self.lines = scrollback_lines;
-    }
-
-    /// Set the cell at the given grid coordinates.
-    pub fn set(&mut self, size: crate::Size, pos: Pos, cell: Cell) -> anyhow::Result<()> {
-        if let Some(line) = self.get_line_mut(size, pos.row) {
-            return line.set_cell(size.width, pos.col, cell);
-        }
-
-        Ok(())
     }
 
     fn add_line(&mut self, line: Line) {
@@ -351,76 +339,20 @@ impl Scrollback {
         Some(grid_start - 1 - row)
     }
 
-    /// Write the given cell at the given cursor position, returning the next
-    /// cursor position.
-    pub fn write_at_cursor(
-        &mut self,
-        size: crate::Size,
-        mut cursor: Pos,
-        cell: Cell,
-    ) -> anyhow::Result<Pos> {
-        if size.width < 1 {
-            return Err(anyhow!("cannot write to zero width terminal grid"));
+    /// The line at the given screen row, ready to be written to.
+    ///
+    /// We only store the rows that have been written to, so this has to fill
+    /// in the blank rows between the last stored line and the one we want.
+    /// Returns None if the row is not on the screen.
+    pub fn materialize_line(&mut self, size: crate::Size, row: usize) -> Option<&mut Line> {
+        if row >= size.height {
+            return None;
         }
 
-        // We do the wrapping before writing a cell rather than after
-        // doing so to allow the user to avoid setting the wrap bit
-        // by entering \r\n right after writing the very rightmost
-        // cell.
-        if cursor.col >= size.width {
-            if let Some(line) = self.get_line_mut(size, cursor.row) {
-                line.is_wrapped = true;
-            } else {
-                return Err(anyhow!("unexpectedly missing line when setting wrap marker"));
-            }
-
-            cursor.col = 0;
-            cursor.row += 1;
-        }
-
-        // If we've run off the end, add a new line and clamp.
-        if cursor.row >= size.height {
-            self.add_line(Line::new());
-            cursor.row -= 1;
-        }
-
-        assert!(self.lines >= size.height);
-        while self.buf.len() < cursor.row + 1 {
-            // TODO: these lines will all count as having
-            // not been wrapped and will be retained on reflow.
-            // Is that actually what we want?
+        while self.buf.len() < row + 1 {
             self.add_line(Line::new());
         }
-
-        if cursor.col + cell.width() as usize >= size.width + 1 {
-            if let Some(line) = self.get_line_mut(size, cursor.row) {
-                line.is_wrapped = true;
-            } else {
-                return Err(anyhow!(
-                    "unexpectedly missing line when setting wide char wrap marker"
-                ));
-            }
-
-            cursor.col = 0;
-            cursor.row += 1;
-
-            if self.buf.len() < cursor.row + 1 {
-                self.add_line(Line::new())
-            }
-        }
-
-        let mut npad = cell.width().saturating_sub(1);
-        self.set(size, cursor, cell).context("setting main cell")?;
-        cursor.col += 1;
-        while npad > 0 {
-            assert!(cursor.col < size.width);
-
-            self.set(size, cursor, Cell::wide_pad()).context("padding after wide char")?;
-            cursor.col += 1;
-            npad -= 1;
-        }
-
-        Ok(cursor)
+        self.get_line_mut(size, row)
     }
 
     //

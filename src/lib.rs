@@ -588,29 +588,7 @@ impl State {
 
     fn write_char_at_cursor(&mut self, cell: Cell) {
         let insert_mode = self.insert_mode;
-        let screen = self.screen_mut();
-
-        // In insert mode (ECMA-48 IRM), incoming characters do not overwrite
-        // existing text under the cursor. Instead, existing characters are
-        // shifted to the right, dropping any characters that spill past the
-        // terminal width.
-        //
-        // `Line::insert_character` does not write `cell` itself; it inserts
-        // blank cells to make room for `cell.width()`. The subsequent
-        // call to `screen.write_at_cursor(cell)` then writes the actual
-        // character into the newly opened space at the cursor position
-        // and advances the cursor.
-        if insert_mode {
-            let width = screen.size.width;
-            let col = screen.cursor.col;
-            if col < width {
-                if let Some(l) = screen.get_line_mut() {
-                    l.insert_character(width, col, cell.width() as usize);
-                }
-            }
-        }
-
-        if let Err(e) = screen.write_at_cursor(cell) {
+        if let Err(e) = self.screen_mut().write_at_cursor(cell, insert_mode) {
             warn!(self.logger, "writing char at cursor: {:?}", e);
         }
     }
@@ -626,7 +604,14 @@ impl State {
     fn add_modifier_char(&mut self, c: char) {
         let screen = self.screen_mut();
         let width = screen.size.width;
-        let Some(mut col) = screen.cursor.col.checked_sub(1) else {
+        // With a wrap pending, the cursor stays on top of the cell it just
+        // moved past rather than to the right of it.
+        let col = if screen.pending_wrap {
+            Some(screen.cursor.col)
+        } else {
+            screen.cursor.col.checked_sub(1)
+        };
+        let Some(mut col) = col else {
             return;
         };
 
@@ -685,23 +670,12 @@ impl vte::Perform for State {
         self.last_print_char = None;
         trace!(self.logger, "execute: byte {}", byte);
         match byte {
-            b'\n' => {
+            b'\n' => self.screen_mut().linefeed(),
+            b'\r' => {
                 let screen = self.screen_mut();
-                let (scroll_top, scroll_bottom) =
-                    screen.scroll_region(false).as_region(&screen.size).row_bounds();
-                let within_scroll =
-                    scroll_top <= screen.cursor.row && screen.cursor.row < scroll_bottom;
-                screen.cursor.row += 1;
-                if within_scroll {
-                    if screen.cursor.row >= scroll_bottom {
-                        screen.scroll_up(1);
-                        screen.cursor.row -= 1;
-                    }
-                } else {
-                    screen.clamp();
-                }
+                screen.cursor.col = 0;
+                screen.pending_wrap = false;
             }
-            b'\r' => self.screen_mut().cursor.col = 0,
             b'\t' => {
                 let mut col = self.screen().cursor.col;
                 col += 1;
@@ -709,14 +683,21 @@ impl vte::Perform for State {
                     col += 1;
                 }
 
+                // A tab stops at the last column. If the cursor is already
+                // there it does not move at all, and a pending wrap stays
+                // pending.
                 let screen = self.screen_mut();
-                screen.cursor.col = col;
-                screen.clamp();
+                let col = std::cmp::min(col, screen.size.width.saturating_sub(1));
+                if col != screen.cursor.col {
+                    screen.cursor.col = col;
+                    screen.clamp();
+                }
             }
             b'\x08' => {
                 // backspace
                 let screen = self.screen_mut();
                 screen.cursor.col = screen.cursor.col.saturating_sub(1);
+                screen.pending_wrap = false;
             }
             // bell, ignore
             b'\x07' => {}
@@ -977,6 +958,7 @@ impl vte::Perform for State {
                 match code {
                     [] | [0] => {
                         let screen = self.screen_mut();
+                        screen.pending_wrap = false;
                         let col = screen.cursor.col;
                         if let Some(l) = screen.get_line_mut() {
                             l.erase(line::Section::ToEnd(col));
@@ -984,13 +966,18 @@ impl vte::Perform for State {
                     }
                     [1] => {
                         let screen = self.screen_mut();
+                        screen.pending_wrap = false;
                         let col = screen.cursor.col;
                         if let Some(l) = screen.get_line_mut() {
                             l.erase(line::Section::StartTo(col));
                         }
                     }
-                    [2] => if let Some(l) = self.screen_mut().get_line_mut() {
-                        l.erase(line::Section::Whole);
+                    [2] => {
+                        let screen = self.screen_mut();
+                        screen.pending_wrap = false;
+                        if let Some(l) = screen.get_line_mut() {
+                            l.erase(line::Section::Whole);
+                        }
                     }
                     _ => warn!(self.logger, "unhandled 'CSI {:?} K'", code),
                 }
@@ -1069,6 +1056,7 @@ impl vte::Perform for State {
                 let n = param_or(&mut params_iter, 1) as usize;
 
                 let screen = self.screen_mut();
+                screen.pending_wrap = false;
                 let width = screen.size.width;
                 let col = screen.cursor.col;
                 if let Some(l) = screen.get_line_mut() {
@@ -1082,6 +1070,7 @@ impl vte::Perform for State {
                 let attrs = self.cursor_attrs.clone();
 
                 let screen = self.screen_mut();
+                screen.pending_wrap = false;
                 let width = screen.size.width;
                 let col = screen.cursor.col;
                 if let Some(l) = screen.get_line_mut() {
@@ -1095,6 +1084,7 @@ impl vte::Perform for State {
                 let attrs = self.cursor_attrs.clone();
 
                 let screen = self.screen_mut();
+                screen.pending_wrap = false;
                 let width = screen.size.width;
                 let col = screen.cursor.col;
                 if let Some(l) = screen.get_line_mut() {
@@ -1510,12 +1500,14 @@ impl vte::Perform for State {
                 let attrs = self.cursor_attrs.clone();
                 let screen = self.screen_mut();
                 let pos = screen.cursor.clone();
-                screen.saved_cursor = SavedCursor { pos, attrs };
+                let pending_wrap = screen.pending_wrap;
+                screen.saved_cursor = SavedCursor { pos, attrs, pending_wrap };
             }
             // restore cursor (ESC 8)
             ([], b'8') => {
                 let screen = self.screen_mut();
                 screen.cursor = screen.saved_cursor.pos;
+                screen.pending_wrap = screen.saved_cursor.pending_wrap;
                 self.cursor_attrs = screen.saved_cursor.attrs.clone();
             }
             // HTS (Horizontal Tabluation Set, ESC H)
@@ -1526,6 +1518,7 @@ impl vte::Perform for State {
             // RI (Reverse Index)
             ([], b'M') => {
                 let screen = self.screen_mut();
+                screen.pending_wrap = false;
                 let (scroll_top, _) =
                     screen.scroll_region(false).as_region(&screen.size).row_bounds();
 
