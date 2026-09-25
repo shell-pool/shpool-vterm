@@ -301,14 +301,20 @@ impl Screen {
         let mut anchors = [
             scrollback.anchor_cursor(old_size, cursor, self.pending_wrap),
             scrollback.anchor_cursor(old_size, saved_cursor, saved.pending_wrap),
+            // Where the top of the screen ends up says how many rows the old
+            // screen contents take up after the resize.
+            scrollback.anchor_cursor(old_size, Pos { row: 0, col: 0 }, false),
         ];
-        // While the alt screen is up, the cursor is on it instead.
-        let on_scrollback =
-            if self.grids.alt_active { &mut anchors[1..] } else { &mut anchors[..] };
+        // While the alt screen is up, the cursor is on it instead, so the
+        // anchors on the main screen start after it.
+        let first = if self.grids.alt_active { 1 } else { 0 };
         // Only the width decides where lines wrap.
         if new_size.width != old_size.width {
-            scrollback.reflow(new_size.width, on_scrollback);
+            scrollback.reflow(new_size.width, &mut anchors[first..]);
         }
+        let [cursor_anchor, saved_anchor, top_anchor] = anchors;
+        let mut anchors = [cursor_anchor, saved_anchor];
+        scrollback.trim_blank_rows(new_size, top_anchor, &mut anchors[first..]);
         let [cursor_anchor, saved_anchor] = anchors;
         let saved_cursor =
             (scrollback.resolve_cursor(new_size, saved_anchor), saved_anchor.pending_wrap);
@@ -1118,5 +1124,18 @@ mod tests {
             assert!(line.cells.is_empty());
             assert_eq!(line.blank_bgcolor, fill);
         }
+    }
+
+    // Rows painted with a background color are not blank, even though they
+    // store no cells, so a shorter screen keeps them.
+    #[test]
+    fn painted_rows_survive_the_screen_getting_shorter() {
+        let fill = term::Color::Idx(4);
+
+        let mut screen = Screen::new(100, Size { width: 5, height: 4 });
+        screen.erase(fill);
+        screen.resize(Size { width: 5, height: 2 });
+
+        assert_eq!(screen.grids.scrollback.buf.len(), 4);
     }
 }
