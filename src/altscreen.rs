@@ -274,7 +274,7 @@ mod tests {
     fn alt_screen() -> AltScreen {
         let mut alt = AltScreen::new(SIZE);
         for (i, c) in ['a', 'b', 'c'].iter().enumerate() {
-            alt.buf[i].set_cell(SIZE.width, 0, Cell::new(*c, term::Attrs::default())).unwrap();
+            alt.buf[i].write_cell(SIZE.width, 0, Cell::new(*c, term::Attrs::default())).unwrap();
         }
         alt
     }

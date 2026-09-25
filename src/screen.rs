@@ -351,10 +351,7 @@ impl Screen {
         if insert_mode {
             line.insert_character(width, col, cell_width);
         }
-        line.set_cell(width, col, cell).context("setting main cell")?;
-        for pad_col in col + 1..col + cell_width {
-            line.set_cell(width, pad_col, Cell::wide_pad()).context("padding after wide char")?;
-        }
+        line.write_cell(width, col, cell).context("writing cell")?;
 
         if col + cell_width < width {
             self.cursor.col = col + cell_width;
@@ -669,7 +666,9 @@ mod tests {
 
         match &mut screen.grid {
             Grid::AltScreen(alt) => {
-                alt.buf[0].set_cell(10, 9, crate::cell::Cell::new('a', Attrs::default())).unwrap();
+                alt.buf[0]
+                    .write_cell(10, 9, crate::cell::Cell::new('a', Attrs::default()))
+                    .unwrap();
                 assert_eq!(alt.buf[0].cells.len(), 10);
             }
             _ => panic!("wrong grid type"),

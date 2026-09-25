@@ -91,14 +91,11 @@ impl Cell {
         Cell { grapheme_cluster: smallvec![], width: 0, empty: true, wide_padding: false, attrs }
     }
 
-    pub fn wide_pad() -> Self {
-        Cell {
-            grapheme_cluster: smallvec![],
-            width: 0,
-            empty: true,
-            wide_padding: true,
-            attrs: term::Attrs::default(),
-        }
+    /// The padding that fills the columns to the right of a wide char. It
+    /// gets the attrs of the wide char so that attr runs don't get broken up
+    /// in the middle of it.
+    pub fn wide_pad(attrs: term::Attrs) -> Self {
+        Cell { grapheme_cluster: smallvec![], width: 0, empty: true, wide_padding: true, attrs }
     }
 
     /// Append a zero width modifier char to the grapheme cluster.
