@@ -22,6 +22,7 @@ use crate::{
 };
 
 use anyhow::anyhow;
+use std::borrow::Cow;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub(crate) struct Line {
@@ -181,6 +182,35 @@ impl Line {
         for cell in self.cells[start..end].iter_mut() {
             *cell = Cell::empty_with_attrs(attrs.clone());
         }
+    }
+
+    /// The line the way a screen `width` columns wide shows it.
+    ///
+    /// Reflowing onto a one column screen keeps each wide char on a row of
+    /// its own, padding and all, so that it is still there once the screen
+    /// gets wider again. Until then it shows up as a blank, and the cells
+    /// that stick out past the edge of the screen don't show up at all.
+    pub fn shown_at(&self, width: usize) -> Cow<'_, Line> {
+        let too_wide = |cell: &Cell| cell.width() as usize > width;
+        // A zero width screen keeps its lines the way they were laid out
+        // before, since there is nothing to lay them out on.
+        if width == 0 || (self.cells.len() <= width && !self.cells.iter().any(too_wide)) {
+            return Cow::Borrowed(self);
+        }
+
+        let mut shown = self.clone();
+        for col in 0..shown.cells.len() {
+            let cell = &shown.cells[col];
+            if too_wide(cell) && !cell.is_wide_padding() {
+                let attrs = cell.attrs().clone();
+                let end = std::cmp::min(col + cell.width() as usize, shown.cells.len());
+                for cell in shown.cells[col..end].iter_mut() {
+                    *cell = Cell::empty_with_attrs(attrs.clone());
+                }
+            }
+        }
+        shown.cells.truncate(width);
+        Cow::Owned(shown)
     }
 
     /// Trim the line to the new width, dropping any cells too far to the right.
