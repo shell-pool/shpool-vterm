@@ -524,6 +524,13 @@ impl Attrs {
     }
 }
 
+/// Shift In (SI), which invokes the G0 charset into GL, the half of the
+/// charset table that printable chars get looked up in.
+///
+/// Like every C0 control this is a lone byte rather than an escape
+/// sequence, so there is no `ControlCode` for it.
+pub const SHIFT_IN: u8 = 0x0f;
+
 test_pub! {
     // A dictionary of standard control codes. Access codes via the
     // control_codes() function. Most are constant struct members.
@@ -613,6 +620,8 @@ test_pub! {
         pub hard_reset: ControlCode,
         pub designate_g0_us_ascii: ControlCode,
         pub designate_g1_us_ascii: ControlCode,
+        pub designate_g2_us_ascii: ControlCode,
+        pub designate_g3_us_ascii: ControlCode,
         pub designate_g0_uk_ascii: ControlCode,
     }
 }
@@ -1236,6 +1245,14 @@ test_pub! {
             },
             designate_g1_us_ascii: ControlCode::ESC {
                 intermediates: smallvec![b')'],
+                byte: b'B',
+            },
+            designate_g2_us_ascii: ControlCode::ESC {
+                intermediates: smallvec![b'*'],
+                byte: b'B',
+            },
+            designate_g3_us_ascii: ControlCode::ESC {
+                intermediates: smallvec![b'+'],
                 byte: b'B',
             },
             designate_g0_uk_ascii: ControlCode::ESC {

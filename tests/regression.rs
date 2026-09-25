@@ -458,32 +458,61 @@ frag! {
 }
 
 // A dump has to land correctly on a terminal in any state, so the prefix
-// clears margins and origin mode before it homes the cursor and erases.
+// switches off every mode the dump might replay and clears margins and
+// origin mode before it homes the cursor and erases.
 //
-// Spelled out rather than built from `reset_codes` so that the helper cannot
-// quietly track a regression here.
+// Spelled out byte for byte rather than built from `reset_codes` so that the
+// helper cannot quietly track a regression here.
 #[test]
-fn dump_prefix_clears_scroll_region_and_origin_mode() {
-    use shpool_vterm::term::AsTermInput;
-
-    let mut expected = vec![];
-    term::control_codes().end_link.term_input_into(&mut expected);
-    term::control_codes().clear_attrs.term_input_into(&mut expected);
-    term::control_codes().unset_scroll_region.term_input_into(&mut expected);
-    term::control_codes().disable_scroll_region_origin_mode.term_input_into(&mut expected);
-    term::ControlCodes::cursor_position(1, 1).term_input_into(&mut expected);
-    term::control_codes().clear_screen.term_input_into(&mut expected);
-    term::Raw::from("hi").term_input_into(&mut expected);
-    term::ControlCodes::cursor_position(1, 3).term_input_into(&mut expected);
-    term::control_codes().clear_attrs.term_input_into(&mut expected);
+fn dump_prefix_resets_terminal_modes() {
+    let prefix = [
+        "\x1b]8;;\x1b\\",                            // end any link
+        "\x1b[?1049l",                               // leave the alt screen
+        "\x1b[m",                                    // reset attrs
+        "\x1b[r",                                    // clear the scroll region
+        "\x1b[?6l",                                  // origin mode off
+        "\x1b[4l",                                   // insert mode off
+        "\x1b[?7h",                                  // auto-wrap on
+        "\x1b(B\x1b)B\x1b*B\x1b+B\x0f",              // G0-G3 ascii, G0 in use
+        "\x1b[?25h",                                 // show the cursor
+        "\x1b[?1l",                                  // normal cursor keys
+        "\x1b>",                                     // normal keypad
+        "\x1b[?1000;1002;1003;1005;1006;1015;1016l", // mouse reporting off
+        "\x1b[?1004l",                               // focus reporting off
+        "\x1b[?2004l",                               // bracketed paste off
+        "\x1b[H",                                    // home
+        "\x1b[J",                                    // erase
+    ];
+    let expected = format!("{}hi\x1b[1;3H\x1b[m", prefix.concat());
 
     crate::support::frag::round_trip_frag(
         b"hi",
-        expected.as_slice(),
+        expected.as_bytes(),
         100,
         shpool_vterm::Size { width: 5, height: 3 },
         ContentRegion::All,
     );
+}
+
+// The terminal a restore gets painted into is often still in whatever state
+// the previous session left it in, e.g. because the connection dropped while
+// a curses app was running. Restoring into it has to end up in the same state
+// as restoring into a fresh terminal.
+#[test]
+fn restore_resets_modes_left_over_in_the_client() {
+    let size = shpool_vterm::Size { width: 20, height: 5 };
+    let mut session = shpool_vterm::Term::new(100, size);
+    session.process(b"$ ls\r\nfoo  bar\r\n$ ");
+
+    let mut client = shpool_vterm::Term::new(100, size);
+    client.process(b"\x1b[?1049h"); // alt screen
+    client.process(b"\x1b[1;31m\x1b[2;4r\x1b[?6h"); // attrs, margins, DECOM
+    client.process(b"\x1b[4h\x1b[?7l"); // insert mode, no auto-wrap
+    client.process(b"\x1b[?25l\x1b[?1h\x1b="); // hidden cursor, app keys
+    client.process(b"\x1b[?1002;1006h\x1b[?1004h\x1b[?2004h"); // reporting
+    client.process(&session.contents(ContentRegion::All));
+
+    assert_eq!(client.contents(ContentRegion::All), session.contents(ContentRegion::All));
 }
 
 // Reflow rebuilds the scrollback out of logical lines, and a blank line is a

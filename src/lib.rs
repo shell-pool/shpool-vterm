@@ -125,23 +125,59 @@ impl Term {
     /// reset the emulator to the contents of this Term instance.
     pub fn contents(&self, dump_region: ContentRegion) -> Vec<u8> {
         let mut buf = vec![];
+        let controls = term::control_codes();
 
         // Reset alone does not terminate active links, so before
         // we issue a reset, we'll issue an end link to fully
         // reset the link.
-        term::control_codes().end_link.term_input_into(&mut buf);
-
-        term::control_codes().clear_attrs.term_input_into(&mut buf);
+        controls.end_link.term_input_into(&mut buf);
 
         // We cannot know what state the terminal we are restoring into is
-        // in, and a leftover scroll region or origin mode would scroll the
+        // in. Often it is whatever state the last session left it in when
+        // the connection dropped, so every mode the restore might replay
+        // has to be switched off here, or it will outlive the app that set
+        // it.
+        //
+        // Leaving the alt screen goes first. xterm restores the saved
+        // cursor, along with its attrs, origin mode and charsets, when it
+        // leaves the alt screen, which would undo any reset sent before.
+        // Painting onto a stranded alt screen would also throw away every
+        // line that scrolls off the top of it.
+        controls.disable_alt_screen.term_input_into(&mut buf);
+        controls.clear_attrs.term_input_into(&mut buf);
+
+        // A leftover scroll region or origin mode would scroll the
         // contents we are about to paint. Clear them before homing the
         // cursor, since origin mode moves where home is.
-        term::control_codes().unset_scroll_region.term_input_into(&mut buf);
-        term::control_codes().disable_scroll_region_origin_mode.term_input_into(&mut buf);
+        controls.unset_scroll_region.term_input_into(&mut buf);
+        controls.disable_scroll_region_origin_mode.term_input_into(&mut buf);
+
+        // Insert mode would shove the contents we paint to the right,
+        // without auto-wrap long lines would pile up in the last column,
+        // and a line drawing charset would turn letters into box parts.
+        controls.disable_insert_mode.term_input_into(&mut buf);
+        controls.enable_autowrap.term_input_into(&mut buf);
+        controls.designate_g0_us_ascii.term_input_into(&mut buf);
+        controls.designate_g1_us_ascii.term_input_into(&mut buf);
+        controls.designate_g2_us_ascii.term_input_into(&mut buf);
+        controls.designate_g3_us_ascii.term_input_into(&mut buf);
+        buf.push(term::SHIFT_IN);
+
+        // An app that hid the cursor and never got the chance to show it
+        // again would leave it hidden for good.
+        controls.show_cursor.term_input_into(&mut buf);
+
+        // These change what the terminal sends rather than what it shows,
+        // so leftovers turn keypresses, mouse movement, focus changes and
+        // pastes into garbage input for whatever is running now.
+        controls.disable_application_cursor_keys.term_input_into(&mut buf);
+        controls.disable_application_keypad_mode.term_input_into(&mut buf);
+        ControlCodes::dec_private_modes_reset(&MOUSE_MODES).term_input_into(&mut buf);
+        controls.disable_report_focus.term_input_into(&mut buf);
+        controls.disable_paste_mode.term_input_into(&mut buf);
 
         term::ControlCodes::cursor_position(1, 1).term_input_into(&mut buf);
-        term::control_codes().clear_screen.term_input_into(&mut buf);
+        controls.clear_screen.term_input_into(&mut buf);
         self.state.dump_contents_into(&mut buf, dump_region);
 
         buf
