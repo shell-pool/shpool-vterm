@@ -151,43 +151,32 @@ impl AltScreen {
     // Command handlers
     //
 
+    /// ED 0 (CSI 0 J). Erase from the cursor to the end of the screen. Like
+    /// the rest of ED, this covers the whole screen whatever the scroll
+    /// region and origin mode are.
     pub fn erase_to_end(&mut self, width: usize, cursor: Pos, fill: &Cell) {
         if let Some(line) = self.buf.get_mut(cursor.row) {
             line.erase(width, line::Section::ToEnd(cursor.col), fill);
         }
-
-        let end = match (self.origin_mode, &self.scroll_region) {
-            (OriginMode::ScrollRegion, ScrollRegion::Window { bottom, .. }) => *bottom,
-            _ => self.buf.len(),
-        };
-
-        for i in (cursor.row + 1)..std::cmp::min(end, self.buf.len()) {
-            self.buf[i] = Line::blank(width, fill);
+        for line in self.buf.iter_mut().skip(cursor.row + 1) {
+            *line = Line::blank(width, fill);
         }
     }
 
+    /// ED 1 (CSI 1 J). Erase from the top of the screen to the cursor.
     pub fn erase_from_start(&mut self, width: usize, cursor: Pos, fill: &Cell) {
-        let start = match (self.origin_mode, &self.scroll_region) {
-            (OriginMode::ScrollRegion, ScrollRegion::Window { top, .. }) => *top,
-            _ => 0,
-        };
-
-        for i in start..std::cmp::min(cursor.row, self.buf.len()) {
-            self.buf[i] = Line::blank(width, fill);
+        for line in self.buf.iter_mut().take(cursor.row) {
+            *line = Line::blank(width, fill);
         }
         if let Some(line) = self.buf.get_mut(cursor.row) {
             line.erase(width, line::Section::StartTo(cursor.col), fill);
         }
     }
 
+    /// ED 2 (CSI 2 J). Erase the whole screen.
     pub fn erase(&mut self, width: usize, fill: &Cell) {
-        let (start, end) = match (self.origin_mode, &self.scroll_region) {
-            (OriginMode::ScrollRegion, ScrollRegion::Window { top, bottom }) => (*top, *bottom),
-            _ => (0, self.buf.len()),
-        };
-
-        for i in start..std::cmp::min(end, self.buf.len()) {
-            self.buf[i] = Line::blank(width, fill);
+        for line in self.buf.iter_mut() {
+            *line = Line::blank(width, fill);
         }
     }
 

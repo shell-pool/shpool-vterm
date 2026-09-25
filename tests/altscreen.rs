@@ -230,6 +230,8 @@ frag! {
             term::control_codes().clear_attrs
 }
 
+// ED works on the whole screen. Neither the scroll region nor origin mode
+// limit what it erases.
 frag! {
     alt_screen_erase_display_to_end_with_decom { scrollback_lines: 100, width: 10, height: 10 }
     <= term::control_codes().enable_alt_screen,
@@ -253,7 +255,6 @@ frag! {
             term::Raw::from("33"),
             term::Crlf::default(),
             term::Crlf::default(),
-            term::Raw::from("55555"),
             term::Crlf::default(),
             term::Crlf::default(),
             term::Crlf::default(),
@@ -281,7 +282,6 @@ frag! {
             reset_codes,
             empty_scrollback,
             term::control_codes().enable_alt_screen,
-            term::Raw::from("11111"),
             term::Crlf::default(),
             term::Crlf::default(),
             term::Raw::from("   33"),
@@ -316,12 +316,10 @@ frag! {
             reset_codes,
             empty_scrollback,
             term::control_codes().enable_alt_screen,
-            term::Raw::from("11111"),
             term::Crlf::default(),
             term::Crlf::default(),
             term::Crlf::default(),
             term::Crlf::default(),
-            term::Raw::from("55555"),
             term::Crlf::default(),
             term::Crlf::default(),
             term::Crlf::default(),
@@ -896,5 +894,26 @@ frag! {
             term::Crlf::default(),
             term::Crlf::default(),
             term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().clear_attrs
+}
+
+// ED 3 drops the scrollback of the main screen even while the alt screen is
+// up, and leaves both screens alone.
+frag! {
+    alt_screen_erase_scrollback { scrollback_lines: 10, width: 5, height: 2 }
+    <= term::Raw::from("1\r\n2\r\n3"),
+       term::control_codes().enable_alt_screen,
+       term::Raw::from("alt"),
+       term::control_codes().erase_scrollback
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("2"),
+            term::Crlf::default(),
+            term::Raw::from("3"),
+            term::ControlCodes::cursor_position(2, 2),
+            term::control_codes().enable_alt_screen,
+            term::Raw::from("alt"),
+            term::Crlf::default(),
+            term::ControlCodes::cursor_position(1, 4),
             term::control_codes().clear_attrs
 }
