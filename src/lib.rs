@@ -203,6 +203,10 @@ pub struct Size {
 
 bitflags::bitflags! {
     /// The terminal modes that are simply on or off, packed into one word.
+    ///
+    /// Every mode starts out off, so that `Modes::empty()` is the initial
+    /// state. Modes that are on by default get stored inverted, like
+    /// `CURSOR_HIDDEN` and `AUTOWRAP_DISABLED`.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     struct Modes: u16 {
         /// The cursor is hidden. Controlled via `CSI ? 25 {h,l}`.
@@ -226,6 +230,10 @@ bitflags::bitflags! {
         const BRACKETED_PASTE = 1 << 4;
         /// Insertion / replacement mode (IRM). Controlled via `CSI 4 {h,l}`.
         const INSERT = 1 << 5;
+        /// Auto-wrap mode (DECAWM) is off, so chars written at the right edge
+        /// of the screen overwrite the last column instead of wrapping onto
+        /// the next line. Controlled via `CSI ? 7 {h,l}`.
+        const AUTOWRAP_DISABLED = 1 << 6;
     }
 }
 
@@ -533,6 +541,11 @@ impl State {
         if self.modes.contains(Modes::INSERT) {
             controls.enable_insert_mode.term_input_into(buf);
         }
+        // This has to come after the screen contents, since restoring a
+        // pending wrap relies on the terminal wrapping.
+        if self.modes.contains(Modes::AUTOWRAP_DISABLED) {
+            controls.disable_autowrap.term_input_into(buf);
+        }
         for (idx, mode) in MOUSE_MODES.iter().enumerate() {
             if self.mouse_modes[idx] {
                 ControlCodes::dec_private_modes_set(&[*mode]).term_input_into(buf);
@@ -600,8 +613,8 @@ impl State {
     }
 
     fn write_char_at_cursor(&mut self, cell: Cell) {
-        let insert_mode = self.modes.contains(Modes::INSERT);
-        if let Err(e) = self.screen_mut().write_at_cursor(cell, insert_mode) {
+        let modes = self.modes & Screen::WRITE_MODES;
+        if let Err(e) = self.screen_mut().write_at_cursor(cell, modes) {
             warn!(self.logger, "writing char at cursor: {:?}", e);
         }
     }
@@ -1214,6 +1227,7 @@ impl vte::Perform for State {
                         // is irrelevant in a headless virtual terminal.
                         [4] => {},
                         [6] => self.screen_mut().set_origin_mode(OriginMode::ScrollRegion),
+                        [7] => self.modes.remove(Modes::AUTOWRAP_DISABLED),
                         [12] => self.cursor_blinking = Some(true),
                         [25] => self.modes.remove(Modes::CURSOR_HIDDEN),
                         [1004] => self.modes.insert(Modes::REPORT_FOCUS),
@@ -1276,6 +1290,7 @@ impl vte::Perform for State {
                         // is irrelevant in a headless virtual terminal.
                         [4] => {},
                         [6] => self.screen_mut().set_origin_mode(OriginMode::Term),
+                        [7] => self.modes.insert(Modes::AUTOWRAP_DISABLED),
                         [12] => self.cursor_blinking = Some(false),
                         [25] => self.modes.insert(Modes::CURSOR_HIDDEN),
                         [1004] => self.modes.remove(Modes::REPORT_FOCUS),
@@ -1431,6 +1446,7 @@ impl vte::Perform for State {
                     self.cursor_attrs = term::Attrs::default();
                     self.cursor_blinking = None;
                     self.modes.remove(Modes::INSERT);
+                    self.modes.remove(Modes::AUTOWRAP_DISABLED);
 
                     warn!(self.logger, "DECSTR only partially handled");
                 }
@@ -1550,6 +1566,7 @@ impl vte::Perform for State {
                 self.cursor_attrs = term::Attrs::default();
                 self.cursor_blinking = None;
                 self.modes.remove(Modes::INSERT);
+                self.modes.remove(Modes::AUTOWRAP_DISABLED);
 
                 warn!(self.logger, "RIS only partially handled");
             }

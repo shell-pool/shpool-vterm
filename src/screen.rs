@@ -22,6 +22,7 @@ use crate::{
     log,
     scrollback::Scrollback,
     term::{self, AsTermInput, OriginMode, Pos, Region, ScrollRegion},
+    Modes,
 };
 
 use anyhow::{anyhow, Context};
@@ -302,13 +303,28 @@ impl Screen {
     // Control Code Handlers
     //
 
+    /// The modes that `write_at_cursor` looks at. Callers have to mask out
+    /// all the others.
+    pub const WRITE_MODES: Modes = Modes::INSERT.union(Modes::AUTOWRAP_DISABLED);
+
     /// Write a cell at the cursor and advance the cursor past it, wrapping
     /// onto the next line first if a wrap is pending or the cell does not
     /// fit in what is left of the current line.
     ///
-    /// In insert mode (IRM) the rest of the line gets shifted right to make
-    /// room for the cell rather than being overwritten.
-    pub fn write_at_cursor(&mut self, cell: Cell, insert_mode: bool) -> anyhow::Result<()> {
+    /// `modes` may only contain `WRITE_MODES`. In insert mode (IRM) the rest
+    /// of the line gets shifted right to make room for the cell rather than
+    /// being overwritten. With autowrap (DECAWM) off the cursor never leaves
+    /// the line, and chars that run into the right edge overwrite the last
+    /// column instead.
+    pub fn write_at_cursor(&mut self, cell: Cell, modes: Modes) -> anyhow::Result<()> {
+        debug_assert!(
+            Self::WRITE_MODES.contains(modes),
+            "write_at_cursor only takes {:?}, got {:?}",
+            Self::WRITE_MODES,
+            modes
+        );
+        let insert_mode = modes.contains(Modes::INSERT);
+        let autowrap = !modes.contains(Modes::AUTOWRAP_DISABLED);
         let width = self.size.width;
         if width == 0 || self.size.height == 0 {
             return Err(anyhow!("cannot write to a zero sized screen"));
@@ -320,12 +336,22 @@ impl Screen {
         self.cursor.clamp_to(self.size);
 
         if self.pending_wrap {
-            self.wrap();
+            if autowrap {
+                self.wrap();
+            } else {
+                // Autowrap was turned off while the wrap was pending.
+                self.pending_wrap = false;
+            }
         }
         // A wide char never gets split across lines. If it does not fit, it
         // goes on the next line and the columns it did not use stay blank.
+        // Without autowrap it gets squeezed in at the end of this one.
         if self.cursor.col + cell_width > width {
-            self.wrap();
+            if autowrap {
+                self.wrap();
+            } else {
+                self.cursor.col = width - cell_width;
+            }
         }
 
         let col = self.cursor.col;
@@ -344,7 +370,7 @@ impl Screen {
             self.cursor.col = col + cell_width;
         } else {
             self.cursor.col = width - 1;
-            self.pending_wrap = true;
+            self.pending_wrap = autowrap;
         }
 
         Ok(())
@@ -712,7 +738,7 @@ mod tests {
         let mut screen = Screen::scrollback(5, size);
         let c = Cell::new('x', term::Attrs::default());
 
-        screen.write_at_cursor(c.clone(), false)?;
+        screen.write_at_cursor(c.clone(), Modes::empty())?;
 
         let pos = Pos { row: 0, col: 0 };
         assert_eq!(
@@ -731,11 +757,11 @@ mod tests {
         let mut screen = Screen::scrollback(5, size);
 
         // Fill first line
-        screen.write_at_cursor(Cell::new('1', term::Attrs::default()), false)?;
-        screen.write_at_cursor(Cell::new('2', term::Attrs::default()), false)?;
+        screen.write_at_cursor(Cell::new('1', term::Attrs::default()), Modes::empty())?;
+        screen.write_at_cursor(Cell::new('2', term::Attrs::default()), Modes::empty())?;
 
         // This should wrap to next line
-        screen.write_at_cursor(Cell::new('3', term::Attrs::default()), false)?;
+        screen.write_at_cursor(Cell::new('3', term::Attrs::default()), Modes::empty())?;
 
         assert_eq!(
             get_screen_cell(&screen, 0, 0),
@@ -766,7 +792,7 @@ mod tests {
 
         // Populate an initial line that will get pushed off
         for _ in 0..10 {
-            screen.write_at_cursor(Cell::new('X', term::Attrs::default()), false)?;
+            screen.write_at_cursor(Cell::new('X', term::Attrs::default()), Modes::empty())?;
         }
 
         let c_top = Cell::new('T', term::Attrs::default());
@@ -774,13 +800,13 @@ mod tests {
         let c_bot = Cell::new('B', term::Attrs::default());
 
         for _ in 0..10 {
-            screen.write_at_cursor(c_top.clone(), false)?;
+            screen.write_at_cursor(c_top.clone(), Modes::empty())?;
         }
         for _ in 0..10 {
-            screen.write_at_cursor(c_mid.clone(), false)?;
+            screen.write_at_cursor(c_mid.clone(), Modes::empty())?;
         }
         for _ in 0..10 {
-            screen.write_at_cursor(c_bot.clone(), false)?;
+            screen.write_at_cursor(c_bot.clone(), Modes::empty())?;
         }
 
         for r in 0..3 {
@@ -807,7 +833,7 @@ mod tests {
         for i in 0..10 {
             screen.write_at_cursor(
                 Cell::new(char::from_digit(i, 10).unwrap(), term::Attrs::default()),
-                false,
+                Modes::empty(),
             )?;
         }
 
@@ -845,7 +871,7 @@ mod tests {
         for i in 0..10 {
             screen.write_at_cursor(
                 Cell::new(char::from_digit(i, 10).unwrap(), term::Attrs::default()),
-                false,
+                Modes::empty(),
             )?;
         }
 
@@ -898,7 +924,7 @@ mod tests {
             for i in 0..count {
                 screen.write_at_cursor(
                     Cell::new(char::from_u32(65 + i % 26).unwrap(), term::Attrs::default()),
-                    false,
+                    Modes::empty(),
                 )?;
             }
 
@@ -913,7 +939,7 @@ mod tests {
             for i in 0..count {
                 expected_screen.write_at_cursor(
                     Cell::new(char::from_u32(65 + i % 26).unwrap(), term::Attrs::default()),
-                    false,
+                    Modes::empty(),
                 )?;
             }
 
