@@ -692,6 +692,53 @@ impl State {
         self.charsets = charsets;
     }
 
+    /// RIS. Put the terminal back the way it was when it started. Like in
+    /// xterm and kitty, that clears both screens and the scrollback too.
+    ///
+    /// The size and the scrollback limit are not up to the app, so they
+    /// stay. So do the titles and the working dir, which describe the
+    /// session rather than the state of the terminal. xterm keeps its title
+    /// as well, and the colors set by OSC 10 through 19.
+    fn hard_reset(&mut self) {
+        let size = self.scrollback.size;
+        let scrollback_lines = self.scrollback.scrollback_lines().unwrap_or(size.height);
+        let mut fresh = State::new(scrollback_lines, size);
+        fresh.set_logger(self.logger.clone());
+        fresh.title_stack = std::mem::take(&mut self.title_stack);
+        fresh.icon_name_stack = std::mem::take(&mut self.icon_name_stack);
+        fresh.working_dir = self.working_dir.take();
+        fresh.functional_colors = std::mem::take(&mut self.functional_colors);
+        *self = fresh;
+    }
+
+    /// DECSTR. Reset the modes and state that apps tend to leave behind, but
+    /// leave the screen contents and the cursor where they are.
+    ///
+    /// This resets what xterm resets, which is what DEC terminals did apart
+    /// from turning autowrap on rather than off. The tab stops get reset as
+    /// well, like in kitty.
+    fn soft_reset(&mut self) {
+        self.cursor_hidden = false;
+        self.cursor_style = term::CursorStyle::Default;
+        self.cursor_blinking = None;
+        self.insert_mode = false;
+        self.autowrap = true;
+        self.application_cursor_keys_enabled = false;
+        self.application_keypad_mode_enabled = false;
+        self.cursor_attrs = term::Attrs::default();
+        self.charsets = Charsets::default();
+        self.palette_overrides.clear();
+        self.tabstops.fill(false);
+        let width = self.tabstops.len();
+        self.fill_tabstops(0, width);
+
+        // Unlike DECSTBM and DECOM, this does not home the cursor.
+        let screen = self.screen_mut();
+        screen.set_scroll_region(term::ScrollRegion::TrackSize);
+        screen.set_origin_mode(OriginMode::Term);
+        screen.saved_cursor = SavedCursor::new(term::Pos { row: 0, col: 0 });
+    }
+
     /// Switch to the alt screen. With `erase`, the alt screen gets erased
     /// with the current background color too, even if it was already active.
     ///
@@ -1586,19 +1633,7 @@ impl vte::Perform for State {
             }
             'p' => match intermediates {
                 // DECSTR (DEC Soft Terminal Reset)
-                [b'!'] => {
-                    self.tabstops.fill(false);
-                    let width = self.screen().size.width;
-                    self.fill_tabstops(0, width);
-                    self.cursor_style = term::CursorStyle::Default;
-                    self.cursor_attrs = term::Attrs::default();
-                    self.cursor_blinking = None;
-                    self.insert_mode = false;
-                    self.autowrap = true;
-                    self.charsets = Charsets::default();
-
-                    warn!(self.logger, "DECSTR only partially handled");
-                }
+                [b'!'] => self.soft_reset(),
                 // DECRQM (DEC Request Mode, both the private and ANSI forms)
                 [b'?', b'$'] | [b'$'] => {
                     // TODO(#4): actuate query state machine.
@@ -1713,19 +1748,7 @@ impl vte::Perform for State {
                 }
             }
             // RIS (Reset to Initial State)
-            ([], b'c') => {
-                self.tabstops.fill(false);
-                let width = self.screen().size.width;
-                self.fill_tabstops(0, width);
-                self.cursor_style = term::CursorStyle::Default;
-                self.cursor_attrs = term::Attrs::default();
-                self.cursor_blinking = None;
-                self.insert_mode = false;
-                self.autowrap = true;
-                self.charsets = Charsets::default();
-
-                warn!(self.logger, "RIS only partially handled");
-            }
+            ([], b'c') => self.hard_reset(),
 
             // DECKPAM / DECKPNM (application and numeric keypad mode)
             ([], b'=') => self.application_keypad_mode_enabled = true,
