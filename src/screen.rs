@@ -129,6 +129,10 @@ impl Screen {
         self.scroll_region = clamp_scroll_region(scroll_region, self.size);
     }
 
+    pub fn origin_mode(&self) -> OriginMode {
+        self.origin_mode
+    }
+
     pub fn set_origin_mode(&mut self, origin_mode: OriginMode) {
         self.origin_mode = origin_mode;
     }
@@ -693,6 +697,9 @@ pub struct SavedCursor {
     /// program can draw a box somewhere else and then carry on printing
     /// with whatever charset it had before.
     pub charsets: Charsets,
+    /// Whether origin mode (DECOM) was on. DECRC turns it back on or off,
+    /// and a position saved in origin mode stays inside the scroll region.
+    pub origin_mode: OriginMode,
 }
 
 impl SavedCursor {
@@ -702,6 +709,7 @@ impl SavedCursor {
             attrs: term::Attrs::default(),
             pending_wrap: false,
             charsets: Charsets::default(),
+            origin_mode: OriginMode::Term,
         }
     }
 }
