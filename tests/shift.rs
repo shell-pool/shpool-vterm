@@ -508,3 +508,57 @@ frag! {
             term::control_codes().clear_attrs,
             term::control_codes().enable_insert_mode
 }
+
+// IL and DL move the cursor to the start of the line.
+frag! {
+    insert_line_goes_to_line_start { scrollback_lines: 100, width: 5, height: 3 }
+    <= term::Raw::from("abc\r\ndef"),
+       term::ControlCodes::cursor_position(1, 3),
+       term::ControlCodes::insert_lines(1),
+       term::Raw::from("X")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("X"),
+            term::Crlf::default(),
+            term::Raw::from("abc"),
+            term::Crlf::default(),
+            term::Raw::from("def"),
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    delete_line_goes_to_line_start { scrollback_lines: 100, width: 5, height: 3 }
+    <= term::Raw::from("abc\r\ndef"),
+       term::ControlCodes::cursor_position(1, 3),
+       term::ControlCodes::delete_lines(1),
+       term::Raw::from("X")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("Xef"),
+            term::Crlf::default(),
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().clear_attrs
+}
+
+// Outside of the scroll region, IL and DL don't move the cursor either.
+frag! {
+    insert_and_delete_line_outside_scroll_region_keep_cursor
+        { scrollback_lines: 100, width: 5, height: 3 }
+    <= term::Raw::from("abc\r\ndef\r\nghi"),
+       term::ControlCodes::set_scroll_region(1, 2),
+       term::ControlCodes::cursor_position(3, 3),
+       term::ControlCodes::insert_lines(1),
+       term::ControlCodes::delete_lines(1),
+       term::Raw::from("X")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("abc"),
+            term::Crlf::default(),
+            term::Raw::from("def"),
+            term::Crlf::default(),
+            term::Raw::from("ghX"),
+            term::ControlCodes::set_scroll_region(1, 2),
+            term::ControlCodes::cursor_position(3, 4),
+            term::control_codes().clear_attrs
+}
