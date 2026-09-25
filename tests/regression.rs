@@ -458,32 +458,78 @@ frag! {
 }
 
 // A dump has to land correctly on a terminal in any state, so the prefix
-// clears margins and origin mode before it homes the cursor and erases.
+// switches off every mode the dump might replay and clears margins and
+// origin mode before it homes the cursor and erases.
 //
 // Spelled out rather than built from `reset_codes` so that the helper cannot
 // quietly track a regression here.
 #[test]
-fn dump_prefix_clears_scroll_region_and_origin_mode() {
-    use shpool_vterm::term::AsTermInput;
-
-    let mut expected = vec![];
-    term::control_codes().end_link.term_input_into(&mut expected);
-    term::control_codes().clear_attrs.term_input_into(&mut expected);
-    term::control_codes().unset_scroll_region.term_input_into(&mut expected);
-    term::control_codes().disable_scroll_region_origin_mode.term_input_into(&mut expected);
-    term::ControlCodes::cursor_position(1, 1).term_input_into(&mut expected);
-    term::control_codes().clear_screen.term_input_into(&mut expected);
-    term::Raw::from("hi").term_input_into(&mut expected);
-    term::ControlCodes::cursor_position(1, 3).term_input_into(&mut expected);
-    term::control_codes().clear_attrs.term_input_into(&mut expected);
+fn dump_prefix_resets_terminal_modes() {
+    let controls = term::control_codes();
+    let expected = input![
+        controls.end_link,
+        controls.disable_alt_screen,
+        controls.clear_attrs,
+        controls.unset_scroll_region,
+        controls.disable_scroll_region_origin_mode,
+        controls.disable_insert_mode,
+        controls.enable_autowrap,
+        controls.designate_g0_us_ascii,
+        controls.designate_g1_us_ascii,
+        controls.designate_g2_us_ascii,
+        controls.designate_g3_us_ascii,
+        controls.shift_in,
+        controls.show_cursor,
+        controls.disable_application_cursor_keys,
+        controls.disable_application_keypad_mode,
+        term::ControlCodes::dec_private_modes_reset(&[1000, 1002, 1003, 1005, 1006, 1015, 1016]),
+        controls.disable_report_focus,
+        controls.disable_paste_mode,
+        term::ControlCodes::cursor_position(1, 1),
+        controls.clear_screen,
+        term::Raw::from("hi"),
+        term::ControlCodes::cursor_position(1, 3),
+        controls.clear_attrs,
+    ];
 
     crate::support::frag::round_trip_frag(
         b"hi",
-        expected.as_slice(),
+        &expected,
         100,
         shpool_vterm::Size { width: 5, height: 3 },
         ContentRegion::All,
     );
+}
+
+// The terminal a restore gets painted into is often still in whatever state
+// the previous session left it in, e.g. because the connection dropped while
+// a curses app was running. Restoring into it has to end up in the same state
+// as restoring into a fresh terminal.
+#[test]
+fn restore_resets_modes_left_over_in_the_client() {
+    let size = shpool_vterm::Size { width: 20, height: 5 };
+    let mut session = shpool_vterm::Term::new(100, size);
+    session.process(b"$ ls\r\nfoo  bar\r\n$ ");
+
+    let mut client = shpool_vterm::Term::new(100, size);
+    client.process(&input![
+        term::control_codes().enable_alt_screen,
+        term::control_codes().bold,
+        term::ControlCodes::fgcolor_idx(1),
+        term::ControlCodes::set_scroll_region(2, 4),
+        term::control_codes().enable_scroll_region_origin_mode,
+        term::control_codes().enable_insert_mode,
+        term::control_codes().disable_autowrap,
+        term::control_codes().hide_cursor,
+        term::control_codes().enable_application_cursor_keys,
+        term::control_codes().enable_application_keypad_mode,
+        term::ControlCodes::dec_private_modes_set(&[1002, 1006]),
+        term::control_codes().enable_report_focus,
+        term::control_codes().enable_paste_mode,
+    ]);
+    client.process(&session.contents(ContentRegion::All));
+
+    assert_eq!(client.contents(ContentRegion::All), session.contents(ContentRegion::All));
 }
 
 // Reflow rebuilds the scrollback out of logical lines, and a blank line is a

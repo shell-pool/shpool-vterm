@@ -524,6 +524,10 @@ impl Attrs {
     }
 }
 
+/// Shift In (SI), which invokes the G0 charset into GL, the half of the
+/// charset table that printable chars get looked up in.
+pub const SHIFT_IN: u8 = 0x0f;
+
 test_pub! {
     // A dictionary of standard control codes. Access codes via the
     // control_codes() function. Most are constant struct members.
@@ -563,6 +567,7 @@ test_pub! {
         pub restore_cursor: ControlCode,
         pub reverse_index: ControlCode,
         pub backspace: ControlCode,
+        pub shift_in: ControlCode,
         pub cursor_backward_tab: ControlCode,
         pub cursor_backwards_tab: ControlCode,
         pub insert_character: ControlCode,
@@ -616,6 +621,8 @@ test_pub! {
         pub hard_reset: ControlCode,
         pub designate_g0_us_ascii: ControlCode,
         pub designate_g1_us_ascii: ControlCode,
+        pub designate_g2_us_ascii: ControlCode,
+        pub designate_g3_us_ascii: ControlCode,
         pub designate_g0_uk_ascii: ControlCode,
     }
 }
@@ -1032,6 +1039,7 @@ test_pub! {
             restore_cursor: ControlCode::ESC { intermediates: smallvec![], byte: b'8' },
             reverse_index: ControlCode::ESC { intermediates: smallvec![], byte: b'M' },
             backspace: ControlCode::C0 { byte: 0x08 },
+            shift_in: ControlCode::C0 { byte: SHIFT_IN },
             cursor_backward_tab: ControlCode::CSI {
                 params: smallvec![],
                 intermediates: smallvec![],
@@ -1281,6 +1289,14 @@ test_pub! {
             },
             designate_g1_us_ascii: ControlCode::ESC {
                 intermediates: smallvec![b')'],
+                byte: b'B',
+            },
+            designate_g2_us_ascii: ControlCode::ESC {
+                intermediates: smallvec![b'*'],
+                byte: b'B',
+            },
+            designate_g3_us_ascii: ControlCode::ESC {
+                intermediates: smallvec![b'+'],
                 byte: b'B',
             },
             designate_g0_uk_ascii: ControlCode::ESC {
