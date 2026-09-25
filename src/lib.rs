@@ -719,6 +719,30 @@ impl State {
         }
     }
 
+    /// Move the cursor forward to the `n`th tab stop after it. This
+    /// implements HT and CHT.
+    fn tab_forward(&mut self, n: usize) {
+        let mut col = self.screen().cursor.col;
+        for _ in 0..n {
+            col += 1;
+            while col < self.tabstops.len() && !self.tabstops.get(col).is_some_and(|b| *b) {
+                col += 1;
+            }
+            if col >= self.tabstops.len() {
+                break;
+            }
+        }
+
+        // A tab stops at the last column. If the cursor is already there it
+        // does not move at all, and a pending wrap stays pending.
+        let screen = self.screen_mut();
+        let col = std::cmp::min(col, screen.size.width.saturating_sub(1));
+        if col != screen.cursor.col {
+            screen.cursor.col = col;
+            screen.clamp();
+        }
+    }
+
     fn write_char_at_cursor(&mut self, cell: Cell) {
         let (insert_mode, autowrap) = (self.insert_mode, self.autowrap);
         if let Err(e) = self.screen_mut().write_at_cursor(cell, insert_mode, autowrap) {
@@ -806,7 +830,8 @@ impl vte::Perform for State {
         self.last_print_char = None;
         trace!(self.logger, "execute: byte {}", byte);
         match byte {
-            b'\n' => {
+            // LF, along with VT and FF, which terminals treat as LF too.
+            b'\n' | 0x0b | 0x0c => {
                 let fill = Cell::blank(&self.cursor_attrs);
                 self.screen_mut().linefeed(&fill);
             }
@@ -815,23 +840,7 @@ impl vte::Perform for State {
                 screen.cursor.col = 0;
                 screen.pending_wrap = false;
             }
-            b'\t' => {
-                let mut col = self.screen().cursor.col;
-                col += 1;
-                while col < self.tabstops.len() && !self.tabstops.get(col).is_some_and(|b| *b) {
-                    col += 1;
-                }
-
-                // A tab stops at the last column. If the cursor is already
-                // there it does not move at all, and a pending wrap stays
-                // pending.
-                let screen = self.screen_mut();
-                let col = std::cmp::min(col, screen.size.width.saturating_sub(1));
-                if col != screen.cursor.col {
-                    screen.cursor.col = col;
-                    screen.clamp();
-                }
-            }
+            b'\t' => self.tab_forward(1),
             b'\x08' => {
                 // backspace
                 let screen = self.screen_mut();
@@ -1037,14 +1046,16 @@ impl vte::Perform for State {
                 screen.clamp();
             }
             // CUD (Cursor Down)
-            'B' if plain => {
+            // VPR (Vertical Position Relative, CSI n e)
+            'B' | 'e' if plain => {
                 let n = param_or(&mut params_iter, 1) as usize;
                 let screen = self.screen_mut();
                 screen.cursor.row += n;
                 screen.clamp();
             }
             // CUF (Cursor Forward)
-            'C' if plain => {
+            // HPR (Horizontal Position Relative, CSI n a)
+            'C' | 'a' if plain => {
                 let n = param_or(&mut params_iter, 1) as usize;
                 let screen = self.screen_mut();
                 screen.cursor.col += n;
@@ -1174,6 +1185,11 @@ impl vte::Perform for State {
                     self.fill_tabstops(0, width);
                 }
                 code => warn!(self.logger, "unhandled 'CSI ? {:?} W'", code),
+            }
+            // CHT (Cursor Horizontal Tabulation)
+            'I' if plain => {
+                let n = param_or(&mut params_iter, 1) as usize;
+                self.tab_forward(n);
             }
             // CBT (Cursor Backward Tabulation)
             'Z' if plain => {
@@ -1671,6 +1687,18 @@ impl vte::Perform for State {
             ([], b'7') => self.save_cursor(),
             // restore cursor (ESC 8)
             ([], b'8') => self.restore_cursor(),
+            // IND (Index) moves the cursor down a row, just like LF.
+            ([], b'D') => {
+                let fill = Cell::blank(&self.cursor_attrs);
+                self.screen_mut().linefeed(&fill);
+            }
+            // NEL (Next Line) is CR LF in one.
+            ([], b'E') => {
+                let fill = Cell::blank(&self.cursor_attrs);
+                let screen = self.screen_mut();
+                screen.cursor.col = 0;
+                screen.linefeed(&fill);
+            }
             // HTS (Horizontal Tabluation Set, ESC H)
             ([], b'H') => {
                 let col = self.screen().cursor.col;

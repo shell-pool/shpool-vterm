@@ -1002,3 +1002,107 @@ frag! {
             term::ControlCodes::cursor_position(1, 2),
             term::control_codes().clear_attrs
 }
+
+// VT and FF move down a row just like LF.
+frag! {
+    vertical_tab_and_form_feed { scrollback_lines: 100, width: 10, height: 10 }
+    <= term::Raw::from("A\x0bB\x0cC")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("A"),
+            term::Crlf::default(),
+            term::Raw::from(" B"),
+            term::Crlf::default(),
+            term::Raw::from("  C"),
+            term::ControlCodes::cursor_position(3, 4),
+            term::control_codes().clear_attrs
+}
+
+// IND moves down a row without going back to the start of it.
+frag! {
+    index { scrollback_lines: 100, width: 10, height: 10 }
+    <= term::Raw::from("A\x1bDB")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("A"),
+            term::Crlf::default(),
+            term::Raw::from(" B"),
+            term::ControlCodes::cursor_position(2, 3),
+            term::control_codes().clear_attrs
+}
+
+// IND scrolls at the bottom of the scroll region.
+frag! {
+    index_scrolls_region { scrollback_lines: 100, width: 5, height: 3 }
+    <= term::Raw::from("1\r\n2\r\n3"),
+       term::ControlCodes::set_scroll_region(1, 2),
+       term::ControlCodes::cursor_position(2, 1),
+       term::Raw::from("\x1bD")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("2"),
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::Raw::from("3"),
+            term::ControlCodes::set_scroll_region(1, 2),
+            term::ControlCodes::cursor_position(2, 1),
+            term::control_codes().clear_attrs
+}
+
+// NEL goes to the start of the next row.
+frag! {
+    next_line { scrollback_lines: 100, width: 10, height: 10 }
+    <= term::Raw::from("AB\x1bEC")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("AB"),
+            term::Crlf::default(),
+            term::Raw::from("C"),
+            term::ControlCodes::cursor_position(2, 2),
+            term::control_codes().clear_attrs
+}
+
+// NEL scrolls at the bottom of the screen.
+frag! {
+    next_line_scrolls { scrollback_lines: 100, width: 5, height: 2 }
+    <= term::Raw::from("1\r\n23\x1bE4")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("1"),
+            term::Crlf::default(),
+            term::Raw::from("23"),
+            term::Crlf::default(),
+            term::Raw::from("4"),
+            term::ControlCodes::cursor_position(2, 2),
+            term::control_codes().clear_attrs
+}
+
+// HPR moves right like CUF.
+frag! {
+    horizontal_position_relative { scrollback_lines: 100, width: 10, height: 10 }
+    <= term::Raw::from("A\x1b[2aB\x1b[aC\x1b[20aD")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("A  B C   D"),
+            term::ControlCodes::cursor_position(1, 10),
+            term::Raw::from("D"),
+            term::control_codes().clear_attrs
+}
+
+// VPR moves down like CUD.
+frag! {
+    vertical_position_relative { scrollback_lines: 100, width: 5, height: 5 }
+    <= term::Raw::from("A\x1b[2eB\x1b[eC\x1b[20eD")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("A"),
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::Raw::from(" B"),
+            term::Crlf::default(),
+            term::Raw::from("  C"),
+            term::Crlf::default(),
+            term::Raw::from("   D"),
+            term::ControlCodes::cursor_position(5, 5),
+            term::control_codes().clear_attrs
+}

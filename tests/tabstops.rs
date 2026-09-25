@@ -30,6 +30,35 @@ frag! {
             term::control_codes().clear_attrs
 }
 
+// CHT moves forward the given number of tab stops.
+frag! {
+    forward_tabulation { scrollback_lines: 100, width: 30, height: 2 }
+    <= term::Raw::from("A\x1b[2IB\x1b[IC")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("A"),
+            term::Raw::from(" ".repeat(15).as_str()),
+            term::Raw::from("B"),
+            term::Raw::from(" ".repeat(7).as_str()),
+            term::Raw::from("C"),
+            term::ControlCodes::cursor_position(1, 26),
+            term::control_codes().clear_attrs
+}
+
+// CHT stops at the last column.
+frag! {
+    forward_tabulation_clamp { scrollback_lines: 100, width: 10, height: 2 }
+    <= term::Raw::from("A\x1b[5IB")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("A"),
+            term::Raw::from(" ".repeat(8).as_str()),
+            term::Raw::from("B"),
+            term::ControlCodes::cursor_position(1, 10),
+            term::Raw::from("B"),
+            term::control_codes().clear_attrs
+}
+
 #[test]
 fn resize() {
     use shpool_vterm::term::AsTermInput;
