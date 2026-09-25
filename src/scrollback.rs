@@ -379,31 +379,27 @@ impl Scrollback {
     // Command Handlers
     //
 
+    /// ED 0 (CSI 0 J). Erase from the cursor to the end of the screen. Like
+    /// the rest of ED, this covers the whole screen whatever the scroll
+    /// region and origin mode are.
     pub fn erase_to_end(&mut self, size: crate::Size, cursor: Pos, fill: &Cell) {
-        let end = match (self.origin_mode, &self.scroll_region) {
-            (OriginMode::ScrollRegion, ScrollRegion::Window { bottom, .. }) => *bottom,
-            _ => size.height,
-        };
-        self.materialize_for_fill(size, std::cmp::max(cursor.row, end.saturating_sub(1)), fill);
+        self.materialize_for_fill(size, size.height.saturating_sub(1), fill);
 
         if let Some(snip_line) = self.get_line_mut(size, cursor.row) {
             snip_line.erase(size.width, line::Section::ToEnd(cursor.col), fill);
         }
-        for i in cursor.row + 1..end {
+        for i in cursor.row + 1..size.height {
             if let Some(snip_line) = self.get_line_mut(size, i) {
                 snip_line.erase(size.width, line::Section::Whole, fill);
             }
         }
     }
 
+    /// ED 1 (CSI 1 J). Erase from the top of the screen to the cursor.
     pub fn erase_from_start(&mut self, size: crate::Size, cursor: Pos, fill: &Cell) {
-        let start = match (self.origin_mode, &self.scroll_region) {
-            (OriginMode::ScrollRegion, ScrollRegion::Window { top, .. }) => *top,
-            _ => 0,
-        };
         self.materialize_for_fill(size, cursor.row, fill);
 
-        for i in start..cursor.row {
+        for i in 0..cursor.row {
             if let Some(snip_line) = self.get_line_mut(size, i) {
                 snip_line.erase(size.width, line::Section::Whole, fill);
             }
@@ -413,23 +409,20 @@ impl Scrollback {
         }
     }
 
-    pub fn erase(&mut self, size: crate::Size, include_scrollback: bool, fill: &Cell) {
-        if include_scrollback {
-            self.buf.truncate(0);
-            return;
-        }
+    /// ED 2 (CSI 2 J). Erase the whole screen, but not the scrollback.
+    pub fn erase(&mut self, size: crate::Size, fill: &Cell) {
+        self.materialize_for_fill(size, size.height.saturating_sub(1), fill);
 
-        let (start, end) = match (self.origin_mode, &self.scroll_region) {
-            (OriginMode::ScrollRegion, ScrollRegion::Window { top, bottom }) => (*top, *bottom),
-            _ => (0, size.height),
-        };
-        self.materialize_for_fill(size, end.saturating_sub(1), fill);
-
-        for i in start..end {
+        for i in 0..size.height {
             if let Some(snip_line) = self.get_line_mut(size, i) {
                 snip_line.erase(size.width, line::Section::Whole, fill);
             }
         }
+    }
+
+    /// ED 3 (CSI 3 J). Drop the scrollback, leaving the screen alone.
+    pub fn erase_scrollback(&mut self, size: crate::Size) {
+        self.buf.truncate(self.lines_below_grid_start(size));
     }
 
     /// SU (CSI S). Move the content of the scroll region up by `n` rows,

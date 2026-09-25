@@ -1038,8 +1038,10 @@ impl vte::Perform for State {
                 match code {
                     [] | [0] => self.screen_mut().erase_to_end(&fill),
                     [1] => self.screen_mut().erase_from_start(&fill),
-                    [2] => self.screen_mut().erase(false, &fill),
-                    [3] => self.screen_mut().erase(true, &fill),
+                    [2] => self.screen_mut().erase(&fill),
+                    // Only the main screen has scrollback, but it goes
+                    // even if the alt screen is up.
+                    [3] => self.scrollback.erase_scrollback(),
                     _ => warn!(self.logger, "unhandled 'CSI {:?} J'", code),
                 }
             }
