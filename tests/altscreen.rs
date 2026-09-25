@@ -17,6 +17,7 @@ frag! {
             term::Raw::from("A"),
             term::ControlCodes::cursor_position(1, 2),
             term::control_codes().enable_alt_screen,
+            term::ControlCodes::cursor_position(1, 1),
             term::Raw::from("B"),
             term::Crlf::default(),
             term::ControlCodes::cursor_position(1, 2),
@@ -45,6 +46,7 @@ frag! {
             term::Raw::from("A"),
             term::ControlCodes::cursor_position(1, 2),
             term::control_codes().enable_alt_screen,
+            term::ControlCodes::cursor_position(1, 1),
             term::Crlf::default(),
             term::ControlCodes::cursor_position(1, 1),
             term::control_codes().clear_attrs
@@ -79,6 +81,7 @@ frag! {
             term::Raw::from("A"),
             term::ControlCodes::cursor_position(1, 2),
             term::control_codes().enable_alt_screen,
+            term::ControlCodes::cursor_position(1, 1),
             term::Raw::from("B"),
             term::Crlf::default(),
             term::ControlCodes::cursor_position(1, 2),
@@ -912,8 +915,58 @@ frag! {
             term::Raw::from("3"),
             term::ControlCodes::cursor_position(2, 2),
             term::control_codes().enable_alt_screen,
+            term::ControlCodes::cursor_position(1, 1),
             term::Raw::from("alt"),
             term::Crlf::default(),
             term::ControlCodes::cursor_position(1, 4),
+            term::control_codes().clear_attrs
+}
+
+// Switching to the alt screen leaves the cursor where the restore of the main
+// screen put it, so the restore has to home it before painting the alt screen
+// or everything would land in the wrong spot.
+frag! {
+    alt_screen_painted_from_the_top { scrollback_lines: 100, width: 5, height: 3 }
+    <= term::Raw::from("$ vi"),
+       term::Crlf::default(),
+       term::control_codes().enable_alt_screen,
+       term::ControlCodes::cursor_position(1, 1),
+       term::Raw::from("text"),
+       term::ControlCodes::cursor_position(3, 1),
+       term::Raw::from("~")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("$ vi"),
+            term::ControlCodes::cursor_position(2, 1),
+            term::control_codes().enable_alt_screen,
+            term::ControlCodes::cursor_position(1, 1),
+            term::Raw::from("text"),
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::Raw::from("~"),
+            term::ControlCodes::cursor_position(3, 2),
+            term::control_codes().clear_attrs
+}
+
+// Resetting the scroll region already homes the cursor.
+frag! {
+    alt_screen_painted_from_the_top_after_region_reset { scrollback_lines: 100, width: 5, height: 3 }
+    <= term::Raw::from("$ vi"),
+       term::ControlCodes::set_scroll_region(1, 2),
+       term::ControlCodes::cursor_position(2, 3),
+       term::control_codes().enable_alt_screen,
+       term::ControlCodes::cursor_position(1, 1),
+       term::Raw::from("text")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("$ vi"),
+            term::ControlCodes::set_scroll_region(1, 2),
+            term::ControlCodes::cursor_position(2, 3),
+            term::control_codes().enable_alt_screen,
+            term::control_codes().unset_scroll_region,
+            term::Raw::from("text"),
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::ControlCodes::cursor_position(1, 5),
             term::control_codes().clear_attrs
 }
