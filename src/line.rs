@@ -99,6 +99,26 @@ impl Line {
         Line { cells: vec![], is_wrapped: false }
     }
 
+    /// A line full of `fill`, the blank that erasing and scrolling leave
+    /// behind (see `Cell::blank`).
+    ///
+    /// Without a background color to paint, a blank looks just like a cell
+    /// nothing has been written to, so there is no need to store any.
+    pub fn blank(width: usize, fill: &Cell) -> Self {
+        let mut line = Line::new();
+        line.fill_to(width, fill);
+        line
+    }
+
+    /// Pad the line out to `width` with `fill` if `fill` has a background
+    /// color to show. Otherwise the implicit blank cells past the end of the
+    /// line already look right.
+    fn fill_to(&mut self, width: usize, fill: &Cell) {
+        if fill.attrs().has_attrs() {
+            self.cells.resize(std::cmp::max(width, self.cells.len()), fill.clone());
+        }
+    }
+
     /// Get the cell at the given grid position.
     pub fn get_cell(&self, width: usize, col: usize) -> Option<&Cell> {
         if col >= width {
@@ -191,29 +211,42 @@ impl Line {
     }
 
     /// Clobber the given section, either by trimming the underlying storage
-    /// or by overwriting with empty cells.
-    pub fn erase(&mut self, section: Section) {
+    /// or by overwriting with `fill`, the blank erasing leaves behind.
+    pub fn erase(&mut self, width: usize, section: Section, fill: &Cell) {
         match section {
             Section::StartTo(col) => {
-                self.split_wide_char_at(col + 1);
-                for i in 0..std::cmp::min(col + 1, self.cells.len()) {
-                    self.cells[i] = Cell::empty();
+                let end = std::cmp::min(col + 1, width);
+                self.split_wide_char_at(end);
+                if fill.attrs().has_attrs() {
+                    while self.cells.len() < end {
+                        self.cells.push(Cell::empty());
+                    }
+                }
+                for i in 0..std::cmp::min(end, self.cells.len()) {
+                    self.cells[i] = fill.clone();
                 }
             }
             Section::ToEnd(col) => {
                 self.truncate(col);
                 self.is_wrapped = false;
+                if fill.attrs().has_attrs() {
+                    while self.cells.len() < col {
+                        self.cells.push(Cell::empty());
+                    }
+                    self.fill_to(width, fill);
+                }
             }
             Section::Whole => {
                 self.truncate(0);
                 self.is_wrapped = false;
+                self.fill_to(width, fill);
             }
         }
     }
 
     /// Insert n new blank cells at the current position, dropping
     /// any cells which spill over width.
-    pub fn insert_character(&mut self, width: usize, col: usize, n: usize) {
+    pub fn insert_character(&mut self, width: usize, col: usize, n: usize, fill: &Cell) {
         if col >= width {
             return;
         }
@@ -221,18 +254,17 @@ impl Line {
             self.cells.push(Cell::empty());
         }
         self.split_wide_char_at(col);
-        let empties = vec![Cell::empty(); std::cmp::min(n, width - col)];
-        self.cells.splice(col..col, empties);
+        let blanks = vec![fill.clone(); std::cmp::min(n, width - col)];
+        self.cells.splice(col..col, blanks);
         self.truncate(width);
     }
 
     /// Delete n cells at the current position, sucking cells to the
     /// right towards the cursor, and backfilling their old position
-    /// with empty cells that have the current background attributes
-    /// set.
+    /// with `fill`, the blank erasing leaves behind.
     ///
     /// This implements DCH (Delete Character).
-    pub fn delete_character(&mut self, width: usize, col: usize, attrs: &term::Attrs, n: usize) {
+    pub fn delete_character(&mut self, width: usize, col: usize, fill: &Cell, n: usize) {
         if col >= width {
             return;
         }
@@ -256,9 +288,9 @@ impl Line {
         }
 
         // Inject the "backfill" cells that the semantics of DCH call
-        // for. These are empty cells with the current attributes set.
+        // for.
         while self.cells.len() < width {
-            self.cells.push(Cell::empty_with_attrs(attrs.clone()));
+            self.cells.push(fill.clone());
         }
     }
 
@@ -266,7 +298,7 @@ impl Line {
     /// delete, this leaves the cells in place, just clobbers their contents.
     ///
     /// This implements ECH (Erase Character)
-    pub fn erase_character(&mut self, width: usize, col: usize, attrs: &term::Attrs, n: usize) {
+    pub fn erase_character(&mut self, width: usize, col: usize, fill: &Cell, n: usize) {
         if col >= width {
             return;
         }
@@ -279,10 +311,10 @@ impl Line {
 
         let erase_to = std::cmp::min(width, col.saturating_add(n));
         for i in col..std::cmp::min(self.cells.len(), erase_to) {
-            self.cells[i] = Cell::empty_with_attrs(attrs.clone());
+            self.cells[i] = fill.clone();
         }
         while self.cells.len() < erase_to {
-            self.cells.push(Cell::empty_with_attrs(attrs.clone()));
+            self.cells.push(fill.clone());
         }
     }
 }

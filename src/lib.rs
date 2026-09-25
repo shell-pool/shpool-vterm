@@ -730,7 +730,10 @@ impl vte::Perform for State {
         self.last_print_char = None;
         trace!(self.logger, "execute: byte {}", byte);
         match byte {
-            b'\n' => self.screen_mut().linefeed(),
+            b'\n' => {
+                let fill = Cell::blank(&self.cursor_attrs);
+                self.screen_mut().linefeed(&fill);
+            }
             b'\r' => {
                 let screen = self.screen_mut();
                 screen.cursor.col = 0;
@@ -1008,58 +1011,54 @@ impl vte::Perform for State {
             // DECSED (Selective Erase in Display, CSI ? n J). We don't track
             // the protected attribute (DECSCA), so this is the same as ED.
             'J' if plain || intermediates == [b'?'] => while let Some(code) = params_iter.next() {
+                let fill = Cell::blank(&self.cursor_attrs);
                 match code {
-                    [] | [0] => self.screen_mut().erase_to_end(),
-                    [1] => self.screen_mut().erase_from_start(),
-                    [2] => self.screen_mut().erase(false),
-                    [3] => self.screen_mut().erase(true),
+                    [] | [0] => self.screen_mut().erase_to_end(&fill),
+                    [1] => self.screen_mut().erase_from_start(&fill),
+                    [2] => self.screen_mut().erase(false, &fill),
+                    [3] => self.screen_mut().erase(true, &fill),
                     _ => warn!(self.logger, "unhandled 'CSI {:?} J'", code),
                 }
             }
             // EL (Erase in Line)
             // DECSEL (Selective Erase in Line, CSI ? n K), see DECSED above.
             'K' if plain || intermediates == [b'?'] => while let Some(code) = params_iter.next() {
-                match code {
-                    [] | [0] => {
-                        let screen = self.screen_mut();
-                        screen.pending_wrap = false;
-                        let col = screen.cursor.col;
-                        if let Some(l) = screen.get_line_mut() {
-                            l.erase(line::Section::ToEnd(col));
-                        }
+                let col = self.screen().cursor.col;
+                let section = match code {
+                    [] | [0] => line::Section::ToEnd(col),
+                    [1] => line::Section::StartTo(col),
+                    [2] => line::Section::Whole,
+                    _ => {
+                        warn!(self.logger, "unhandled 'CSI {:?} K'", code);
+                        continue;
                     }
-                    [1] => {
-                        let screen = self.screen_mut();
-                        screen.pending_wrap = false;
-                        let col = screen.cursor.col;
-                        if let Some(l) = screen.get_line_mut() {
-                            l.erase(line::Section::StartTo(col));
-                        }
-                    }
-                    [2] => {
-                        let screen = self.screen_mut();
-                        screen.pending_wrap = false;
-                        if let Some(l) = screen.get_line_mut() {
-                            l.erase(line::Section::Whole);
-                        }
-                    }
-                    _ => warn!(self.logger, "unhandled 'CSI {:?} K'", code),
+                };
+
+                let fill = Cell::blank(&self.cursor_attrs);
+                let screen = self.screen_mut();
+                screen.pending_wrap = false;
+                let width = screen.size.width;
+                if let Some(l) = screen.line_to_erase(&fill) {
+                    l.erase(width, section, &fill);
                 }
             }
             // IL (Insert Line)
             'L' if plain => {
                 let n = param_or(&mut params_iter, 1) as usize;
-                self.screen_mut().insert_lines(n);
+                let fill = Cell::blank(&self.cursor_attrs);
+                self.screen_mut().insert_lines(n, &fill);
             }
             // DL (Delete Line)
             'M' if plain => {
                 let n = param_or(&mut params_iter, 1) as usize;
-                self.screen_mut().delete_lines(n);
+                let fill = Cell::blank(&self.cursor_attrs);
+                self.screen_mut().delete_lines(n, &fill);
             }
             // SU (Scroll Up)
             'S' if plain => {
                 let n = param_or(&mut params_iter, 1) as usize;
-                self.screen_mut().scroll_up(n as usize);
+                let fill = Cell::blank(&self.cursor_attrs);
+                self.screen_mut().scroll_up(n as usize, &fill);
             }
             // CTC (Cusor Tabulation Control)
             'W' if plain => {
@@ -1112,47 +1111,47 @@ impl vte::Perform for State {
             // highlight tracking, which has nothing to do with scrolling.
             'T' if plain && params.len() <= 1 => {
                 let n = param_or(&mut params_iter, 1) as usize;
-                self.screen_mut().scroll_down(n as usize);
+                let fill = Cell::blank(&self.cursor_attrs);
+                self.screen_mut().scroll_down(n as usize, &fill);
             }
 
             // ICH (Insert Character)
             '@' if plain => {
                 let n = param_or(&mut params_iter, 1) as usize;
 
+                let fill = Cell::blank(&self.cursor_attrs);
                 let screen = self.screen_mut();
                 screen.pending_wrap = false;
                 let width = screen.size.width;
                 let col = screen.cursor.col;
-                if let Some(l) = screen.get_line_mut() {
-                    l.insert_character(width, col, n);
+                if let Some(l) = screen.line_to_erase(&fill) {
+                    l.insert_character(width, col, n, &fill);
                 }
             }
             // DCH (Delete Character)
             'P' if plain => {
                 let n = param_or(&mut params_iter, 1) as usize;
 
-                let attrs = self.cursor_attrs.clone();
-
+                let fill = Cell::blank(&self.cursor_attrs);
                 let screen = self.screen_mut();
                 screen.pending_wrap = false;
                 let width = screen.size.width;
                 let col = screen.cursor.col;
-                if let Some(l) = screen.get_line_mut() {
-                    l.delete_character(width, col, &attrs, n);
+                if let Some(l) = screen.line_to_erase(&fill) {
+                    l.delete_character(width, col, &fill, n);
                 }
             }
             // ECH (Erase Character)
             'X' if plain => {
                 let n = param_or(&mut params_iter, 1) as usize;
 
-                let attrs = self.cursor_attrs.clone();
-
+                let fill = Cell::blank(&self.cursor_attrs);
                 let screen = self.screen_mut();
                 screen.pending_wrap = false;
                 let width = screen.size.width;
                 let col = screen.cursor.col;
-                if let Some(l) = screen.get_line_mut() {
-                    l.erase_character(width, col, &attrs, n);
+                if let Some(l) = screen.line_to_erase(&fill) {
+                    l.erase_character(width, col, &fill, n);
                 }
             }
             // REP (Repeat Preceding Character)
@@ -1588,13 +1587,14 @@ impl vte::Perform for State {
             }
             // RI (Reverse Index)
             ([], b'M') => {
+                let fill = Cell::blank(&self.cursor_attrs);
                 let screen = self.screen_mut();
                 screen.pending_wrap = false;
                 let (scroll_top, _) =
                     screen.scroll_region(false).as_region(&screen.size).row_bounds();
 
                 if screen.cursor.row == scroll_top {
-                    screen.insert_lines(1);
+                    screen.insert_lines(1, &fill);
                 } else if screen.cursor.row > 0 {
                     screen.cursor.row -= 1;
                 }

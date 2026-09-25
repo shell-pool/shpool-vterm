@@ -266,7 +266,7 @@ impl Screen {
                 ];
                 // Only the width decides where lines wrap.
                 if new_size.width != old_size.width {
-                    scrollback.reflow(new_size.width, &mut anchors);
+                    scrollback.reflow(old_size.width, new_size.width, &mut anchors);
                 }
                 (
                     (scrollback.resolve_cursor(new_size, anchors[0]), anchors[0].pending_wrap),
@@ -333,9 +333,12 @@ impl Screen {
         }
         self.cursor.clamp_to(self.size);
 
+        // The blank that a scroll opens up if the cell has to wrap onto a new
+        // line at the bottom of the scroll region.
+        let fill = Cell::blank(cell.attrs());
         if self.pending_wrap {
             if autowrap {
-                self.wrap();
+                self.wrap(&fill);
             } else {
                 // Autowrap was turned off while the wrap was pending.
                 self.pending_wrap = false;
@@ -346,7 +349,7 @@ impl Screen {
         // Without autowrap it gets squeezed in at the end of this one.
         if self.cursor.col + cell_width > width {
             if autowrap {
-                self.wrap();
+                self.wrap(&fill);
             } else {
                 self.cursor.col = width - cell_width;
             }
@@ -357,7 +360,8 @@ impl Screen {
             return Err(anyhow!("no line for cursor row {}", self.cursor.row));
         };
         if insert_mode {
-            line.insert_character(width, col, cell_width);
+            // The blanks this opens up get written over right away.
+            line.insert_character(width, col, cell_width, &Cell::empty());
         }
         line.write_cell(width, col, cell).context("writing cell")?;
 
@@ -372,7 +376,7 @@ impl Screen {
     }
 
     /// Move to the start of the next line because the current one is full.
-    fn wrap(&mut self) {
+    fn wrap(&mut self, fill: &Cell) {
         // The line only continues onto the next one if the cursor is really
         // going to get there. Below the scroll region on the last row it has
         // nowhere to go, so the next char just overwrites this line.
@@ -383,7 +387,7 @@ impl Screen {
             }
         }
 
-        self.linefeed();
+        self.linefeed(fill);
         self.cursor.col = 0;
     }
 
@@ -393,44 +397,51 @@ impl Screen {
     ///
     /// The cursor can sit outside of the scroll region, in which case it
     /// just moves down until it reaches the bottom of the screen.
-    pub fn linefeed(&mut self) {
+    ///
+    /// `fill` is the blank that scrolling opens up the new row with, which
+    /// is painted with the current background color (see `Cell::blank`).
+    pub fn linefeed(&mut self, fill: &Cell) {
         self.pending_wrap = false;
         let (_, bottom) = self.grid.scroll_region().as_region(&self.size).row_bounds();
         if self.cursor.row + 1 == bottom {
-            self.scroll_up(1);
+            self.scroll_up(1, fill);
         } else if self.cursor.row + 1 < self.size.height {
             self.cursor.row += 1;
         }
     }
 
     /// Erase whichever screen is currently active from the cursor
-    /// position to the bottom. Used to implement 'CSI 0 J'
-    pub fn erase_to_end(&mut self) {
+    /// position to the bottom, leaving `fill` behind. Used to implement
+    /// 'CSI 0 J'
+    pub fn erase_to_end(&mut self, fill: &Cell) {
         self.pending_wrap = false;
+        let width = self.size.width;
         match &mut self.grid {
-            Grid::Scrollback(s) => s.erase_to_end(self.size, self.cursor),
-            Grid::AltScreen(alt) => alt.erase_to_end(self.cursor),
+            Grid::Scrollback(s) => s.erase_to_end(self.size, self.cursor, fill),
+            Grid::AltScreen(alt) => alt.erase_to_end(width, self.cursor, fill),
         }
     }
 
     /// Erase whichever screen is currently active from the top to the
-    /// cursor position. Used to implement 'CSI 1 J'
-    pub fn erase_from_start(&mut self) {
+    /// cursor position, leaving `fill` behind. Used to implement 'CSI 1 J'
+    pub fn erase_from_start(&mut self, fill: &Cell) {
         self.pending_wrap = false;
+        let width = self.size.width;
         match &mut self.grid {
-            Grid::Scrollback(s) => s.erase_from_start(self.size, self.cursor),
-            Grid::AltScreen(alt) => alt.erase_from_start(self.cursor),
+            Grid::Scrollback(s) => s.erase_from_start(self.size, self.cursor, fill),
+            Grid::AltScreen(alt) => alt.erase_from_start(width, self.cursor, fill),
         }
     }
 
-    /// Erase whichever screen is currently active, not including scrollback.
-    /// Used to implement 'CSI 2 J' and 'CSI 3 J' (which includes the
-    /// scrollback).
-    pub fn erase(&mut self, include_scrollback: bool) {
+    /// Erase whichever screen is currently active, not including scrollback,
+    /// leaving `fill` behind. Used to implement 'CSI 2 J' and 'CSI 3 J'
+    /// (which includes the scrollback).
+    pub fn erase(&mut self, include_scrollback: bool, fill: &Cell) {
         self.pending_wrap = false;
+        let width = self.size.width;
         match &mut self.grid {
-            Grid::Scrollback(s) => s.erase(self.size, include_scrollback),
-            Grid::AltScreen(alt) => alt.erase(),
+            Grid::Scrollback(s) => s.erase(self.size, include_scrollback, fill),
+            Grid::AltScreen(alt) => alt.erase(width, fill),
         }
     }
 
@@ -443,21 +454,37 @@ impl Screen {
         }
     }
 
+    /// Gets the current line for an edit that leaves `fill` behind.
+    ///
+    /// A row that nothing is stored for is blank already, so an edit that
+    /// only leaves plain blanks behind has nothing to do there and this
+    /// returns nothing, but blanks painted with a background color have to
+    /// be stored.
+    pub fn line_to_erase(&mut self, fill: &Cell) -> Option<&mut Line> {
+        if fill.attrs().has_attrs() {
+            self.grid.materialize_line(self.size, self.cursor.row)
+        } else {
+            self.get_line_mut()
+        }
+    }
+
     /// SU (CSI S). Move the content of the scroll region up by `n` rows,
-    /// opening blank rows at the bottom. The cursor does not move.
-    pub fn scroll_up(&mut self, n: usize) {
+    /// opening rows of `fill` at the bottom. The cursor does not move.
+    pub fn scroll_up(&mut self, n: usize, fill: &Cell) {
+        let width = self.size.width;
         match &mut self.grid {
-            Grid::Scrollback(s) => s.scroll_up(&self.size, n),
-            Grid::AltScreen(alt) => alt.scroll_up(n),
+            Grid::Scrollback(s) => s.scroll_up(&self.size, n, fill),
+            Grid::AltScreen(alt) => alt.scroll_up(width, n, fill),
         }
     }
 
     /// SD (CSI T). Move the content of the scroll region down by `n` rows,
-    /// opening blank rows at the top. The cursor does not move.
-    pub fn scroll_down(&mut self, n: usize) {
+    /// opening rows of `fill` at the top. The cursor does not move.
+    pub fn scroll_down(&mut self, n: usize, fill: &Cell) {
+        let width = self.size.width;
         match &mut self.grid {
-            Grid::Scrollback(s) => s.scroll_down(&self.size, n),
-            Grid::AltScreen(alt) => alt.scroll_down(n),
+            Grid::Scrollback(s) => s.scroll_down(&self.size, n, fill),
+            Grid::AltScreen(alt) => alt.scroll_down(width, n, fill),
         }
     }
 
@@ -474,26 +501,28 @@ impl Screen {
 
     /// Handler for the Insert Line command (CSI n L).
     ///
-    /// n lines are inserted above the current line, dropping any lines that
-    /// get pushed out of the current scroll region.
-    pub fn insert_lines(&mut self, n: usize) {
+    /// n lines of `fill` are inserted above the current line, dropping any
+    /// lines that get pushed out of the current scroll region.
+    pub fn insert_lines(&mut self, n: usize, fill: &Cell) {
         self.pending_wrap = false;
+        let width = self.size.width;
         match &mut self.grid {
-            Grid::Scrollback(s) => s.insert_lines(&self.cursor, &self.size, n),
-            Grid::AltScreen(alt) => alt.insert_lines(&self.cursor, n),
+            Grid::Scrollback(s) => s.insert_lines(&self.cursor, &self.size, n, fill),
+            Grid::AltScreen(alt) => alt.insert_lines(width, &self.cursor, n, fill),
         }
     }
 
     /// Handler for the Delete Line command (CSI n M).
     ///
     /// n lines below the current line are deleted (including the current line),
-    /// sucking any lines below the current line up. New blank lines are
+    /// sucking any lines below the current line up. New lines of `fill` are
     /// inserted at the bottom of the scroll region.
-    pub fn delete_lines(&mut self, n: usize) {
+    pub fn delete_lines(&mut self, n: usize, fill: &Cell) {
         self.pending_wrap = false;
+        let width = self.size.width;
         match &mut self.grid {
-            Grid::Scrollback(s) => s.delete_lines(&self.cursor, &self.size, n),
-            Grid::AltScreen(alt) => alt.delete_lines(&self.cursor, n),
+            Grid::Scrollback(s) => s.delete_lines(&self.cursor, &self.size, n, fill),
+            Grid::AltScreen(alt) => alt.delete_lines(width, &self.cursor, n, fill),
         }
     }
 }

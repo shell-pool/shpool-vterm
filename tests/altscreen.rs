@@ -665,22 +665,22 @@ frag! {
     <= term::control_codes().enable_alt_screen,
        term::Raw::from("123"),
        term::ControlCodes::cursor_position(1, 2),
-       term::ControlCodes::fgcolor_idx(1),
+       term::ControlCodes::bgcolor_idx(4),
        term::ControlCodes::delete_character(1)
     => ContentRegion::All =>
             reset_codes,
             empty_scrollback,
             term::control_codes().enable_alt_screen,
             term::Raw::from("13  "),
-            term::ControlCodes::fgcolor_idx(1),
+            term::ControlCodes::bgcolor_idx(4),
             term::Raw::from(" "),
-            term::control_codes().fgcolor_default,
+            term::control_codes().bgcolor_default,
             term::Crlf::default(),
             term::Crlf::default(),
             term::Crlf::default(),
             term::ControlCodes::cursor_position(1, 2),
             term::control_codes().clear_attrs,
-            term::ControlCodes::fgcolor_idx(1)
+            term::ControlCodes::bgcolor_idx(4)
 }
 
 frag! {
@@ -724,23 +724,23 @@ frag! {
     <= term::control_codes().enable_alt_screen,
        term::Raw::from("123"),
        term::ControlCodes::cursor_position(1, 2),
-       term::ControlCodes::fgcolor_idx(1),
+       term::ControlCodes::bgcolor_idx(4),
        term::ControlCodes::erase_character(1)
     => ContentRegion::All =>
             reset_codes,
             empty_scrollback,
             term::control_codes().enable_alt_screen,
             term::Raw::from("1"),
-            term::ControlCodes::fgcolor_idx(1),
+            term::ControlCodes::bgcolor_idx(4),
             term::Raw::from(" "),
-            term::control_codes().fgcolor_default,
+            term::control_codes().bgcolor_default,
             term::Raw::from("3"),
             term::Crlf::default(),
             term::Crlf::default(),
             term::Crlf::default(),
             term::ControlCodes::cursor_position(1, 2),
             term::control_codes().clear_attrs,
-            term::ControlCodes::fgcolor_idx(1)
+            term::ControlCodes::bgcolor_idx(4)
 }
 
 frag! {

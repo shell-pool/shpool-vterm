@@ -340,14 +340,29 @@ frag! {
     delete_char_with_backfill_attrs { scrollback_lines: 100, width: 5, height: 4 }
     <= term::Raw::from("123"),
        term::ControlCodes::cursor_position(1, 2),
-       term::ControlCodes::fgcolor_idx(1),
+       term::ControlCodes::bgcolor_idx(4),
        term::ControlCodes::delete_character(1)
     => ContentRegion::All =>
             reset_codes,
             term::Raw::from("13  "),
-            term::ControlCodes::fgcolor_idx(1),
+            term::ControlCodes::bgcolor_idx(4),
             term::Raw::from(" "),
-            term::control_codes().fgcolor_default,
+            term::control_codes().bgcolor_default,
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().clear_attrs,
+            term::ControlCodes::bgcolor_idx(4)
+}
+
+// The backfill only gets the background color, like real terminals do.
+frag! {
+    delete_char_backfill_ignores_fgcolor { scrollback_lines: 100, width: 5, height: 4 }
+    <= term::Raw::from("123"),
+       term::ControlCodes::cursor_position(1, 2),
+       term::ControlCodes::fgcolor_idx(1),
+       term::ControlCodes::delete_character(1)
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("13   "),
             term::ControlCodes::cursor_position(1, 2),
             term::control_codes().clear_attrs,
             term::ControlCodes::fgcolor_idx(1)
@@ -381,15 +396,29 @@ frag! {
     erase_char_with_attrs { scrollback_lines: 100, width: 5, height: 4 }
     <= term::Raw::from("123"),
        term::ControlCodes::cursor_position(1, 2),
-       term::ControlCodes::fgcolor_idx(1),
+       term::ControlCodes::bgcolor_idx(4),
        term::ControlCodes::erase_character(1)
     => ContentRegion::All =>
             reset_codes,
             term::Raw::from("1"),
-            term::ControlCodes::fgcolor_idx(1),
+            term::ControlCodes::bgcolor_idx(4),
             term::Raw::from(" "),
-            term::control_codes().fgcolor_default,
+            term::control_codes().bgcolor_default,
             term::Raw::from("3"),
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().clear_attrs,
+            term::ControlCodes::bgcolor_idx(4)
+}
+
+frag! {
+    erase_char_ignores_fgcolor { scrollback_lines: 100, width: 5, height: 4 }
+    <= term::Raw::from("123"),
+       term::ControlCodes::cursor_position(1, 2),
+       term::ControlCodes::fgcolor_idx(1),
+       term::ControlCodes::erase_character(1)
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("1 3"),
             term::ControlCodes::cursor_position(1, 2),
             term::control_codes().clear_attrs,
             term::ControlCodes::fgcolor_idx(1)
