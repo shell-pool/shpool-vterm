@@ -126,6 +126,19 @@ impl Screen {
         }
     }
 
+    /// Carry over the state that a real terminal shares between its screens
+    /// from `other`, the screen that is being switched away from.
+    ///
+    /// We keep a cursor, scroll region and origin mode for each screen, but
+    /// a real terminal only has one of each, and switching screens leaves
+    /// them as they were.
+    pub fn take_shared_state(&mut self, other: &Screen) {
+        self.cursor = other.cursor;
+        self.pending_wrap = other.pending_wrap;
+        self.store_scroll_region(other.grid.scroll_region().clone());
+        self.set_origin_mode(other.grid.origin_mode());
+    }
+
     /// Given a 1-indexed position as the user would directly provide in
     /// a CUP command, update the cursor position, taking the current origin
     /// mode and scroll region into account.

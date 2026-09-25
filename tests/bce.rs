@@ -439,6 +439,24 @@ frag! {
             term::ControlCodes::bgcolor_idx(4)
 }
 
+// Entering the alt screen with 1049 erases it, which paints it with the
+// current background color.
+frag! {
+    alt_screen_enter_paints_bgcolor { scrollback_lines: 100, width: 5, height: 2 }
+    <= term::ControlCodes::bgcolor_idx(4),
+       term::control_codes().enable_alt_screen
+    => ContentRegion::All =>
+            reset_codes,
+            empty_scrollback,
+            term::control_codes().enable_alt_screen,
+            blue(5),
+            term::Crlf::default(),
+            blue(5),
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs,
+            term::ControlCodes::bgcolor_idx(4)
+}
+
 /// Run `input` through a term of `size`, resize it to `new_size` and return
 /// what it dumps.
 fn resized_dump(size: Size, input: &[u8], new_size: Size) -> Vec<u8> {

@@ -18,9 +18,13 @@ frag! {
             term::ControlCodes::cursor_position(1, 2),
             term::control_codes().enable_alt_screen,
             term::ControlCodes::cursor_position(1, 1),
-            term::Raw::from("B"),
+            // Switching screens doesn't move the cursor, so the B went in
+            // right next to where the A is on the main screen.
+            term::Raw::from(" B"),
             term::Crlf::default(),
+            // It filled the last column, which leaves a wrap pending.
             term::ControlCodes::cursor_position(1, 2),
+            term::Raw::from("B"),
             term::control_codes().clear_attrs
 }
 
@@ -48,7 +52,7 @@ frag! {
             term::control_codes().enable_alt_screen,
             term::ControlCodes::cursor_position(1, 1),
             term::Crlf::default(),
-            term::ControlCodes::cursor_position(1, 1),
+            term::ControlCodes::cursor_position(1, 2),
             term::control_codes().clear_attrs
 }
 
@@ -82,9 +86,13 @@ frag! {
             term::ControlCodes::cursor_position(1, 2),
             term::control_codes().enable_alt_screen,
             term::ControlCodes::cursor_position(1, 1),
-            term::Raw::from("B"),
+            // Switching screens doesn't move the cursor, so the B went in
+            // right next to where the A is on the main screen.
+            term::Raw::from(" B"),
             term::Crlf::default(),
+            // It filled the last column, which leaves a wrap pending.
             term::ControlCodes::cursor_position(1, 2),
+            term::Raw::from("B"),
             term::control_codes().clear_attrs
 }
 
@@ -141,15 +149,17 @@ frag! {
             term::control_codes().clear_attrs
 }
 
+// A real terminal only has the one scroll region, so the one the app set up
+// on the alt screen is still in place once it is back on the main screen.
 frag! {
-    scroll_region_persistence { scrollback_lines: 100, width: 10, height: 5 }
+    scroll_region_shared_between_screens { scrollback_lines: 100, width: 10, height: 5 }
     <= term::ControlCodes::set_scroll_region(2, 5),
        term::control_codes().enable_alt_screen,
        term::ControlCodes::set_scroll_region(3, 6),
        term::control_codes().disable_alt_screen
     => ContentRegion::All =>
             reset_codes,
-            term::ControlCodes::set_scroll_region(2, 5),
+            term::ControlCodes::set_scroll_region(3, 5),
             term::ControlCodes::cursor_position(1, 1),
             term::control_codes().clear_attrs
 }
@@ -872,13 +882,16 @@ frag! {
             term::control_codes().clear_attrs
 }
 
-// Ensure that the alt screen wins when margins conflict.
+// Ensure that the alt screen wins when margins conflict. The alt screen takes
+// the margins over from the main screen, but here the app drops them again.
 frag! {
     alt_screen_resets_scrollback_scroll_region_and_origin_mode
         { scrollback_lines: 100, width: 5, height: 5 }
     <= term::ControlCodes::set_scroll_region(2, 4),
        term::control_codes().enable_scroll_region_origin_mode,
        term::control_codes().enable_alt_screen,
+       term::control_codes().unset_scroll_region,
+       term::control_codes().disable_scroll_region_origin_mode,
        term::Raw::from("X")
     => ContentRegion::All =>
             reset_codes,
@@ -916,9 +929,9 @@ frag! {
             term::ControlCodes::cursor_position(2, 2),
             term::control_codes().enable_alt_screen,
             term::ControlCodes::cursor_position(1, 1),
-            term::Raw::from("alt"),
             term::Crlf::default(),
-            term::ControlCodes::cursor_position(1, 4),
+            term::Raw::from(" alt"),
+            term::ControlCodes::cursor_position(2, 5),
             term::control_codes().clear_attrs
 }
 
@@ -967,6 +980,70 @@ frag! {
             term::Raw::from("text"),
             term::Crlf::default(),
             term::Crlf::default(),
+            // The alt screen took the scroll region over from the main
+            // screen, so it gets set up again once the paint is done.
+            term::ControlCodes::set_scroll_region(1, 2),
             term::ControlCodes::cursor_position(1, 5),
+            term::control_codes().clear_attrs
+}
+
+// The alt screen starts out with the scroll region of the main screen.
+frag! {
+    alt_screen_inherits_scroll_region { scrollback_lines: 100, width: 3, height: 3 }
+    <= term::ControlCodes::set_scroll_region(1, 2),
+       term::control_codes().enable_alt_screen,
+       term::Raw::from("a\r\nb\r\nc")
+    => ContentRegion::All =>
+            reset_codes,
+            term::ControlCodes::set_scroll_region(1, 2),
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().enable_alt_screen,
+            term::control_codes().unset_scroll_region,
+            term::Raw::from("b"),
+            term::Crlf::default(),
+            term::Raw::from("c"),
+            term::Crlf::default(),
+            term::ControlCodes::set_scroll_region(1, 2),
+            term::ControlCodes::cursor_position(2, 2),
+            term::control_codes().clear_attrs
+}
+
+// Leaving the alt screen restores the cursor the way DECRC does, which
+// brings back the attrs and charsets it was saved with too.
+frag! {
+    alt_screen_exit_restores_cursor_state { scrollback_lines: 100, width: 5, height: 2 }
+    <= term::Raw::from("A"),
+       term::ControlCodes::fgcolor_idx(1),
+       term::control_codes().enable_alt_screen,
+       term::control_codes().clear_attrs,
+       term::ControlCodes::designate_charset(0, b'0'),
+       term::ControlCodes::cursor_position(2, 3),
+       term::control_codes().disable_alt_screen,
+       term::Raw::from("q")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("A\x1b[31mq\x1b[39m"),
+            term::ControlCodes::cursor_position(1, 3),
+            term::control_codes().clear_attrs,
+            term::ControlCodes::fgcolor_idx(1)
+}
+
+// The alt screen keeps its own saved cursor while the main screen is up.
+frag! {
+    alt_screen_saved_cursor_survives_exit { scrollback_lines: 100, width: 5, height: 2 }
+    <= term::control_codes().enable_alt_screen,
+       term::ControlCodes::cursor_position(2, 3),
+       term::control_codes().save_cursor,
+       term::control_codes().disable_alt_screen,
+       term::control_codes().enable_alt_screen,
+       term::control_codes().restore_cursor,
+       term::Raw::from("X")
+    => ContentRegion::All =>
+            reset_codes,
+            empty_scrollback,
+            term::control_codes().enable_alt_screen,
+            term::Crlf::default(),
+            term::Raw::from("  X"),
+            term::ControlCodes::cursor_position(2, 4),
             term::control_codes().clear_attrs
 }

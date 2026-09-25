@@ -671,6 +671,54 @@ impl State {
         screen.clamp();
     }
 
+    /// DECSC. Save the cursor position, along with the state that printing
+    /// depends on, into the active screen's slot.
+    fn save_cursor(&mut self) {
+        let attrs = self.cursor_attrs.clone();
+        let charsets = self.charsets.clone();
+        let screen = self.screen_mut();
+        let pos = screen.cursor;
+        let pending_wrap = screen.pending_wrap;
+        screen.saved_cursor = SavedCursor { pos, attrs, pending_wrap, charsets };
+    }
+
+    /// DECRC. Put back whatever `save_cursor` saved for the active screen.
+    fn restore_cursor(&mut self) {
+        let screen = self.screen_mut();
+        screen.cursor = screen.saved_cursor.pos;
+        screen.pending_wrap = screen.saved_cursor.pending_wrap;
+        let SavedCursor { attrs, charsets, .. } = screen.saved_cursor.clone();
+        self.cursor_attrs = attrs;
+        self.charsets = charsets;
+    }
+
+    /// Switch to the alt screen. With `erase`, the alt screen gets erased
+    /// with the current background color too, even if it was already active.
+    ///
+    /// Like in xterm, the alt screen otherwise keeps whatever it held the
+    /// last time it was active.
+    fn enter_alt_screen(&mut self, erase: bool) {
+        if matches!(self.screen_mode, ScreenMode::Scrollback) {
+            self.altscreen.take_shared_state(&self.scrollback);
+            self.screen_mode = ScreenMode::Alt;
+        }
+        if erase {
+            self.altscreen.erase(&Cell::blank(&self.cursor_attrs));
+        }
+    }
+
+    /// Switch back to the main screen. With `erase`, the alt screen gets
+    /// erased with the current background color on the way out.
+    fn exit_alt_screen(&mut self, erase: bool) {
+        if matches!(self.screen_mode, ScreenMode::Alt) {
+            if erase {
+                self.altscreen.erase(&Cell::blank(&self.cursor_attrs));
+            }
+            self.scrollback.take_shared_state(&self.altscreen);
+            self.screen_mode = ScreenMode::Scrollback;
+        }
+    }
+
     fn write_char_at_cursor(&mut self, cell: Cell) {
         let (insert_mode, autowrap) = (self.insert_mode, self.autowrap);
         if let Err(e) = self.screen_mut().write_at_cursor(cell, insert_mode, autowrap) {
@@ -1308,12 +1356,11 @@ impl vte::Perform for State {
                         [12] => self.cursor_blinking = Some(true),
                         [25] => self.cursor_hidden = false,
                         [1004] => self.report_focus = true,
-                        // enable alt screen
+                        // Switch to the alt screen, saving the cursor
+                        // first and starting out with a blank screen.
                         [1049] => {
-                            // The alt-screen gets reset upon entry, so we need to
-                            // clobber it here.
-                            self.altscreen = Screen::alt(self.altscreen.size);
-                            self.screen_mode = ScreenMode::Alt;
+                            self.save_cursor();
+                            self.enter_alt_screen(true);
                         }
                         [2004] => self.in_paste_mode = true,
                         // Means "pause visual rendering." We are not rendering
@@ -1371,7 +1418,10 @@ impl vte::Perform for State {
                         [12] => self.cursor_blinking = Some(false),
                         [25] => self.cursor_hidden = true,
                         [1004] => self.report_focus = false,
-                        [1049] => self.screen_mode = ScreenMode::Scrollback,
+                        [1049] => {
+                            self.exit_alt_screen(false);
+                            self.restore_cursor();
+                        }
                         [2004] => self.in_paste_mode = false,
                         // Means "resume & flush visual rendering." We are
                         // not rendering anything visually so we don't care.
@@ -1607,23 +1657,9 @@ impl vte::Perform for State {
 
         match (intermediates, byte) {
             // save cursor (ESC 7)
-            ([], b'7') => {
-                let attrs = self.cursor_attrs.clone();
-                let charsets = self.charsets.clone();
-                let screen = self.screen_mut();
-                let pos = screen.cursor.clone();
-                let pending_wrap = screen.pending_wrap;
-                screen.saved_cursor = SavedCursor { pos, attrs, pending_wrap, charsets };
-            }
+            ([], b'7') => self.save_cursor(),
             // restore cursor (ESC 8)
-            ([], b'8') => {
-                let screen = self.screen_mut();
-                screen.cursor = screen.saved_cursor.pos;
-                screen.pending_wrap = screen.saved_cursor.pending_wrap;
-                let SavedCursor { attrs, charsets, .. } = screen.saved_cursor.clone();
-                self.cursor_attrs = attrs;
-                self.charsets = charsets;
-            }
+            ([], b'8') => self.restore_cursor(),
             // HTS (Horizontal Tabluation Set, ESC H)
             ([], b'H') => {
                 let col = self.screen().cursor.col;
