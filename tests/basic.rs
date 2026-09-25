@@ -208,7 +208,7 @@ frag! {
 }
 
 frag! {
-    ascii_charset_ignored { scrollback_lines: 100, width: 10, height: 10 }
+    ascii_charsets { scrollback_lines: 100, width: 10, height: 10 }
     <= term::Raw::from("A"),
        term::control_codes().designate_g0_us_ascii,
        term::Raw::from("B"),
@@ -220,7 +220,8 @@ frag! {
             reset_codes,
             term::Raw::from("ABCD"),
             term::ControlCodes::cursor_position(1, 5),
-            term::control_codes().clear_attrs
+            term::control_codes().clear_attrs,
+            term::control_codes().designate_g0_uk_ascii
 }
 
 frag! {

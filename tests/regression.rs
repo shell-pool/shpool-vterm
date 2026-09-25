@@ -510,6 +510,7 @@ fn restore_resets_modes_left_over_in_the_client() {
     client.process(b"\x1b[4h\x1b[?7l"); // insert mode, no auto-wrap
     client.process(b"\x1b[?25l\x1b[?1h\x1b="); // hidden cursor, app keys
     client.process(b"\x1b[?1002;1006h\x1b[?1004h\x1b[?2004h"); // reporting
+    client.process(b"\x1b(0\x1b)0\x1b*0\x1b+0\x0e"); // line drawing
     client.process(&session.contents(ContentRegion::All));
 
     assert_eq!(client.contents(ContentRegion::All), session.contents(ContentRegion::All));

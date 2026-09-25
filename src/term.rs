@@ -531,6 +531,9 @@ impl Attrs {
 /// sequence, so there is no `ControlCode` for it.
 pub const SHIFT_IN: u8 = 0x0f;
 
+/// Shift Out (SO), which invokes the G1 charset into GL. See `SHIFT_IN`.
+pub const SHIFT_OUT: u8 = 0x0e;
+
 test_pub! {
     // A dictionary of standard control codes. Access codes via the
     // control_codes() function. Most are constant struct members.
@@ -623,6 +626,10 @@ test_pub! {
         pub designate_g2_us_ascii: ControlCode,
         pub designate_g3_us_ascii: ControlCode,
         pub designate_g0_uk_ascii: ControlCode,
+        pub locking_shift_2: ControlCode,
+        pub locking_shift_3: ControlCode,
+        pub single_shift_2: ControlCode,
+        pub single_shift_3: ControlCode,
     }
 }
 
@@ -1259,6 +1266,10 @@ test_pub! {
                 intermediates: smallvec![b'('],
                 byte: b'A',
             },
+            locking_shift_2: ControlCode::ESC { intermediates: smallvec![], byte: b'n' },
+            locking_shift_3: ControlCode::ESC { intermediates: smallvec![], byte: b'o' },
+            single_shift_2: ControlCode::ESC { intermediates: smallvec![], byte: b'N' },
+            single_shift_3: ControlCode::ESC { intermediates: smallvec![], byte: b'O' },
         })
     }
 }
@@ -1657,6 +1668,18 @@ impl ControlCodes {
     pub fn dec_private_modes_reset(modes: &[u16]) -> ControlCode {
         let params = modes.iter().map(|&m| smallvec![m]).collect();
         ControlCode::CSI { params, intermediates: smallvec![b'?'], action: 'l' }
+    }
+
+    /// SCS (Select Character Set), which designates the 94 char set with
+    /// the given final byte into one of the G0-G3 slots.
+    pub fn designate_charset(slot: usize, designator: u8) -> ControlCode {
+        let intermediate = match slot {
+            0 => b'(',
+            1 => b')',
+            2 => b'*',
+            _ => b'+',
+        };
+        ControlCode::ESC { intermediates: smallvec![intermediate], byte: designator }
     }
 }
 

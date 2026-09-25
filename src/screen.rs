@@ -18,6 +18,7 @@
 use crate::{
     altscreen::AltScreen,
     cell::Cell,
+    charset::Charsets,
     line::Line,
     log,
     scrollback::Scrollback,
@@ -564,11 +565,20 @@ pub struct SavedCursor {
     /// back, so a program that saves the cursor right after filling the last
     /// column still wraps once it restores it and keeps printing.
     pub pending_wrap: bool,
+    /// The charset designations and shifts. DECSC saves these too, so a
+    /// program can draw a box somewhere else and then carry on printing
+    /// with whatever charset it had before.
+    pub charsets: Charsets,
 }
 
 impl SavedCursor {
     pub fn new(pos: Pos) -> Self {
-        SavedCursor { pos, attrs: term::Attrs::default(), pending_wrap: false }
+        SavedCursor {
+            pos,
+            attrs: term::Attrs::default(),
+            pending_wrap: false,
+            charsets: Charsets::default(),
+        }
     }
 }
 
