@@ -306,8 +306,15 @@ impl Screen {
     /// fit in what is left of the current line.
     ///
     /// In insert mode (IRM) the rest of the line gets shifted right to make
-    /// room for the cell rather than being overwritten.
-    pub fn write_at_cursor(&mut self, cell: Cell, insert_mode: bool) -> anyhow::Result<()> {
+    /// room for the cell rather than being overwritten. With autowrap
+    /// (DECAWM) off the cursor never leaves the line, and chars that run
+    /// into the right edge overwrite the last column instead.
+    pub fn write_at_cursor(
+        &mut self,
+        cell: Cell,
+        insert_mode: bool,
+        autowrap: bool,
+    ) -> anyhow::Result<()> {
         let width = self.size.width;
         if width == 0 || self.size.height == 0 {
             return Err(anyhow!("cannot write to a zero sized screen"));
@@ -319,12 +326,22 @@ impl Screen {
         self.cursor.clamp_to(self.size);
 
         if self.pending_wrap {
-            self.wrap();
+            if autowrap {
+                self.wrap();
+            } else {
+                // Autowrap was turned off while the wrap was pending.
+                self.pending_wrap = false;
+            }
         }
         // A wide char never gets split across lines. If it does not fit, it
         // goes on the next line and the columns it did not use stay blank.
+        // Without autowrap it gets squeezed in at the end of this one.
         if self.cursor.col + cell_width > width {
-            self.wrap();
+            if autowrap {
+                self.wrap();
+            } else {
+                self.cursor.col = width - cell_width;
+            }
         }
 
         let col = self.cursor.col;
@@ -343,7 +360,7 @@ impl Screen {
             self.cursor.col = col + cell_width;
         } else {
             self.cursor.col = width - 1;
-            self.pending_wrap = true;
+            self.pending_wrap = autowrap;
         }
 
         Ok(())
@@ -711,7 +728,7 @@ mod tests {
         let mut screen = Screen::scrollback(5, size);
         let c = Cell::new('x', term::Attrs::default());
 
-        screen.write_at_cursor(c.clone(), false)?;
+        screen.write_at_cursor(c.clone(), false, true)?;
 
         let pos = Pos { row: 0, col: 0 };
         assert_eq!(
@@ -730,11 +747,11 @@ mod tests {
         let mut screen = Screen::scrollback(5, size);
 
         // Fill first line
-        screen.write_at_cursor(Cell::new('1', term::Attrs::default()), false)?;
-        screen.write_at_cursor(Cell::new('2', term::Attrs::default()), false)?;
+        screen.write_at_cursor(Cell::new('1', term::Attrs::default()), false, true)?;
+        screen.write_at_cursor(Cell::new('2', term::Attrs::default()), false, true)?;
 
         // This should wrap to next line
-        screen.write_at_cursor(Cell::new('3', term::Attrs::default()), false)?;
+        screen.write_at_cursor(Cell::new('3', term::Attrs::default()), false, true)?;
 
         assert_eq!(
             get_screen_cell(&screen, 0, 0),
@@ -765,7 +782,7 @@ mod tests {
 
         // Populate an initial line that will get pushed off
         for _ in 0..10 {
-            screen.write_at_cursor(Cell::new('X', term::Attrs::default()), false)?;
+            screen.write_at_cursor(Cell::new('X', term::Attrs::default()), false, true)?;
         }
 
         let c_top = Cell::new('T', term::Attrs::default());
@@ -773,13 +790,13 @@ mod tests {
         let c_bot = Cell::new('B', term::Attrs::default());
 
         for _ in 0..10 {
-            screen.write_at_cursor(c_top.clone(), false)?;
+            screen.write_at_cursor(c_top.clone(), false, true)?;
         }
         for _ in 0..10 {
-            screen.write_at_cursor(c_mid.clone(), false)?;
+            screen.write_at_cursor(c_mid.clone(), false, true)?;
         }
         for _ in 0..10 {
-            screen.write_at_cursor(c_bot.clone(), false)?;
+            screen.write_at_cursor(c_bot.clone(), false, true)?;
         }
 
         for r in 0..3 {
@@ -807,6 +824,7 @@ mod tests {
             screen.write_at_cursor(
                 Cell::new(char::from_digit(i, 10).unwrap(), term::Attrs::default()),
                 false,
+                true,
             )?;
         }
 
@@ -845,6 +863,7 @@ mod tests {
             screen.write_at_cursor(
                 Cell::new(char::from_digit(i, 10).unwrap(), term::Attrs::default()),
                 false,
+                true,
             )?;
         }
 
@@ -898,6 +917,7 @@ mod tests {
                 screen.write_at_cursor(
                     Cell::new(char::from_u32(65 + i % 26).unwrap(), term::Attrs::default()),
                     false,
+                    true,
                 )?;
             }
 
@@ -913,6 +933,7 @@ mod tests {
                 expected_screen.write_at_cursor(
                     Cell::new(char::from_u32(65 + i % 26).unwrap(), term::Attrs::default()),
                     false,
+                    true,
                 )?;
             }
 

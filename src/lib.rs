@@ -256,6 +256,10 @@ struct State {
     in_paste_mode: bool,
     /// Tracks insertion / replacement mode (IRM). Controlled via `CSI 4 {h,l}`.
     insert_mode: bool,
+    /// Tracks auto-wrap mode (DECAWM). When it is off, chars written at the
+    /// right edge of the screen overwrite the last column instead of wrapping
+    /// onto the next line. Controlled via `CSI ? 7 {h,l}`.
+    autowrap: bool,
     /// Tab stop columns. By default, these are spaced 8 cols apart
     /// starting at col 9, but they can be directly manipulated by certain
     /// control codes as well.
@@ -306,6 +310,7 @@ impl State {
             report_focus: false,
             in_paste_mode: false,
             insert_mode: false,
+            autowrap: true,
             tabstops: bitvec![0; size.width],
             last_print_char: None,
             logger: log::Context::None,
@@ -520,6 +525,11 @@ impl State {
         if self.insert_mode {
             controls.enable_insert_mode.term_input_into(buf);
         }
+        // This has to come after the screen contents, since restoring a
+        // pending wrap relies on the terminal wrapping.
+        if !self.autowrap {
+            controls.disable_autowrap.term_input_into(buf);
+        }
         for (idx, mode) in MOUSE_MODES.iter().enumerate() {
             if self.mouse_modes[idx] {
                 ControlCodes::dec_private_modes_set(&[*mode]).term_input_into(buf);
@@ -587,8 +597,8 @@ impl State {
     }
 
     fn write_char_at_cursor(&mut self, cell: Cell) {
-        let insert_mode = self.insert_mode;
-        if let Err(e) = self.screen_mut().write_at_cursor(cell, insert_mode) {
+        let (insert_mode, autowrap) = (self.insert_mode, self.autowrap);
+        if let Err(e) = self.screen_mut().write_at_cursor(cell, insert_mode, autowrap) {
             warn!(self.logger, "writing char at cursor: {:?}", e);
         }
     }
@@ -1201,6 +1211,7 @@ impl vte::Perform for State {
                         // is irrelevant in a headless virtual terminal.
                         [4] => {},
                         [6] => self.screen_mut().set_origin_mode(OriginMode::ScrollRegion),
+                        [7] => self.autowrap = true,
                         [12] => self.cursor_blinking = Some(true),
                         [25] => self.cursor_hidden = false,
                         [1004] => self.report_focus = true,
@@ -1263,6 +1274,7 @@ impl vte::Perform for State {
                         // is irrelevant in a headless virtual terminal.
                         [4] => {},
                         [6] => self.screen_mut().set_origin_mode(OriginMode::Term),
+                        [7] => self.autowrap = false,
                         [12] => self.cursor_blinking = Some(false),
                         [25] => self.cursor_hidden = true,
                         [1004] => self.report_focus = false,
@@ -1418,6 +1430,7 @@ impl vte::Perform for State {
                     self.cursor_attrs = term::Attrs::default();
                     self.cursor_blinking = None;
                     self.insert_mode = false;
+                    self.autowrap = true;
 
                     warn!(self.logger, "DECSTR only partially handled");
                 }
@@ -1537,6 +1550,7 @@ impl vte::Perform for State {
                 self.cursor_attrs = term::Attrs::default();
                 self.cursor_blinking = None;
                 self.insert_mode = false;
+                self.autowrap = true;
 
                 warn!(self.logger, "RIS only partially handled");
             }

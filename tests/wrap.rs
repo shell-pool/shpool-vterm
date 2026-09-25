@@ -273,3 +273,70 @@ fn narrowing_resize_keeps_a_pending_wrap() {
         contents_after(Size { width: 2, height: 3 }, b"abcde")
     );
 }
+
+// With autowrap (DECAWM) off, chars that run into the right edge keep
+// overwriting the last column.
+frag! {
+    autowrap_off_overwrites_the_last_column { scrollback_lines: 100, width: 3, height: 3 }
+    <= term::control_codes().disable_autowrap,
+       term::Raw::from("abcde")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("abe"),
+            term::ControlCodes::cursor_position(1, 3),
+            term::control_codes().clear_attrs,
+            term::control_codes().disable_autowrap
+}
+
+frag! {
+    autowrap_off_squeezes_a_wide_char_in_at_the_end { scrollback_lines: 100, width: 3, height: 3 }
+    <= term::control_codes().disable_autowrap,
+       term::Raw::from("abc😊")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("a😊"),
+            term::ControlCodes::cursor_position(1, 3),
+            term::control_codes().clear_attrs,
+            term::control_codes().disable_autowrap
+}
+
+frag! {
+    autowrap_turned_off_with_a_wrap_pending { scrollback_lines: 100, width: 3, height: 3 }
+    <= term::Raw::from("abc"),
+       term::control_codes().disable_autowrap,
+       term::Raw::from("d")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("abd"),
+            term::ControlCodes::cursor_position(1, 3),
+            term::control_codes().clear_attrs,
+            term::control_codes().disable_autowrap
+}
+
+frag! {
+    autowrap_turned_back_on { scrollback_lines: 100, width: 3, height: 3 }
+    <= term::control_codes().disable_autowrap,
+       term::control_codes().enable_autowrap,
+       term::Raw::from("abcd")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("abc"),
+            term::Crlf::default(),
+            term::Raw::from("d"),
+            term::ControlCodes::cursor_position(2, 2),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    decstr_turns_autowrap_back_on { scrollback_lines: 100, width: 3, height: 3 }
+    <= term::control_codes().disable_autowrap,
+       term::control_codes().soft_reset,
+       term::Raw::from("abcd")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("abc"),
+            term::Crlf::default(),
+            term::Raw::from("d"),
+            term::ControlCodes::cursor_position(2, 2),
+            term::control_codes().clear_attrs
+}

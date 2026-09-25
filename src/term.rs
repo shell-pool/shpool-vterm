@@ -598,6 +598,8 @@ test_pub! {
         pub disable_paste_mode: ControlCode,
         pub enable_insert_mode: ControlCode,
         pub disable_insert_mode: ControlCode,
+        pub enable_autowrap: ControlCode,
+        pub disable_autowrap: ControlCode,
         pub enable_132_column_mode: ControlCode,
         pub disable_132_column_mode: ControlCode,
         pub enable_smooth_scroll_mode: ControlCode,
@@ -1169,6 +1171,16 @@ test_pub! {
             disable_insert_mode: ControlCode::CSI {
                 params: smallvec![smallvec![4]],
                 intermediates: smallvec![],
+                action: 'l',
+            },
+            enable_autowrap: ControlCode::CSI {
+                params: smallvec![smallvec![7]],
+                intermediates: smallvec![b'?'],
+                action: 'h',
+            },
+            disable_autowrap: ControlCode::CSI {
+                params: smallvec![smallvec![7]],
+                intermediates: smallvec![b'?'],
                 action: 'l',
             },
             enable_132_column_mode: ControlCode::CSI {
