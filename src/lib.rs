@@ -16,6 +16,7 @@ use std::collections::BTreeMap;
 
 use crate::{
     cell::Cell,
+    charset::{Charset, Charsets},
     screen::{SavedCursor, Screen},
     term::{
         AsTermInput, BlinkStyle, ControlCodes, FontWeight, FrameStyle, LinkTarget, OriginMode,
@@ -35,6 +36,7 @@ mod log;
 
 mod altscreen;
 mod cell;
+mod charset;
 mod line;
 mod screen;
 mod scrollback;
@@ -318,6 +320,9 @@ struct State {
     /// collapsed into a single effective mode, since the application will
     /// expect everything it set to still be in force after a reattach.
     mouse_modes: [bool; MOUSE_MODES.len()],
+    /// The charsets printed chars get translated through. Apps switch to
+    /// the DEC special graphics set to draw lines and boxes.
+    charsets: Charsets,
     /// Tab stop columns. By default, these are spaced 8 cols apart
     /// starting at col 9, but they can be directly manipulated by certain
     /// control codes as well.
@@ -363,6 +368,7 @@ impl State {
             modes: Modes::empty(),
             cursor_blinking: None,
             mouse_modes: [false; MOUSE_MODES.len()],
+            charsets: Charsets::default(),
             tabstops: bitvec![0; size.width],
             last_print_char: None,
             logger: log::Context::None,
@@ -611,6 +617,11 @@ impl State {
 
             functional_color_idx += 1;
         }
+
+        // The screen holds chars that have already been through the
+        // charsets, so painting it has to happen with plain ascii in place.
+        // Switch the charsets over last, once there is nothing left to paint.
+        self.charsets.dump_into(buf);
     }
 
     /// Set a run within the functional colors table starting at the given
@@ -705,6 +716,9 @@ enum ScreenMode {
 impl vte::Perform for State {
     fn print(&mut self, c: char) {
         trace!(self.logger, "print: {}", c);
+        // Store the char that gets displayed rather than the one that was
+        // sent, so the dump doesn't depend on the charsets.
+        let c = self.charsets.translate(c);
 
         match UnicodeWidthChar::width(c) {
             // Control chars have no printable form. vte routes the C0 set to
@@ -763,6 +777,10 @@ impl vte::Perform for State {
             }
             // bell, ignore
             b'\x07' => {}
+            // SO (Shift Out) and SI (Shift In) switch printed chars over to
+            // the G1 charset and back to G0.
+            term::SHIFT_OUT => self.charsets.lock_shift(1),
+            term::SHIFT_IN => self.charsets.lock_shift(0),
             _ => {
                 warn!(self.logger, "execute: unhandled byte {}", byte);
             }
@@ -1483,6 +1501,7 @@ impl vte::Perform for State {
                     self.cursor_blinking = None;
                     self.modes.remove(Modes::INSERT);
                     self.modes.remove(Modes::AUTOWRAP_DISABLED);
+                    self.charsets = Charsets::default();
 
                     warn!(self.logger, "DECSTR only partially handled");
                 }
@@ -1563,17 +1582,20 @@ impl vte::Perform for State {
             // save cursor (ESC 7)
             ([], b'7') => {
                 let attrs = self.cursor_attrs.clone();
+                let charsets = self.charsets.clone();
                 let screen = self.screen_mut();
                 let pos = screen.cursor.clone();
                 let pending_wrap = screen.pending_wrap;
-                screen.saved_cursor = SavedCursor { pos, attrs, pending_wrap };
+                screen.saved_cursor = SavedCursor { pos, attrs, pending_wrap, charsets };
             }
             // restore cursor (ESC 8)
             ([], b'8') => {
                 let screen = self.screen_mut();
                 screen.cursor = screen.saved_cursor.pos;
                 screen.pending_wrap = screen.saved_cursor.pending_wrap;
-                self.cursor_attrs = screen.saved_cursor.attrs.clone();
+                let SavedCursor { attrs, charsets, .. } = screen.saved_cursor.clone();
+                self.cursor_attrs = attrs;
+                self.charsets = charsets;
             }
             // HTS (Horizontal Tabluation Set, ESC H)
             ([], b'H') => {
@@ -1603,6 +1625,7 @@ impl vte::Perform for State {
                 self.cursor_blinking = None;
                 self.modes.remove(Modes::INSERT);
                 self.modes.remove(Modes::AUTOWRAP_DISABLED);
+                self.charsets = Charsets::default();
 
                 warn!(self.logger, "RIS only partially handled");
             }
@@ -1611,9 +1634,32 @@ impl vte::Perform for State {
             ([], b'=') => self.modes.insert(Modes::APPLICATION_KEYPAD),
             ([], b'>') => self.modes.remove(Modes::APPLICATION_KEYPAD),
 
-            // Designates US-ASCII or UK-ASCII as a G0-G3 character set. We handle
-            // utf-8, which is a superset of ascii, so this is a no-op.
-            ([b'(' | b')' | b'*' | b'+'], b'B' | b'A') => {}
+            // SCS (Select Character Set) designates a set of 94 chars into
+            // one of the G0-G3 slots.
+            ([b'('], designator) => {
+                self.charsets.designate(0, Charset::from_designator(designator))
+            }
+            ([b')'], designator) => {
+                self.charsets.designate(1, Charset::from_designator(designator))
+            }
+            ([b'*'], designator) => {
+                self.charsets.designate(2, Charset::from_designator(designator))
+            }
+            ([b'+'], designator) => {
+                self.charsets.designate(3, Charset::from_designator(designator))
+            }
+            // Sets of 96 chars only make sense for the upper half of an 8 bit
+            // charset, which utf-8 leaves no room for.
+            ([b'-' | b'.' | b'/'], _) => debug!(self.logger, "ignoring 96 char set designation"),
+            // LS2 / LS3 (Locking Shift 2 / 3)
+            ([], b'n') => self.charsets.lock_shift(2),
+            ([], b'o') => self.charsets.lock_shift(3),
+            // SS2 / SS3 (Single Shift 2 / 3)
+            ([], b'N') => self.charsets.single_shift(2),
+            ([], b'O') => self.charsets.single_shift(3),
+            // Select utf-8 (ESC % G) or the terminal's default encoding
+            // (ESC % @). We only speak utf-8.
+            ([b'%'], b'G' | b'@') => {}
 
             // OSC terminators that get sent to the esc handler as well,
             // we can ignore them.

@@ -526,6 +526,11 @@ fn restore_resets_modes_left_over_in_the_client() {
         term::ControlCodes::dec_private_modes_set(&[1002, 1006]),
         term::control_codes().enable_report_focus,
         term::control_codes().enable_paste_mode,
+        term::ControlCodes::designate_charset(0, b'0'),
+        term::ControlCodes::designate_charset(1, b'0'),
+        term::ControlCodes::designate_charset(2, b'0'),
+        term::ControlCodes::designate_charset(3, b'0'),
+        term::control_codes().shift_out,
     ]);
     client.process(&session.contents(ContentRegion::All));
 

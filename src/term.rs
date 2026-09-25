@@ -528,6 +528,9 @@ impl Attrs {
 /// charset table that printable chars get looked up in.
 pub const SHIFT_IN: u8 = 0x0f;
 
+/// Shift Out (SO), which invokes the G1 charset into GL. See `SHIFT_IN`.
+pub const SHIFT_OUT: u8 = 0x0e;
+
 test_pub! {
     // A dictionary of standard control codes. Access codes via the
     // control_codes() function. Most are constant struct members.
@@ -568,6 +571,7 @@ test_pub! {
         pub reverse_index: ControlCode,
         pub backspace: ControlCode,
         pub shift_in: ControlCode,
+        pub shift_out: ControlCode,
         pub cursor_backward_tab: ControlCode,
         pub cursor_backwards_tab: ControlCode,
         pub insert_character: ControlCode,
@@ -624,6 +628,10 @@ test_pub! {
         pub designate_g2_us_ascii: ControlCode,
         pub designate_g3_us_ascii: ControlCode,
         pub designate_g0_uk_ascii: ControlCode,
+        pub locking_shift_2: ControlCode,
+        pub locking_shift_3: ControlCode,
+        pub single_shift_2: ControlCode,
+        pub single_shift_3: ControlCode,
     }
 }
 
@@ -1040,6 +1048,7 @@ test_pub! {
             reverse_index: ControlCode::ESC { intermediates: smallvec![], byte: b'M' },
             backspace: ControlCode::C0 { byte: 0x08 },
             shift_in: ControlCode::C0 { byte: SHIFT_IN },
+            shift_out: ControlCode::C0 { byte: SHIFT_OUT },
             cursor_backward_tab: ControlCode::CSI {
                 params: smallvec![],
                 intermediates: smallvec![],
@@ -1303,6 +1312,10 @@ test_pub! {
                 intermediates: smallvec![b'('],
                 byte: b'A',
             },
+            locking_shift_2: ControlCode::ESC { intermediates: smallvec![], byte: b'n' },
+            locking_shift_3: ControlCode::ESC { intermediates: smallvec![], byte: b'o' },
+            single_shift_2: ControlCode::ESC { intermediates: smallvec![], byte: b'N' },
+            single_shift_3: ControlCode::ESC { intermediates: smallvec![], byte: b'O' },
         })
     }
 }
@@ -1796,6 +1809,18 @@ impl ControlCodes {
     pub fn dec_private_modes_reset(modes: &[u16]) -> ControlCode {
         let params = modes.iter().map(|&m| smallvec![m]).collect();
         ControlCode::CSI { params, intermediates: smallvec![b'?'], action: 'l' }
+    }
+
+    /// SCS (Select Character Set), which designates the 94 char set with
+    /// the given final byte into one of the G0-G3 slots.
+    pub fn designate_charset(slot: usize, designator: u8) -> ControlCode {
+        let intermediate = match slot {
+            0 => b'(',
+            1 => b')',
+            2 => b'*',
+            _ => b'+',
+        };
+        ControlCode::ESC { intermediates: smallvec![intermediate], byte: designator }
     }
 }
 
