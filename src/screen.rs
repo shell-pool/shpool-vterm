@@ -288,11 +288,17 @@ impl Screen {
                         saved_cursor,
                         self.saved_cursor.pending_wrap,
                     ),
+                    // Where the top of the screen ends up says how many rows
+                    // the old screen contents take up after the resize.
+                    scrollback.anchor_cursor(old_size, Pos { row: 0, col: 0 }, false),
                 ];
                 // Only the width decides where lines wrap.
                 if new_size.width != old_size.width {
                     scrollback.reflow(old_size.width, new_size.width, &mut anchors);
                 }
+                let [cursor_anchor, saved_anchor, top_anchor] = anchors;
+                let mut anchors = [cursor_anchor, saved_anchor];
+                scrollback.trim_blank_rows(new_size, top_anchor, &mut anchors);
                 (
                     (scrollback.resolve_cursor(new_size, anchors[0]), anchors[0].pending_wrap),
                     (scrollback.resolve_cursor(new_size, anchors[1]), anchors[1].pending_wrap),

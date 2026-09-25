@@ -167,6 +167,62 @@ impl Scrollback {
         Pos { row, col: anchor.col }
     }
 
+    /// Drop the blank rows at the bottom of the buffer that would otherwise
+    /// push the content that was on the screen up into the scrollback once it
+    /// no longer fits.
+    ///
+    /// Clearing the screen erases it and homes the cursor, which leaves the
+    /// prompt sitting on top of a screen full of blank rows. When the screen
+    /// gets shorter, or narrower lines take up more rows, it is those rows
+    /// that should go rather than the prompt. `top` is where the top of the
+    /// screen was before the resize. Rows are only dropped from below every
+    /// one of `anchors`, which get moved to stay on the rows they were on.
+    pub fn trim_blank_rows(
+        &mut self,
+        size: crate::Size,
+        top: CursorAnchor,
+        anchors: &mut [CursorAnchor],
+    ) {
+        // Nothing is stored, so there is nothing to drop.
+        let AnchorRow::Line(top_idx) = top.row else {
+            return;
+        };
+        // A screen with no rows is most likely just a passing state while a
+        // window gets resized, so don't throw anything away over it.
+        if size.height == 0 {
+            return;
+        }
+
+        let overflow = (top_idx + 1).saturating_sub(size.height);
+        let below_anchors = anchors
+            .iter()
+            .map(|anchor| match anchor.row {
+                AnchorRow::Line(idx) => idx,
+                // Every stored row is above this cursor.
+                AnchorRow::BelowContent(_) => 0,
+            })
+            .min()
+            .unwrap_or(usize::MAX);
+        let max = std::cmp::min(overflow, below_anchors);
+
+        let is_blank = |line: &Line| !line.is_wrapped && line.cells.iter().all(looks_unused);
+        let mut n = 0;
+        // The rest of a wrapped line is part of it, blank or not.
+        while n < max
+            && self.buf.get(n).is_some_and(is_blank)
+            && !self.buf.get(n + 1).is_some_and(|line| line.is_wrapped)
+        {
+            n += 1;
+        }
+        self.buf.drain(..n);
+
+        for anchor in anchors.iter_mut() {
+            if let AnchorRow::Line(idx) = &mut anchor.row {
+                *idx -= n;
+            }
+        }
+    }
+
     pub fn dump_contents_into(
         &self,
         buf: &mut Vec<u8>,

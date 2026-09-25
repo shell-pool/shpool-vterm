@@ -743,6 +743,132 @@ fn cursor_stays_on_the_bottom_row_when_the_height_shrinks() {
     assert_eq!(term.contents(ContentRegion::Screen), expected);
 }
 
+// Clearing the screen erases it and homes the cursor, which leaves the prompt
+// on the top row with a screen full of blank rows under it. Shrinking the
+// height has to drop those rows rather than push the prompt up into the
+// scrollback, which used to leave the cursor on an empty screen.
+#[test]
+fn shrinking_a_cleared_screen_keeps_the_prompt_on_it() {
+    use shpool_vterm::term::AsTermInput;
+
+    let mut input = vec![];
+    for row in ["11", "22", "33", "44"] {
+        term::Raw::from(row).term_input_into(&mut input);
+        term::Crlf::default().term_input_into(&mut input);
+    }
+    term::Raw::from("55").term_input_into(&mut input);
+    term::ControlCodes::cursor_position(1, 1).term_input_into(&mut input);
+    term::control_codes().erase_screen.term_input_into(&mut input);
+    term::Raw::from("$ ").term_input_into(&mut input);
+
+    let mut term = shpool_vterm::Term::new(100, shpool_vterm::Size { width: 5, height: 5 });
+    term.process(input.as_slice());
+    term.resize(shpool_vterm::Size { width: 5, height: 3 });
+
+    let mut expected = vec![];
+    crate::support::frag::reset_codes.term_input_into(&mut expected);
+    term::Raw::from("$ ").term_input_into(&mut expected);
+    term::Crlf::default().term_input_into(&mut expected);
+    term::Crlf::default().term_input_into(&mut expected);
+    term::ControlCodes::cursor_position(1, 3).term_input_into(&mut expected);
+    term::control_codes().clear_attrs.term_input_into(&mut expected);
+
+    assert_eq!(term.contents(ContentRegion::All), expected);
+}
+
+// Only as many blank rows go as it takes to keep what was on the screen on
+// it, and never the ones the cursor is on or above.
+#[test]
+fn shrinking_drops_blank_rows_from_below_the_cursor() {
+    use shpool_vterm::term::AsTermInput;
+
+    let mut input = vec![];
+    for row in ["11", "22", "33", "44"] {
+        term::Raw::from(row).term_input_into(&mut input);
+        term::Crlf::default().term_input_into(&mut input);
+    }
+    term::Raw::from("55").term_input_into(&mut input);
+    term::ControlCodes::cursor_position(2, 3).term_input_into(&mut input);
+    term::control_codes().erase_to_end.term_input_into(&mut input);
+
+    let mut term = shpool_vterm::Term::new(100, shpool_vterm::Size { width: 5, height: 5 });
+    term.process(input.as_slice());
+    term.resize(shpool_vterm::Size { width: 5, height: 2 });
+
+    let mut expected = vec![];
+    crate::support::frag::reset_codes.term_input_into(&mut expected);
+    term::Raw::from("11").term_input_into(&mut expected);
+    term::Crlf::default().term_input_into(&mut expected);
+    term::Raw::from("22").term_input_into(&mut expected);
+    term::ControlCodes::cursor_position(2, 3).term_input_into(&mut expected);
+    term::control_codes().clear_attrs.term_input_into(&mut expected);
+
+    assert_eq!(term.contents(ContentRegion::All), expected);
+}
+
+// Text below the cursor stays, and so do the blank rows above it. The screen
+// gets pushed up into the scrollback like before.
+#[test]
+fn shrinking_keeps_text_below_the_cursor() {
+    use shpool_vterm::term::AsTermInput;
+
+    let mut input = vec![];
+    for row in ["11", "22", "33", ""] {
+        term::Raw::from(row).term_input_into(&mut input);
+        term::Crlf::default().term_input_into(&mut input);
+    }
+    term::Raw::from("55").term_input_into(&mut input);
+    term::ControlCodes::cursor_position(3, 1).term_input_into(&mut input);
+
+    let mut term = shpool_vterm::Term::new(100, shpool_vterm::Size { width: 5, height: 5 });
+    term.process(input.as_slice());
+    term.resize(shpool_vterm::Size { width: 5, height: 3 });
+
+    let mut expected = vec![];
+    crate::support::frag::reset_codes.term_input_into(&mut expected);
+    term::Raw::from("33").term_input_into(&mut expected);
+    term::Crlf::default().term_input_into(&mut expected);
+    term::Crlf::default().term_input_into(&mut expected);
+    term::Raw::from("55").term_input_into(&mut expected);
+    term::ControlCodes::cursor_position(1, 1).term_input_into(&mut expected);
+    term::control_codes().clear_attrs.term_input_into(&mut expected);
+
+    assert_eq!(term.contents(ContentRegion::Screen), expected);
+}
+
+// Narrowing splits long lines into more rows, which pushes the screen up just
+// like shrinking the height does, and the blank rows at the bottom make up
+// for it the same way.
+#[test]
+fn narrowing_drops_blank_rows_from_below_the_cursor() {
+    use shpool_vterm::term::AsTermInput;
+
+    let mut input = vec![];
+    term::Raw::from("abcdef").term_input_into(&mut input);
+    term::Crlf::default().term_input_into(&mut input);
+    term::Raw::from("gh").term_input_into(&mut input);
+    term::Crlf::default().term_input_into(&mut input);
+    term::Raw::from("ij").term_input_into(&mut input);
+    term::ControlCodes::cursor_position(2, 3).term_input_into(&mut input);
+    term::control_codes().erase_to_end.term_input_into(&mut input);
+
+    let mut term = shpool_vterm::Term::new(100, shpool_vterm::Size { width: 6, height: 3 });
+    term.process(input.as_slice());
+    term.resize(shpool_vterm::Size { width: 3, height: 3 });
+
+    let mut expected = vec![];
+    crate::support::frag::reset_codes.term_input_into(&mut expected);
+    term::Raw::from("abc").term_input_into(&mut expected);
+    term::Crlf::default().term_input_into(&mut expected);
+    term::Raw::from("def").term_input_into(&mut expected);
+    term::Crlf::default().term_input_into(&mut expected);
+    term::Raw::from("gh").term_input_into(&mut expected);
+    term::ControlCodes::cursor_position(3, 3).term_input_into(&mut expected);
+    term::control_codes().clear_attrs.term_input_into(&mut expected);
+
+    assert_eq!(term.contents(ContentRegion::All), expected);
+}
+
 // DECSC stores a row too, so it has the same problem as the live cursor: a
 // resize between the save and the restore moves the line out from under it.
 // Save on "55", park the live cursor elsewhere so a fix cannot get this right
