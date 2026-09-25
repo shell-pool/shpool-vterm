@@ -1787,6 +1787,14 @@ impl ControlCodes {
         }
     }
 
+    /// The one CSI that `codes` fuse into, the way the dump fuses runs of
+    /// SGRs. The codes all have to share an action and intermediates.
+    pub fn fused_csi(codes: &[&ControlCode]) -> ControlCode {
+        let mut fused = ControlCode::fuse_csi(codes.iter().map(|&code| code.clone()));
+        assert_eq!(fused.len(), 1, "codes do not fuse into one CSI");
+        fused.pop().unwrap()
+    }
+
     /// A CSI with the given private marker or intermediates and a single
     /// value for each param.
     fn csi<P: IntoIterator<Item = u16>>(
