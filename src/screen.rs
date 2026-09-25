@@ -361,10 +361,7 @@ impl Screen {
         if insert_mode {
             line.insert_character(width, col, cell_width);
         }
-        line.set_cell(width, col, cell).context("setting main cell")?;
-        for pad_col in col + 1..col + cell_width {
-            line.set_cell(width, pad_col, Cell::wide_pad()).context("padding after wide char")?;
-        }
+        line.set_cell(width, col, cell).context("setting cell")?;
 
         if col + cell_width < width {
             self.cursor.col = col + cell_width;
