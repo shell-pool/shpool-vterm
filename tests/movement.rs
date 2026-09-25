@@ -321,7 +321,7 @@ frag! {
             term::Crlf::default(),
             term::Raw::from("X"),
             term::ControlCodes::set_scroll_region(2, 4),
-            term::ControlCodes::cursor_position(3, 2),
+            term::ControlCodes::cursor_position(1, 1),
             term::control_codes().clear_attrs
 }
 
@@ -434,7 +434,7 @@ frag! {
             reset_codes,
             term::Raw::from("A"),
             term::ControlCodes::set_scroll_region(2, 5),
-            term::ControlCodes::cursor_position(1, 2),
+            term::ControlCodes::cursor_position(1, 1),
             term::control_codes().clear_attrs
 }
 
@@ -453,12 +453,12 @@ frag! {
     <= term::ControlCodes::set_scroll_region(2, 3),
        term::control_codes().enable_scroll_region_origin_mode,
        term::ControlCodes::cursor_position(1, 1),
-       term::ControlCodes::cursor_up(1),
-       term::control_codes().disable_scroll_region_origin_mode
+       term::ControlCodes::cursor_up(1)
     => ContentRegion::All =>
             reset_codes,
             term::ControlCodes::set_scroll_region(2, 3),
-            term::ControlCodes::cursor_position(2, 1),
+            term::control_codes().enable_scroll_region_origin_mode,
+            term::ControlCodes::cursor_position(1, 1),
             term::control_codes().clear_attrs
 }
 
@@ -467,12 +467,12 @@ frag! {
     <= term::ControlCodes::set_scroll_region(2, 3),
        term::control_codes().enable_scroll_region_origin_mode,
        term::ControlCodes::cursor_position(2, 1),
-       term::ControlCodes::cursor_down(1),
-       term::control_codes().disable_scroll_region_origin_mode
+       term::ControlCodes::cursor_down(1)
     => ContentRegion::All =>
             reset_codes,
             term::ControlCodes::set_scroll_region(2, 3),
-            term::ControlCodes::cursor_position(3, 1),
+            term::control_codes().enable_scroll_region_origin_mode,
+            term::ControlCodes::cursor_position(2, 1),
             term::control_codes().clear_attrs
 }
 
@@ -489,7 +489,7 @@ frag! {
             term::Crlf::default(),
             term::Raw::from(" X"),
             term::ControlCodes::set_scroll_region(2, 3),
-            term::ControlCodes::cursor_position(3, 3),
+            term::ControlCodes::cursor_position(1, 1),
             term::control_codes().clear_attrs
 }
 
@@ -523,7 +523,7 @@ frag! {
             term::Crlf::default(),
             term::Raw::from(" X"),
             term::ControlCodes::set_scroll_region(2, 3),
-            term::ControlCodes::cursor_position(3, 3),
+            term::ControlCodes::cursor_position(1, 1),
             term::control_codes().clear_attrs
 }
 
@@ -888,5 +888,117 @@ frag! {
             term::Raw::from("3"),
             term::ControlCodes::set_scroll_region(1, 3),
             term::ControlCodes::cursor_position(3, 2),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    scroll_region_homes_cursor { scrollback_lines: 100, width: 10, height: 10 }
+    <= term::Raw::from("abc"),
+       term::ControlCodes::cursor_position(5, 5),
+       term::ControlCodes::set_scroll_region(2, 4),
+       term::Raw::from("X")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("Xbc"),
+            term::ControlCodes::set_scroll_region(2, 4),
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    scroll_region_homes_cursor_in_origin_mode { scrollback_lines: 100, width: 10, height: 10 }
+    <= term::control_codes().enable_scroll_region_origin_mode,
+       term::ControlCodes::cursor_position(5, 5),
+       term::ControlCodes::set_scroll_region(3, 6),
+       term::Raw::from("X")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::Raw::from("X"),
+            term::ControlCodes::set_scroll_region(3, 6),
+            term::control_codes().enable_scroll_region_origin_mode,
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    scroll_region_cancels_pending_wrap { scrollback_lines: 100, width: 5, height: 5 }
+    <= term::Raw::from("abcde"),
+       term::ControlCodes::set_scroll_region(2, 4),
+       term::Raw::from("X")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("Xbcde"),
+            term::ControlCodes::set_scroll_region(2, 4),
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    scroll_region_top_only { scrollback_lines: 100, width: 10, height: 10 }
+    <= term::Raw::from("\x1b[3r")
+    => ContentRegion::All =>
+            reset_codes,
+            term::ControlCodes::set_scroll_region(3, 10),
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    scroll_region_whole_screen { scrollback_lines: 100, width: 10, height: 10 }
+    <= term::ControlCodes::set_scroll_region(2, 4),
+       term::ControlCodes::set_scroll_region(1, 10)
+    => ContentRegion::All =>
+            reset_codes,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs
+}
+
+// A region has to span at least two rows. Anything else leaves both the
+// region and the cursor alone.
+frag! {
+    scroll_region_invalid_ignored { scrollback_lines: 100, width: 10, height: 10 }
+    <= term::ControlCodes::set_scroll_region(2, 5),
+       term::ControlCodes::cursor_position(4, 4),
+       term::ControlCodes::set_scroll_region(5, 5),
+       term::ControlCodes::set_scroll_region(6, 3),
+       term::ControlCodes::set_scroll_region(11, 20)
+    => ContentRegion::All =>
+            reset_codes,
+            term::ControlCodes::set_scroll_region(2, 5),
+            term::ControlCodes::cursor_position(4, 4),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    origin_mode_homes_cursor { scrollback_lines: 100, width: 10, height: 10 }
+    <= term::ControlCodes::set_scroll_region(3, 6),
+       term::ControlCodes::cursor_position(8, 5),
+       term::control_codes().enable_scroll_region_origin_mode,
+       term::Raw::from("X")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::Raw::from("X"),
+            term::ControlCodes::set_scroll_region(3, 6),
+            term::control_codes().enable_scroll_region_origin_mode,
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    origin_mode_reset_homes_cursor { scrollback_lines: 100, width: 10, height: 10 }
+    <= term::ControlCodes::set_scroll_region(3, 6),
+       term::control_codes().enable_scroll_region_origin_mode,
+       term::ControlCodes::cursor_position(2, 5),
+       term::control_codes().disable_scroll_region_origin_mode,
+       term::Raw::from("X")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("X"),
+            term::ControlCodes::set_scroll_region(3, 6),
+            term::ControlCodes::cursor_position(1, 2),
             term::control_codes().clear_attrs
 }

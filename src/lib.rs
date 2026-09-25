@@ -656,6 +656,15 @@ impl State {
         }
     }
 
+    /// DECOM. Switching origin mode either way homes the cursor, which is the
+    /// top of the scroll region once origin mode is on.
+    fn set_origin_mode(&mut self, origin_mode: OriginMode) {
+        let screen = self.screen_mut();
+        screen.set_origin_mode(origin_mode);
+        screen.set_cursor(term::Pos { row: 1, col: 1 });
+        screen.clamp();
+    }
+
     fn write_char_at_cursor(&mut self, cell: Cell) {
         let (insert_mode, autowrap) = (self.insert_mode, self.autowrap);
         if let Err(e) = self.screen_mut().write_at_cursor(cell, insert_mode, autowrap) {
@@ -1288,7 +1297,7 @@ impl vte::Perform for State {
                         // Smooth Scroll Mode (DECSCLM). Visual display scrolling timing
                         // is irrelevant in a headless virtual terminal.
                         [4] => {},
-                        [6] => self.screen_mut().set_origin_mode(OriginMode::ScrollRegion),
+                        [6] => self.set_origin_mode(OriginMode::ScrollRegion),
                         [7] => self.autowrap = true,
                         [12] => self.cursor_blinking = Some(true),
                         [25] => self.cursor_hidden = false,
@@ -1351,7 +1360,7 @@ impl vte::Perform for State {
                         // Jump Scroll Mode (DECSCLM). Visual display scrolling timing
                         // is irrelevant in a headless virtual terminal.
                         [4] => {},
-                        [6] => self.screen_mut().set_origin_mode(OriginMode::Term),
+                        [6] => self.set_origin_mode(OriginMode::Term),
                         [7] => self.autowrap = false,
                         [12] => self.cursor_blinking = Some(false),
                         [25] => self.cursor_hidden = true,
@@ -1545,25 +1554,29 @@ impl vte::Perform for State {
             },
             // DECSTBM (Set Scroll Region)
             'r' if plain => {
-                let top = maybe_param(&mut params_iter);
-                let bottom = maybe_param(&mut params_iter);
+                let height = self.screen().size.height;
+                // Like in xterm, a bottom that is missing or off the screen
+                // means the last row.
+                let top = param_or(&mut params_iter, 1) as usize;
+                let bottom = match maybe_param(&mut params_iter) {
+                    Some(b) if (b as usize) <= height => b as usize,
+                    _ => height,
+                };
 
-                let screen = self.screen_mut();
-                screen.set_scroll_region(match (top, bottom) {
-                    (None, None) => term::ScrollRegion::TrackSize,
-                    (Some(t), None) => term::ScrollRegion::Window {
-                        top: t.saturating_sub(1) as usize,
-                        bottom: screen.size.height,
-                    },
-                    (None, Some(b)) => term::ScrollRegion::Window {
-                        top: 0,
-                        bottom: b as usize,
-                    },
-                    (Some(t), Some(b)) => term::ScrollRegion::Window {
-                        top: t.saturating_sub(1) as usize,
-                        bottom: b as usize,
-                    }
-                });
+                // A region has to be at least two rows high, and anything
+                // else gets ignored.
+                if top < bottom {
+                    let screen = self.screen_mut();
+                    screen.set_scroll_region(if top == 1 && bottom == height {
+                        term::ScrollRegion::TrackSize
+                    } else {
+                        term::ScrollRegion::Window { top: top - 1, bottom }
+                    });
+                    // Setting the region homes the cursor, which is the top
+                    // of the region itself in origin mode.
+                    screen.set_cursor(term::Pos { row: 1, col: 1 });
+                    screen.clamp();
+                }
             }
 
             _ => {
