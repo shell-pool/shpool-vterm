@@ -249,25 +249,32 @@ impl Screen {
         // the last column, and that is the spot it should keep following.
         let cursor = past_pending_wrap(self.cursor, self.pending_wrap);
         let saved_cursor = past_pending_wrap(self.saved_cursor.pos, self.saved_cursor.pending_wrap);
-        let (cursor, saved_cursor) = match &mut self.grid {
+        let ((cursor, pending_wrap), (saved_cursor, saved_pending_wrap)) = match &mut self.grid {
             Grid::Scrollback(scrollback) => {
                 // A row is derived from the buffer length and the height, both
                 // of which this changes, so the cursor has to be re-derived
                 // rather than just clamped. The saved cursor is a row too, and
                 // a resize between DECSC and DECRC moves it just the same.
                 let mut anchors = [
-                    scrollback.anchor_cursor(old_size, cursor),
-                    scrollback.anchor_cursor(old_size, saved_cursor),
+                    scrollback.anchor_cursor(old_size, cursor, self.pending_wrap),
+                    scrollback.anchor_cursor(
+                        old_size,
+                        saved_cursor,
+                        self.saved_cursor.pending_wrap,
+                    ),
                 ];
-                scrollback.reflow(new_size.width, &mut anchors);
+                // Only the width decides where lines wrap.
+                if new_size.width != old_size.width {
+                    scrollback.reflow(new_size.width, &mut anchors);
+                }
                 (
-                    scrollback.resolve_cursor(new_size, anchors[0]),
-                    scrollback.resolve_cursor(new_size, anchors[1]),
+                    (scrollback.resolve_cursor(new_size, anchors[0]), anchors[0].pending_wrap),
+                    (scrollback.resolve_cursor(new_size, anchors[1]), anchors[1].pending_wrap),
                 )
             }
             Grid::AltScreen(altscreen) => {
                 altscreen.resize(new_size);
-                (cursor, saved_cursor)
+                ((cursor, self.pending_wrap), (saved_cursor, self.saved_cursor.pending_wrap))
             }
         };
         self.size = new_size;
@@ -275,9 +282,9 @@ impl Screen {
         let scroll_region = self.grid.scroll_region().clone();
         self.store_scroll_region(clamp_scroll_region(scroll_region, self.size));
 
-        (self.cursor, self.pending_wrap) = settle_cursor(cursor, self.pending_wrap, self.size);
+        (self.cursor, self.pending_wrap) = settle_cursor(cursor, pending_wrap, self.size);
         (self.saved_cursor.pos, self.saved_cursor.pending_wrap) =
-            settle_cursor(saved_cursor, self.saved_cursor.pending_wrap, self.size);
+            settle_cursor(saved_cursor, saved_pending_wrap, self.size);
     }
 
     /// Bring the cursor back within the region it may occupy after it has
@@ -518,7 +525,7 @@ fn past_pending_wrap(pos: Pos, pending_wrap: bool) -> Pos {
 
 /// Bring a cursor that has been through a resize back onto the screen.
 ///
-/// A cursor that was waiting to wrap can come out of a reflow just past the
+/// A cursor that is waiting to wrap can come out of a resize just past the
 /// end of a line, and then it should still be waiting to wrap. Anywhere else
 /// on the line there is no wrap left to do.
 fn settle_cursor(mut pos: Pos, pending_wrap: bool, size: crate::Size) -> (Pos, bool) {
