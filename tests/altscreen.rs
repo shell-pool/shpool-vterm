@@ -1047,3 +1047,111 @@ frag! {
             term::ControlCodes::cursor_position(2, 4),
             term::control_codes().clear_attrs
 }
+
+// Mode 47 switches screens without saving the cursor or erasing anything,
+// so the alt screen comes back the way it was left.
+frag! {
+    alt_screen_47_keeps_contents { scrollback_lines: 100, width: 5, height: 2 }
+    <= term::Raw::from("$ "),
+       term::ControlCodes::dec_private_modes_set(&[47]),
+       term::Raw::from("alt"),
+       term::ControlCodes::dec_private_modes_reset(&[47]),
+       term::Raw::from("\r\n"),
+       term::ControlCodes::dec_private_modes_set(&[47])
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("$ "),
+            term::ControlCodes::cursor_position(2, 1),
+            term::control_codes().enable_alt_screen,
+            term::ControlCodes::cursor_position(1, 1),
+            term::Raw::from("  alt"),
+            term::Crlf::default(),
+            term::ControlCodes::cursor_position(2, 1),
+            term::control_codes().clear_attrs
+}
+
+// Leaving with mode 47 leaves the cursor where the alt screen had it.
+frag! {
+    alt_screen_47_exit_keeps_cursor { scrollback_lines: 100, width: 5, height: 3 }
+    <= term::Raw::from("$ "),
+       term::ControlCodes::dec_private_modes_set(&[47]),
+       term::ControlCodes::cursor_position(3, 2),
+       term::ControlCodes::dec_private_modes_reset(&[47]),
+       term::Raw::from("x")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("$ "),
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::Raw::from(" x"),
+            term::ControlCodes::cursor_position(3, 3),
+            term::control_codes().clear_attrs
+}
+
+// The rxvt terminfo entry saves and restores the cursor around mode 47
+// itself.
+frag! {
+    alt_screen_47_with_decsc { scrollback_lines: 100, width: 5, height: 3 }
+    <= term::Raw::from("$ "),
+       term::control_codes().save_cursor,
+       term::ControlCodes::dec_private_modes_set(&[47]),
+       term::ControlCodes::cursor_position(3, 2),
+       term::Raw::from("vi"),
+       term::control_codes().erase_screen,
+       term::ControlCodes::dec_private_modes_reset(&[47]),
+       term::control_codes().restore_cursor,
+       term::Raw::from("ls")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("$ ls"),
+            term::ControlCodes::cursor_position(1, 5),
+            term::control_codes().clear_attrs
+}
+
+// Leaving with mode 1047 erases the alt screen first.
+frag! {
+    alt_screen_1047_erases_on_exit { scrollback_lines: 100, width: 5, height: 2 }
+    <= term::ControlCodes::dec_private_modes_set(&[1047]),
+       term::Raw::from("alt"),
+       term::ControlCodes::dec_private_modes_reset(&[1047]),
+       term::ControlCodes::cursor_position(1, 1),
+       term::ControlCodes::dec_private_modes_set(&[1047])
+    => ContentRegion::All =>
+            reset_codes,
+            empty_scrollback,
+            term::control_codes().enable_alt_screen,
+            term::Crlf::default(),
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs
+}
+
+// Leaving with mode 1047 when the alt screen isn't up erases nothing.
+frag! {
+    alt_screen_1047_exit_from_main_screen { scrollback_lines: 100, width: 5, height: 2 }
+    <= term::Raw::from("main"),
+       term::ControlCodes::dec_private_modes_reset(&[1047])
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("main"),
+            term::ControlCodes::cursor_position(1, 5),
+            term::control_codes().clear_attrs
+}
+
+// Mode 1048 saves and restores the cursor just like DECSC and DECRC.
+frag! {
+    save_cursor_mode { scrollback_lines: 100, width: 5, height: 2 }
+    <= term::ControlCodes::cursor_position(2, 3),
+       term::ControlCodes::fgcolor_idx(1),
+       term::ControlCodes::dec_private_modes_set(&[1048]),
+       term::control_codes().clear_attrs,
+       term::ControlCodes::cursor_position(1, 1),
+       term::ControlCodes::dec_private_modes_reset(&[1048]),
+       term::Raw::from("x")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Crlf::default(),
+            term::Raw::from("  \x1b[31mx\x1b[39m"),
+            term::ControlCodes::cursor_position(2, 4),
+            term::control_codes().clear_attrs,
+            term::ControlCodes::fgcolor_idx(1)
+}
