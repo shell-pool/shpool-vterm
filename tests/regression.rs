@@ -369,11 +369,12 @@ frag! {
             term::control_codes().clear_attrs
 }
 
-// A shrinking resize strands a region that was in range when it was set, so
-// the clamp has to be reapplied there too. shpool resizes the spool on every
-// reattach, which is how a long lived session gets into this state.
+// A shrinking resize used to strand a region that was in range when it was
+// set. shpool resizes the spool on every reattach, which is how a long lived
+// session got into that state. Like in other terminals, a resize now drops
+// the region altogether.
 #[test]
-fn scroll_region_clamped_on_shrinking_resize() {
+fn scroll_region_dropped_on_shrinking_resize() {
     use shpool_vterm::term::AsTermInput;
 
     let mut input = vec![];
@@ -385,17 +386,16 @@ fn scroll_region_clamped_on_shrinking_resize() {
 
     let mut expected = vec![];
     crate::support::frag::reset_codes.term_input_into(&mut expected);
-    term::ControlCodes::set_scroll_region(2, 3).term_input_into(&mut expected);
     term::ControlCodes::cursor_position(1, 1).term_input_into(&mut expected);
     term::control_codes().clear_attrs.term_input_into(&mut expected);
 
     assert_eq!(term.contents(ContentRegion::All), expected);
 }
 
-// Same, on the alt screen, where the stranded region also takes the session
+// Same, on the alt screen, where a stranded region used to take the session
 // down on the next scroll.
 #[test]
-fn alt_screen_scroll_region_clamped_on_shrinking_resize() {
+fn alt_screen_scroll_region_dropped_on_shrinking_resize() {
     use shpool_vterm::term::AsTermInput;
 
     let mut input = vec![];
@@ -416,8 +416,36 @@ fn alt_screen_scroll_region_clamped_on_shrinking_resize() {
     term::control_codes().enable_alt_screen.term_input_into(&mut expected);
     term::Crlf::default().term_input_into(&mut expected);
     term::Crlf::default().term_input_into(&mut expected);
-    term::ControlCodes::set_scroll_region(2, 3).term_input_into(&mut expected);
     term::ControlCodes::cursor_position(1, 1).term_input_into(&mut expected);
+    term::control_codes().clear_attrs.term_input_into(&mut expected);
+
+    assert_eq!(term.contents(ContentRegion::All), expected);
+}
+
+// Growing the screen drops the region too. Origin mode stays on, but with no
+// region it just addresses the whole screen.
+#[test]
+fn scroll_region_dropped_on_growing_resize() {
+    use shpool_vterm::term::AsTermInput;
+
+    let mut input = vec![];
+    term::ControlCodes::set_scroll_region(2, 3).term_input_into(&mut input);
+    term::control_codes().enable_scroll_region_origin_mode.term_input_into(&mut input);
+
+    let mut term = shpool_vterm::Term::new(100, shpool_vterm::Size { width: 5, height: 4 });
+    term.process(input.as_slice());
+    term.resize(shpool_vterm::Size { width: 5, height: 6 });
+
+    let mut more = vec![];
+    term::ControlCodes::cursor_position(1, 1).term_input_into(&mut more);
+    term::Raw::from("X").term_input_into(&mut more);
+    term.process(more.as_slice());
+
+    let mut expected = vec![];
+    crate::support::frag::reset_codes.term_input_into(&mut expected);
+    term::Raw::from("X").term_input_into(&mut expected);
+    term::control_codes().enable_scroll_region_origin_mode.term_input_into(&mut expected);
+    term::ControlCodes::cursor_position(1, 2).term_input_into(&mut expected);
     term::control_codes().clear_attrs.term_input_into(&mut expected);
 
     assert_eq!(term.contents(ContentRegion::All), expected);
