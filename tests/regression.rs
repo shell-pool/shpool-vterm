@@ -91,7 +91,7 @@ frag! {
        term::ControlCodes::delete_character(3)
     => ContentRegion::All =>
             reset_codes,
-            term::Raw::from("ab   "),
+            term::Raw::from("ab"),
             term::ControlCodes::cursor_position(1, 3),
             term::control_codes().clear_attrs
 }
@@ -104,7 +104,7 @@ frag! {
        term::ControlCodes::delete_character(3)
     => ContentRegion::All =>
             reset_codes,
-            term::Raw::from("ab   "),
+            term::Raw::from("ab"),
             term::ControlCodes::cursor_position(1, 5),
             term::control_codes().clear_attrs
 }
@@ -117,7 +117,7 @@ frag! {
        term::ControlCodes::delete_character(3)
     => ContentRegion::All =>
             reset_codes,
-            term::Raw::from("ab   "),
+            term::Raw::from("ab"),
             term::ControlCodes::cursor_position(1, 5),
             term::control_codes().clear_attrs
 }
@@ -130,7 +130,7 @@ frag! {
        term::ControlCodes::delete_character(3)
     => ContentRegion::All =>
             reset_codes,
-            term::Raw::from("ab   "),
+            term::Raw::from("ab"),
             term::ControlCodes::cursor_position(1, 5),
             term::control_codes().clear_attrs
 }
@@ -146,7 +146,7 @@ frag! {
             reset_codes,
             term::Raw::from("ab"),
             term::Crlf::default(),
-            term::Raw::from("cd   "),
+            term::Raw::from("cd"),
             term::ControlCodes::cursor_position(2, 5),
             term::control_codes().clear_attrs
 }

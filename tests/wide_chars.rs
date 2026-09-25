@@ -68,7 +68,7 @@ frag! {
        term::control_codes().erase_to_end_of_line
     => ContentRegion::All =>
             reset_codes,
-            term::Raw::from("a "),
+            term::Raw::from("a"),
             term::ControlCodes::cursor_position(1, 3),
             term::control_codes().clear_attrs
 }
@@ -104,7 +104,7 @@ frag! {
        term::ControlCodes::delete_character(1)
     => ContentRegion::All =>
             reset_codes,
-            term::Raw::from("a b  "),
+            term::Raw::from("a b"),
             term::ControlCodes::cursor_position(1, 3),
             term::control_codes().clear_attrs
 }
@@ -117,7 +117,7 @@ frag! {
        term::ControlCodes::insert_character(1)
     => ContentRegion::All =>
             reset_codes,
-            term::Raw::from(" ab "),
+            term::Raw::from(" ab"),
             term::ControlCodes::cursor_position(1, 1),
             term::control_codes().clear_attrs
 }

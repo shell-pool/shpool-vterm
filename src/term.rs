@@ -167,6 +167,14 @@ test_pub! {
     }
 }
 
+impl<T: AsTermInput> AsTermInput for [T] {
+    fn term_input_into(&self, buf: &mut Vec<u8>) {
+        for item in self {
+            item.term_input_into(buf);
+        }
+    }
+}
+
 test_pub! {
     #[derive(Debug)]
     #[must_use = "this struct does nothing unless you call term_input_into"]
@@ -840,7 +848,10 @@ impl std::fmt::Display for ControlCode {
 }
 
 impl ControlCode {
-    fn fuse_csi<I>(control_codes: I) -> Vec<Self>
+    /// Fuse each run of CSIs that share an action and intermediates into a
+    /// single CSI with all of their params, the way the dump fuses runs of
+    /// SGRs. Everything else passes through as is.
+    pub fn fuse_csi<I>(control_codes: I) -> Vec<Self>
     where
         I: IntoIterator<Item = Self>,
     {

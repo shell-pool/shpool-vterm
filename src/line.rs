@@ -28,6 +28,13 @@ use std::borrow::Cow;
 pub(crate) struct Line {
     /// The cells stored in this line.
     pub cells: Vec<Cell>,
+    /// The background color of every cell past the end of `cells`.
+    ///
+    /// Erasing to the end of a line, or opening up a new one, while a
+    /// background color is set paints the rest of the line with it (see
+    /// `Cell::blank`). Keeping that here means a painted line costs no more
+    /// to store than a plain one.
+    pub blank_bgcolor: term::Color,
     /// If true, indicates that this line was automatically wrapped due to
     /// the terminal width. The following line is part of the same logical
     /// line and should be reflowed together with this line on terminal resize.
@@ -97,20 +104,55 @@ impl AsTermInput for Line {
 /// to have the grid width passed down by the grid implementation.
 impl Line {
     pub fn new() -> Self {
-        Line { cells: vec![], is_wrapped: false }
+        Line::blank(term::Color::Default)
     }
 
-    /// Get the cell at the given grid position.
-    pub fn get_cell(&self, width: usize, col: usize) -> Option<&Cell> {
+    /// A line full of the blanks that erasing and scrolling leave behind
+    /// while `fill` is the background color (see `Cell::blank`). They are
+    /// all past the end of the line, so none of them have to be stored.
+    pub fn blank(fill: term::Color) -> Self {
+        Line { cells: vec![], blank_bgcolor: fill, is_wrapped: false }
+    }
+
+    /// Store copies of the blanks past the end of the line out to `len`, for
+    /// an edit that changes cells in front of there.
+    fn pad_to(&mut self, len: usize) {
+        if self.cells.len() < len {
+            self.cells.resize(len, Cell::blank(self.blank_bgcolor));
+        }
+    }
+
+    /// Drop the cells at the end of the line that are the same as the
+    /// blanks past the end of it, since those look like that anyway.
+    ///
+    /// A wrapped line keeps them. They are in the middle of its logical
+    /// line, and only stored cells count as part of that when it gets
+    /// reflowed.
+    fn trim_blanks(&mut self) {
+        if self.is_wrapped {
+            return;
+        }
+        let blank = Cell::blank(self.blank_bgcolor);
+        while self.cells.last() == Some(&blank) {
+            self.cells.pop();
+        }
+    }
+
+    /// Get the cell at the given grid position. Past the end of the stored
+    /// cells, that is a blank painted with the line's `blank_bgcolor`.
+    pub fn get_cell(&self, width: usize, col: usize) -> Option<Cow<'_, Cell>> {
         if col >= width {
             return None;
         }
 
         if col >= self.cells.len() {
-            return Some(cell::empty());
+            return Some(match self.blank_bgcolor {
+                term::Color::Default => Cow::Borrowed(cell::empty()),
+                bgcolor => Cow::Owned(Cell::blank(bgcolor)),
+            });
         }
 
-        return Some(&self.cells[col]);
+        return Some(Cow::Borrowed(&self.cells[col]));
     }
 
     /// Get a mutable reference to the cell at the given grid position.
@@ -132,15 +174,16 @@ impl Line {
     /// A wide char that this only covers one half of gets blanked out
     /// entirely, like real terminals do. Leaving the other half behind would
     /// throw off the columns of everything after it when we dump the line.
+    ///
+    /// Setting the last cell to the same blank as the ones past the end of
+    /// the line makes it part of them, so it doesn't get stored.
     pub fn set_cell(&mut self, width: usize, col: usize, cell: Cell) -> anyhow::Result<()> {
         let end = col + std::cmp::max(cell.width() as usize, 1);
         if end > width {
             return Err(anyhow!("{}..{} out of bounds (width={})", col, end, width));
         }
 
-        while self.cells.len() < end {
-            self.cells.push(Cell::empty());
-        }
+        self.pad_to(end);
         self.blank_out_wide_char_at(col);
         self.blank_out_wide_char_at(end);
 
@@ -148,6 +191,9 @@ impl Line {
             self.cells[pad_col] = Cell::wide_pad(cell.attrs().clone());
         }
         self.cells[col] = cell;
+        if end == self.cells.len() {
+            self.trim_blanks();
+        }
 
         Ok(())
     }
@@ -190,11 +236,18 @@ impl Line {
     /// its own, padding and all, so that it is still there once the screen
     /// gets wider again. Until then it shows up as a blank, and the cells
     /// that stick out past the edge of the screen don't show up at all.
+    ///
+    /// The cells past the end of the line show up out to the edge if they
+    /// look any different from cells nothing has been written to, so that
+    /// painting the line paints them too.
     pub fn shown_at(&self, width: usize) -> Cow<'_, Line> {
         let too_wide = |cell: &Cell| cell.width() as usize > width;
+        let paint_blanks = self.cells.len() < width && self.blank_bgcolor != term::Color::Default;
         // A zero width screen keeps its lines the way they were laid out
         // before, since there is nothing to lay them out on.
-        if width == 0 || (self.cells.len() <= width && !self.cells.iter().any(too_wide)) {
+        if width == 0
+            || (self.cells.len() <= width && !self.cells.iter().any(too_wide) && !paint_blanks)
+        {
             return Cow::Borrowed(self);
         }
 
@@ -210,6 +263,9 @@ impl Line {
             }
         }
         shown.cells.truncate(width);
+        if paint_blanks {
+            shown.pad_to(width);
+        }
         Cow::Owned(shown)
     }
 
@@ -220,100 +276,123 @@ impl Line {
         self.cells.truncate(width);
     }
 
-    /// Clobber the given section, either by trimming the underlying storage
-    /// or by overwriting with empty cells.
-    pub fn erase(&mut self, section: Section) {
+    /// Clobber the given section with the blanks that erasing leaves behind
+    /// while `fill` is the background color. Erasing out to the end of the
+    /// line makes `fill` the line's `blank_bgcolor` rather than storing any
+    /// of them.
+    pub fn erase(&mut self, width: usize, section: Section, fill: term::Color) {
         match section {
             Section::StartTo(col) => {
-                self.blank_out_wide_char_at(col + 1);
-                for i in 0..std::cmp::min(col + 1, self.cells.len()) {
-                    self.cells[i] = Cell::empty();
+                let end = std::cmp::min(col + 1, width);
+                self.blank_out_wide_char_at(end);
+                // The cells past the end of the line only look like the
+                // blanks already if they have the same background color.
+                if fill != self.blank_bgcolor {
+                    self.pad_to(end);
                 }
+                let blank = Cell::blank(fill);
+                for i in 0..std::cmp::min(end, self.cells.len()) {
+                    self.cells[i] = blank.clone();
+                }
+                self.trim_blanks();
             }
             Section::ToEnd(col) => {
                 self.truncate(col);
                 self.is_wrapped = false;
+                // The cells in front of `col` keep their old background
+                // color.
+                if fill != self.blank_bgcolor {
+                    self.pad_to(col);
+                    self.blank_bgcolor = fill;
+                }
+                self.trim_blanks();
             }
             Section::Whole => {
                 self.truncate(0);
                 self.is_wrapped = false;
+                self.blank_bgcolor = fill;
             }
         }
     }
 
-    /// Insert n new blank cells at the current position, dropping
-    /// any cells which spill over width.
-    pub fn insert_character(&mut self, width: usize, col: usize, n: usize) {
+    /// Insert n new blank cells painted with `fill` at the current position,
+    /// dropping any cells which spill over width.
+    pub fn insert_character(&mut self, width: usize, col: usize, n: usize, fill: term::Color) {
         if col >= width {
             return;
         }
-        while self.cells.len() < col {
-            self.cells.push(Cell::empty());
+        // Past the end of the line, inserting cells that look just like the
+        // ones already there changes nothing.
+        if col >= self.cells.len() && fill == self.blank_bgcolor {
+            return;
         }
+        self.pad_to(col);
         self.blank_out_wide_char_at(col);
-        let empties = vec![Cell::empty(); std::cmp::min(n, width - col)];
-        self.cells.splice(col..col, empties);
+        let blanks = vec![Cell::blank(fill); std::cmp::min(n, width - col)];
+        self.cells.splice(col..col, blanks);
         self.truncate(width);
+        self.trim_blanks();
     }
 
     /// Delete n cells at the current position, sucking cells to the
     /// right towards the cursor, and backfilling their old position
-    /// with empty cells that have the current background attributes
-    /// set.
+    /// with blanks painted with `fill`.
     ///
     /// This implements DCH (Delete Character).
-    pub fn delete_character(&mut self, width: usize, col: usize, attrs: &term::Attrs, n: usize) {
+    pub fn delete_character(&mut self, width: usize, col: usize, fill: term::Color, n: usize) {
         if col >= width {
             return;
         }
+        let n = std::cmp::min(n, width - col);
 
         self.blank_out_wide_char_at(col);
-        self.blank_out_wide_char_at(col.saturating_add(n));
+        self.blank_out_wide_char_at(col + n);
+
+        // The backfill goes in at the right edge. If it has the line's
+        // `blank_bgcolor`, the cells past the end of the line that get pulled
+        // in look just like it, so only the stored cells have to move.
+        // Otherwise the whole line has to be stored.
+        let backfill = fill != self.blank_bgcolor;
+        if backfill {
+            self.pad_to(width);
+        }
 
         // Everything past the end of the cells buffer is implicitly blank, so
         // when the cursor sits out there we have no physical cells to remove
         // and the drain range collapses to an empty one at the end.
         let delete_from = std::cmp::min(col, self.cells.len());
-        let delete_to = std::cmp::min(self.cells.len(), col.saturating_add(n));
-        let num_to_delete = delete_to - delete_from;
-
+        let delete_to = std::cmp::min(self.cells.len(), col + n);
         self.cells.drain(delete_from..delete_to);
 
-        // Inject the empty cells that were logically already present
-        // when the cells buffer was short.
-        while self.cells.len() < width - num_to_delete {
-            self.cells.push(Cell::empty());
+        if backfill {
+            self.cells.resize(std::cmp::max(width, self.cells.len()), Cell::blank(fill));
         }
-
-        // Inject the "backfill" cells that the semantics of DCH call
-        // for. These are empty cells with the current attributes set.
-        while self.cells.len() < width {
-            self.cells.push(Cell::empty_with_attrs(attrs.clone()));
-        }
+        self.trim_blanks();
     }
 
     /// Blank out n characters to the right of the current cursor. Unlike
     /// delete, this leaves the cells in place, just clobbers their contents.
     ///
     /// This implements ECH (Erase Character)
-    pub fn erase_character(&mut self, width: usize, col: usize, attrs: &term::Attrs, n: usize) {
+    pub fn erase_character(&mut self, width: usize, col: usize, fill: term::Color, n: usize) {
         if col >= width {
             return;
         }
 
-        while self.cells.len() < col {
-            self.cells.push(Cell::empty());
+        let erase_to = std::cmp::min(width, col.saturating_add(n));
+        // The cells past the end of the line only look like the blanks
+        // already if they have the same background color.
+        if fill != self.blank_bgcolor {
+            self.pad_to(erase_to);
         }
         self.blank_out_wide_char_at(col);
         self.blank_out_wide_char_at(col.saturating_add(n));
 
-        let erase_to = std::cmp::min(width, col.saturating_add(n));
+        let blank = Cell::blank(fill);
         for i in col..std::cmp::min(self.cells.len(), erase_to) {
-            self.cells[i] = Cell::empty_with_attrs(attrs.clone());
+            self.cells[i] = blank.clone();
         }
-        while self.cells.len() < erase_to {
-            self.cells.push(Cell::empty_with_attrs(attrs.clone()));
-        }
+        self.trim_blanks();
     }
 }
 
@@ -348,13 +427,13 @@ mod tests {
 
         // set at 0
         line.set_cell(width, 0, c1.clone())?;
-        assert_eq!(line.get_cell(width, 0), Some(&c1));
+        assert_eq!(line.get_cell(width, 0).as_deref(), Some(&c1));
 
         // set at 2 (should pad with empty)
         line.set_cell(width, 2, c2.clone())?;
-        assert_eq!(line.get_cell(width, 0), Some(&c1));
+        assert_eq!(line.get_cell(width, 0).as_deref(), Some(&c1));
         assert!(line.get_cell(width, 1).unwrap().is_empty());
-        assert_eq!(line.get_cell(width, 2), Some(&c2));
+        assert_eq!(line.get_cell(width, 2).as_deref(), Some(&c2));
 
         Ok(())
     }
@@ -446,5 +525,116 @@ mod tests {
         let mut buf = vec![];
         line.term_input_into(&mut buf);
         assert_eq!(buf, b"a b");
+    }
+
+    const BLUE: term::Color = term::Color::Idx(4);
+
+    #[test]
+    fn set_blank_at_end_is_not_stored() -> anyhow::Result<()> {
+        let width = 5;
+        let mut line = Line::blank(BLUE);
+        line.set_cell(width, 0, Cell::new('a', term::Attrs::default()))?;
+        line.set_cell(width, 2, Cell::new('b', term::Attrs::default()))?;
+        assert_eq!(line.cells.len(), 3);
+
+        // The cell in front of the "b" is a stored copy of the blanks past the
+        // end of the line, and goes along with it.
+        line.set_cell(width, 2, Cell::blank(BLUE))?;
+        assert_eq!(line.cells.len(), 1);
+        assert_eq!(line.get_cell(width, 3).as_deref(), Some(&Cell::blank(BLUE)));
+
+        Ok(())
+    }
+
+    #[test]
+    fn erase_to_end_only_changes_the_blank_bgcolor() -> anyhow::Result<()> {
+        let width = 5;
+        let mut line = Line::new();
+        for (col, c) in "abc".chars().enumerate() {
+            line.set_cell(width, col, Cell::new(c, term::Attrs::default()))?;
+        }
+
+        line.erase(width, Section::ToEnd(1), BLUE);
+        assert_eq!(format!("{line}"), "a\n");
+        assert_eq!(line.get_cell(width, 4).as_deref(), Some(&Cell::blank(BLUE)));
+
+        // Past the end of the cells, the ones in front of the erase keep
+        // their old background color.
+        line.erase(width, Section::ToEnd(3), term::Color::Default);
+        assert_eq!(
+            line.cells,
+            vec![Cell::new('a', term::Attrs::default()), Cell::blank(BLUE), Cell::blank(BLUE)]
+        );
+        assert_eq!(line.blank_bgcolor, term::Color::Default);
+
+        line.erase(width, Section::Whole, BLUE);
+        assert!(line.cells.is_empty());
+        assert_eq!(line.blank_bgcolor, BLUE);
+
+        Ok(())
+    }
+
+    // Blanks that look just like the cells past the end of the line don't need
+    // storing there.
+    #[test]
+    fn edits_with_the_blank_bgcolor_store_nothing_past_the_end() -> anyhow::Result<()> {
+        let width = 10;
+        let mut line = Line::blank(BLUE);
+        line.set_cell(width, 0, Cell::new('a', term::Attrs::default()))?;
+
+        line.erase_character(width, 3, BLUE, 2);
+        line.insert_character(width, 3, 2, BLUE);
+        line.delete_character(width, 3, BLUE, 2);
+        assert_eq!(line.cells.len(), 1);
+
+        // Blanks with a different background color do have to be stored.
+        line.erase_character(width, 3, term::Color::Default, 2);
+        assert_eq!(line.cells.len(), 5);
+
+        Ok(())
+    }
+
+    #[test]
+    fn delete_character_backfills_past_the_end() {
+        let width = 5;
+        let mut line = Line::new();
+        line.delete_character(width, 1, BLUE, 2);
+        assert_eq!(line.cells[..3], vec![Cell::empty(); 3]);
+        assert_eq!(line.cells[3..], vec![Cell::blank(BLUE); 2]);
+    }
+
+    // The blanks at the end of a wrapped line are in the middle of its logical
+    // line, so they stay.
+    #[test]
+    fn wrapped_line_keeps_its_blanks() -> anyhow::Result<()> {
+        let width = 5;
+        let mut line = Line::new();
+        for (col, c) in "abcde".chars().enumerate() {
+            line.set_cell(width, col, Cell::new(c, term::Attrs::default()))?;
+        }
+        line.is_wrapped = true;
+
+        line.erase_character(width, 3, term::Color::Default, 2);
+        assert_eq!(format!("{line}"), "abc**⏎\n");
+
+        Ok(())
+    }
+
+    #[test]
+    fn shown_at_paints_the_blanks_to_the_edge() -> anyhow::Result<()> {
+        let width = 4;
+        let mut line = Line::blank(BLUE);
+        line.set_cell(width, 0, Cell::new('a', term::Attrs::default()))?;
+        let shown = line.shown_at(width);
+        assert_eq!(shown.cells.len(), width);
+        assert_eq!(shown.cells[1..], vec![Cell::blank(BLUE); 3]);
+
+        // Plain blanks look like nothing was written there, so they don't
+        // need painting.
+        let mut line = Line::new();
+        line.set_cell(width, 0, Cell::new('a', term::Attrs::default()))?;
+        assert!(matches!(line.shown_at(width), Cow::Borrowed(_)));
+
+        Ok(())
     }
 }

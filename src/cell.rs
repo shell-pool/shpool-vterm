@@ -91,6 +91,17 @@ impl Cell {
         Cell { grapheme_cluster: smallvec![], width: 0, empty: true, wide_padding: false, attrs }
     }
 
+    /// The blank cell that erasing, inserting blanks and scrolling leave
+    /// behind while `bgcolor` is the current background color.
+    ///
+    /// Terminals paint these with the current background color, which is
+    /// what lets apps fill the screen with a color just by clearing it
+    /// ("bce" in terminfo), but none of the other attrs carry over. A blank
+    /// that got erased while underline was on is not underlined.
+    pub fn blank(bgcolor: term::Color) -> Self {
+        Cell::empty_with_attrs(term::Attrs { bgcolor, ..term::Attrs::default() })
+    }
+
     /// The padding that fills the columns to the right of a wide char. It
     /// gets the attrs of the wide char so that attr runs don't get broken up
     /// in the middle of it.
@@ -129,6 +140,26 @@ impl Cell {
 
     pub fn attrs(&self) -> &term::Attrs {
         &self.attrs
+    }
+
+    /// True for a cell that looks just like one nothing has been written to:
+    /// a blank without any attrs that would show up on a blank.
+    pub fn looks_unused(&self) -> bool {
+        self.is_erased() && matches!(self.attrs.bgcolor, term::Color::Default)
+    }
+
+    /// True for a cell that looks like erasing left it behind: a blank
+    /// without any attrs that would show up on a blank, other than a
+    /// background color.
+    pub fn is_erased(&self) -> bool {
+        let attrs = &self.attrs;
+        self.is_empty()
+            && !self.is_wide_padding()
+            && !attrs.inverse
+            && attrs.underline.is_none()
+            && !attrs.strikethrough
+            && !attrs.overline
+            && attrs.framed.is_none()
     }
 }
 
