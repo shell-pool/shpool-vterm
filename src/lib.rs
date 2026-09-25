@@ -672,22 +672,29 @@ impl State {
     }
 
     /// DECSC. Save the cursor position, along with the state that printing
-    /// depends on, into the active screen's slot.
+    /// and cursor addressing depend on, into the active screen's slot.
     fn save_cursor(&mut self) {
         let attrs = self.cursor_attrs.clone();
         let charsets = self.charsets.clone();
         let screen = self.screen_mut();
         let pos = screen.cursor;
         let pending_wrap = screen.pending_wrap;
-        screen.saved_cursor = SavedCursor { pos, attrs, pending_wrap, charsets };
+        let origin_mode = screen.origin_mode();
+        screen.saved_cursor = SavedCursor { pos, attrs, pending_wrap, charsets, origin_mode };
     }
 
     /// DECRC. Put back whatever `save_cursor` saved for the active screen.
     fn restore_cursor(&mut self) {
         let screen = self.screen_mut();
-        screen.cursor = screen.saved_cursor.pos;
-        screen.pending_wrap = screen.saved_cursor.pending_wrap;
-        let SavedCursor { attrs, charsets, .. } = screen.saved_cursor.clone();
+        let SavedCursor { pos, attrs, pending_wrap, charsets, origin_mode } =
+            screen.saved_cursor.clone();
+        // Unlike DECOM, this does not home the cursor.
+        screen.set_origin_mode(origin_mode);
+        screen.cursor = pos;
+        // The scroll region might have changed since the save, and in origin
+        // mode the cursor has to end up inside it, like in xterm.
+        screen.clamp();
+        screen.pending_wrap = pending_wrap;
         self.cursor_attrs = attrs;
         self.charsets = charsets;
     }

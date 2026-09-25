@@ -1223,3 +1223,67 @@ frag! {
             term::ControlCodes::cursor_position(2, 2),
             term::control_codes().clear_attrs
 }
+
+// DECSC saves origin mode along with the position, and DECRC turns it back on
+// without homing the cursor.
+frag! {
+    restore_cursor_restores_origin_mode { scrollback_lines: 100, width: 5, height: 5 }
+    <= term::ControlCodes::set_scroll_region(2, 4),
+       term::control_codes().enable_scroll_region_origin_mode,
+       term::control_codes().save_cursor,
+       term::control_codes().disable_scroll_region_origin_mode,
+       term::control_codes().restore_cursor,
+       term::Raw::from("X")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Crlf::default(),
+            term::Raw::from("X"),
+            term::ControlCodes::set_scroll_region(2, 4),
+            term::control_codes().enable_scroll_region_origin_mode,
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().clear_attrs
+}
+
+// It turns it back off too, and the cursor goes back to where it was, even
+// though that is outside of the scroll region.
+frag! {
+    restore_cursor_turns_origin_mode_off { scrollback_lines: 100, width: 5, height: 5 }
+    <= term::ControlCodes::set_scroll_region(2, 3),
+       term::ControlCodes::cursor_position(5, 2),
+       term::control_codes().save_cursor,
+       term::control_codes().enable_scroll_region_origin_mode,
+       term::control_codes().restore_cursor,
+       term::Raw::from("X")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::Raw::from(" X"),
+            term::ControlCodes::set_scroll_region(2, 3),
+            term::ControlCodes::cursor_position(5, 3),
+            term::control_codes().clear_attrs
+}
+
+// A position saved in origin mode stays inside the scroll region, even if the
+// region has shrunk since.
+frag! {
+    restore_cursor_stays_in_the_scroll_region { scrollback_lines: 100, width: 5, height: 5 }
+    <= term::ControlCodes::set_scroll_region(2, 5),
+       term::control_codes().enable_scroll_region_origin_mode,
+       term::ControlCodes::cursor_position(4, 1),
+       term::control_codes().save_cursor,
+       term::ControlCodes::set_scroll_region(2, 3),
+       term::control_codes().restore_cursor,
+       term::Raw::from("X")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::Raw::from("X"),
+            term::ControlCodes::set_scroll_region(2, 3),
+            term::control_codes().enable_scroll_region_origin_mode,
+            term::ControlCodes::cursor_position(2, 2),
+            term::control_codes().clear_attrs
+}
