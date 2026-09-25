@@ -804,6 +804,22 @@ frag! {
             term::control_codes().clear_attrs
 }
 
+// Unlike IL, RI doesn't move the cursor to the start of the line when it
+// scrolls.
+frag! {
+    reverse_index_scroll_keeps_column { scrollback_lines: 100, width: 5, height: 3 }
+    <= term::Raw::from("abc"),
+       term::control_codes().reverse_index,
+       term::Raw::from("X")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("   X"),
+            term::Crlf::default(),
+            term::Raw::from("abc"),
+            term::ControlCodes::cursor_position(1, 5),
+            term::control_codes().clear_attrs
+}
+
 frag! {
     reverse_index_scroll_region { scrollback_lines: 100, width: 5, height: 5 }
     <= term::Raw::from("0"), term::Crlf::default(),

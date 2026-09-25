@@ -1713,7 +1713,7 @@ impl vte::Perform for State {
                     screen.scroll_region(false).as_region(&screen.size).row_bounds();
 
                 if screen.cursor.row == scroll_top {
-                    screen.insert_lines(1, &fill);
+                    screen.scroll_down(1, &fill);
                 } else if screen.cursor.row > 0 {
                     screen.cursor.row -= 1;
                 }

@@ -522,6 +522,12 @@ impl Screen {
         }
     }
 
+    /// Whether the cursor is on one of the rows of the scroll region.
+    fn cursor_in_scroll_region(&self) -> bool {
+        let (top, bottom) = self.grid.scroll_region().as_region(&self.size).row_bounds();
+        top <= self.cursor.row && self.cursor.row < bottom
+    }
+
     pub fn scroll_region(&self, by_origin_mode: bool) -> ScrollRegion {
         if by_origin_mode {
             match self.grid.origin_mode() {
@@ -536,9 +542,15 @@ impl Screen {
     /// Handler for the Insert Line command (CSI n L).
     ///
     /// n lines of `fill` are inserted above the current line, dropping any
-    /// lines that get pushed out of the current scroll region.
+    /// lines that get pushed out of the current scroll region. The cursor
+    /// goes back to the start of the line. Outside of the scroll region,
+    /// nothing happens at all.
     pub fn insert_lines(&mut self, n: usize, fill: &Cell) {
+        if !self.cursor_in_scroll_region() {
+            return;
+        }
         self.pending_wrap = false;
+        self.cursor.col = 0;
         let width = self.size.width;
         match &mut self.grid {
             Grid::Scrollback(s) => s.insert_lines(&self.cursor, &self.size, n, fill),
@@ -550,9 +562,15 @@ impl Screen {
     ///
     /// n lines below the current line are deleted (including the current line),
     /// sucking any lines below the current line up. New lines of `fill` are
-    /// inserted at the bottom of the scroll region.
+    /// inserted at the bottom of the scroll region. Like with IL, the cursor
+    /// goes back to the start of the line, and nothing happens outside of the
+    /// scroll region.
     pub fn delete_lines(&mut self, n: usize, fill: &Cell) {
+        if !self.cursor_in_scroll_region() {
+            return;
+        }
         self.pending_wrap = false;
+        self.cursor.col = 0;
         let width = self.size.width;
         match &mut self.grid {
             Grid::Scrollback(s) => s.delete_lines(&self.cursor, &self.size, n, fill),
