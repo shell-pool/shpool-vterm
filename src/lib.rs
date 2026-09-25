@@ -896,37 +896,46 @@ impl vte::Perform for State {
             self.last_print_char = None;
         }
 
+        // Private markers (`?`, `>`, `<`, `=`) and intermediate bytes
+        // (`SP`, `$`, `!`, ...) turn a final byte into a completely different
+        // command, e.g. `CSI > 4 ; 2 m` sets key modifier options rather than
+        // underline + faint and `CSI ? 1 ; 1 ; 0 S` is a graphics query rather
+        // than a scroll. Every arm must check that the intermediates are the
+        // ones it expects, or we will mangle the screen when an application
+        // sends a sequence we don't otherwise know about.
+        let plain = intermediates.is_empty();
+
         match action {
             // CUU (Cursor Up)
-            'A' => {
+            'A' if plain => {
                 let n = param_or(&mut params_iter, 1) as usize;
                 let screen = self.screen_mut();
                 screen.cursor.row = screen.cursor.row.saturating_sub(n);
                 screen.clamp();
             }
             // CUD (Cursor Down)
-            'B' => {
+            'B' if plain => {
                 let n = param_or(&mut params_iter, 1) as usize;
                 let screen = self.screen_mut();
                 screen.cursor.row += n;
                 screen.clamp();
             }
             // CUF (Cursor Forward)
-            'C' => {
+            'C' if plain => {
                 let n = param_or(&mut params_iter, 1) as usize;
                 let screen = self.screen_mut();
                 screen.cursor.col += n;
                 screen.clamp();
             }
             // CUF (Cursor Backwards)
-            'D' => {
+            'D' if plain => {
                 let n = param_or(&mut params_iter, 1) as usize;
                 let screen = self.screen_mut();
                 screen.cursor.col = screen.cursor.col.saturating_sub(n);
                 screen.clamp();
             }
             // CNL (Cursor Next Line)
-            'E' => {
+            'E' if plain => {
                 let n = param_or(&mut params_iter, 1) as usize;
                 let screen = self.screen_mut();
                 screen.cursor.row += n;
@@ -934,7 +943,7 @@ impl vte::Perform for State {
                 screen.clamp();
             }
             // CPL (Cursor Prev Line)
-            'F' => {
+            'F' if plain => {
                 let n = param_or(&mut params_iter, 1) as usize;
                 let screen = self.screen_mut();
                 screen.cursor.row = screen.cursor.row.saturating_sub(n);
@@ -943,7 +952,7 @@ impl vte::Perform for State {
             }
             // HPA (Horizontal Position Absolute, CSI n `)
             // CHA (Cursor Horizontal Absolute, CSI n G)
-            '`' | 'G' => {
+            '`' | 'G' if plain => {
                 let n = param_or(&mut params_iter, 1) as usize;
                 let n = n.saturating_sub(1); // translate to 0 indexing
 
@@ -953,7 +962,7 @@ impl vte::Perform for State {
             }
             // HVP (Horizontal and Vertical Position)
             // CUP (Cursor Set Position)
-            'f' | 'H' => {
+            'f' | 'H' if plain => {
                 // parse the params and adjust 1 indexing to 0 indexing
                 let row = param_or(&mut params_iter, 1) as usize;
                 let col = param_or(&mut params_iter, 1) as usize;
@@ -962,7 +971,9 @@ impl vte::Perform for State {
                 screen.clamp();
             }
             // ED (Erase in Display)
-            'J' => while let Some(code) = params_iter.next() {
+            // DECSED (Selective Erase in Display, CSI ? n J). We don't track
+            // the protected attribute (DECSCA), so this is the same as ED.
+            'J' if plain || intermediates == [b'?'] => while let Some(code) = params_iter.next() {
                 match code {
                     [] | [0] => self.screen_mut().erase_to_end(),
                     [1] => self.screen_mut().erase_from_start(),
@@ -972,7 +983,8 @@ impl vte::Perform for State {
                 }
             }
             // EL (Erase in Line)
-            'K' => while let Some(code) = params_iter.next() {
+            // DECSEL (Selective Erase in Line, CSI ? n K), see DECSED above.
+            'K' if plain || intermediates == [b'?'] => while let Some(code) = params_iter.next() {
                 match code {
                     [] | [0] => {
                         let screen = self.screen_mut();
@@ -995,22 +1007,22 @@ impl vte::Perform for State {
                 }
             }
             // IL (Insert Line)
-            'L' => {
+            'L' if plain => {
                 let n = param_or(&mut params_iter, 1) as usize;
                 self.screen_mut().insert_lines(n);
             }
             // DL (Delete Line)
-            'M' => {
+            'M' if plain => {
                 let n = param_or(&mut params_iter, 1) as usize;
                 self.screen_mut().delete_lines(n);
             }
             // SU (Scroll Up)
-            'S' => {
+            'S' if plain => {
                 let n = param_or(&mut params_iter, 1) as usize;
                 self.screen_mut().scroll_up(n as usize);
             }
             // CTC (Cusor Tabulation Control)
-            'W' => {
+            'W' if plain => {
                 let code = param_or(&mut params_iter, 0) as usize;
                 match code {
                     0 => {
@@ -1027,8 +1039,17 @@ impl vte::Perform for State {
                     _ => warn!(self.logger, "unhandled 'CSI {:?} W'", code),
                 }
             }
+            // DECST8C (Set Tab at Every 8 Columns, CSI ? 5 W)
+            'W' if intermediates == [b'?'] => match param_or(&mut params_iter, 0) {
+                5 => {
+                    self.tabstops.fill(false);
+                    let width = self.tabstops.len();
+                    self.fill_tabstops(0, width);
+                }
+                code => warn!(self.logger, "unhandled 'CSI ? {:?} W'", code),
+            }
             // CBT (Cursor Backward Tabulation)
-            'Z' if intermediates.is_empty() => {
+            'Z' if plain => {
                 let n = param_or(&mut params_iter, 1) as usize;
                 let mut col = self.screen().cursor.col;
                 for _ in 0..n {
@@ -1046,13 +1067,16 @@ impl vte::Perform for State {
                 screen.clamp();
             }
             // SD (Scroll Down)
-            'T' => {
+            //
+            // xterm also has a five param form of `CSI T` that starts mouse
+            // highlight tracking, which has nothing to do with scrolling.
+            'T' if plain && params.len() <= 1 => {
                 let n = param_or(&mut params_iter, 1) as usize;
                 self.screen_mut().scroll_down(n as usize);
             }
 
             // ICH (Insert Character)
-            '@' => {
+            '@' if plain => {
                 let n = param_or(&mut params_iter, 1) as usize;
 
                 let screen = self.screen_mut();
@@ -1063,7 +1087,7 @@ impl vte::Perform for State {
                 }
             }
             // DCH (Delete Character)
-            'P' => {
+            'P' if plain => {
                 let n = param_or(&mut params_iter, 1) as usize;
 
                 let attrs = self.cursor_attrs.clone();
@@ -1076,7 +1100,7 @@ impl vte::Perform for State {
                 }
             }
             // ECH (Erase Character)
-            'X' => {
+            'X' if plain => {
                 let n = param_or(&mut params_iter, 1) as usize;
 
                 let attrs = self.cursor_attrs.clone();
@@ -1089,7 +1113,7 @@ impl vte::Perform for State {
                 }
             }
             // REP (Repeat Preceding Character)
-            'b' if intermediates.is_empty() => if let Some(c) = self.last_print_char {
+            'b' if plain => if let Some(c) = self.last_print_char {
                 let n = param_or(&mut params_iter, 1) as usize;
 
                 let cell = Cell::new(c, self.cursor_attrs.clone());
@@ -1099,7 +1123,7 @@ impl vte::Perform for State {
             }
             'c' => debug!(self.logger, "CSI ... c - device attribute query"),
             // VPA (Vertical Line Position Absolute)
-            'd' => {
+            'd' if plain => {
                 let row = param_or(&mut params_iter, 1) as usize;
                 let col = self.screen().cursor.col + 1;
                 let screen = self.screen_mut();
@@ -1108,13 +1132,13 @@ impl vte::Perform for State {
             }
 
             // SCP (Save Cursor Position)
-            's' => {
+            's' if plain => {
                 let screen = self.screen_mut();
                 let cursor = screen.cursor.clone();
                 screen.saved_cursor.pos = cursor;
             }
             // Window Title Operations
-            't' => while let Some(code) = params_iter.next() {
+            't' if plain => while let Some(code) = params_iter.next() {
                 match code {
                     [] | [0] => debug!(self.logger, "CSI 0 t - ignoring"),
                     [14, ..] => debug!(self.logger, "CSI 14 t - pixel size query"),
@@ -1153,14 +1177,14 @@ impl vte::Perform for State {
                 }
             }
             // RCP (Restore Cursor Position)
-            'u' => {
+            'u' if plain => {
                 let screen = self.screen_mut();
                 screen.cursor = screen.saved_cursor.pos;
                 screen.clamp();
             }
 
             // TBC (Tabulation Clear, CSI 3 g, CSI 0 g, CSI g)
-            'g' => {
+            'g' if plain => {
                 let code = param_or(&mut params_iter, 0) as usize;
                 match code {
                     0 => {
@@ -1306,7 +1330,7 @@ impl vte::Perform for State {
             },
 
             // cell attribute manipulation
-            'm' => while let Some(param) = params_iter.next() {
+            'm' if plain => while let Some(param) = params_iter.next() {
                 match param {
                     [] | [0] => self.cursor_attrs = term::Attrs::default(),
 
@@ -1418,8 +1442,8 @@ impl vte::Perform for State {
 
                     warn!(self.logger, "DECSTR only partially handled");
                 }
-                // DECRQM (DEC Request Mode Private)
-                [b'?', b'$'] => {
+                // DECRQM (DEC Request Mode, both the private and ANSI forms)
+                [b'?', b'$'] | [b'$'] => {
                     // TODO(#4): actuate query state machine.
                     //
                     // In the future, we'll want to expose an API that
@@ -1449,7 +1473,7 @@ impl vte::Perform for State {
                 }
             },
             // DECSTBM (Set Scroll Region)
-            'r' => {
+            'r' if plain => {
                 let top = maybe_param(&mut params_iter);
                 let bottom = maybe_param(&mut params_iter);
 
@@ -1472,7 +1496,13 @@ impl vte::Perform for State {
             }
 
             _ => {
-                warn!(self.logger, "unhandled action {}", action);
+                warn!(
+                    self.logger,
+                    "unhandled CSI command: CSI {:?} {:?} {}",
+                    intermediates,
+                    params.iter().collect::<Vec<&[u16]>>(),
+                    action
+                );
             }
         }
     }
