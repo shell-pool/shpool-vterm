@@ -139,16 +139,48 @@ frag! {
             term::control_codes().clear_attrs
 }
 
+// ED 3 only drops the lines that have scrolled off, the screen stays.
 frag! {
     erase_scrollback { scrollback_lines: 10, width: 5, height: 2 }
     <= term::Raw::from("1\r\n2\r\n3"),
        term::control_codes().erase_scrollback
     => ContentRegion::All =>
             reset_codes,
+            term::Raw::from("2"),
+            term::Crlf::default(),
+            term::Raw::from("3"),
             term::ControlCodes::cursor_position(2, 2),
             term::control_codes().clear_attrs
     => ContentRegion::Screen =>
             reset_codes,
+            term::Raw::from("2"),
+            term::Crlf::default(),
+            term::Raw::from("3"),
+            term::ControlCodes::cursor_position(2, 2),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    erase_scrollback_partly_filled_screen { scrollback_lines: 10, width: 5, height: 5 }
+    <= term::Raw::from("1\r\n2"),
+       term::control_codes().erase_scrollback
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("1"),
+            term::Crlf::default(),
+            term::Raw::from("2"),
+            term::ControlCodes::cursor_position(2, 2),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    erase_screen_and_scrollback { scrollback_lines: 10, width: 5, height: 2 }
+    <= term::Raw::from("1\r\n2\r\n3"),
+       term::control_codes().erase_screen,
+       term::control_codes().erase_scrollback
+    => ContentRegion::All =>
+            reset_codes,
+            term::Crlf::default(),
             term::ControlCodes::cursor_position(2, 2),
             term::control_codes().clear_attrs
 }
@@ -224,6 +256,8 @@ frag! {
             term::control_codes().designate_g0_uk_ascii
 }
 
+// ED works on the whole screen. Neither the scroll region nor origin mode
+// limit what it erases.
 frag! {
     erase_display_to_end_with_decom { scrollback_lines: 100, width: 5, height: 5 }
     <= term::Raw::from("11111"), term::Crlf::default(),
@@ -244,7 +278,6 @@ frag! {
             term::Raw::from("33"),
             term::Crlf::default(),
             term::Crlf::default(),
-            term::Raw::from("55555"),
             term::ControlCodes::set_scroll_region(2, 4),
             term::control_codes().enable_scroll_region_origin_mode,
             term::ControlCodes::cursor_position(2, 3),
@@ -264,7 +297,6 @@ frag! {
        term::control_codes().erase_from_start
     => ContentRegion::All =>
             reset_codes,
-            term::Raw::from("11111"),
             term::Crlf::default(),
             term::Crlf::default(),
             term::Raw::from("   33"),
@@ -291,12 +323,10 @@ frag! {
        term::control_codes().erase_screen
     => ContentRegion::All =>
             reset_codes,
-            term::Raw::from("11111"),
             term::Crlf::default(),
             term::Crlf::default(),
             term::Crlf::default(),
             term::Crlf::default(),
-            term::Raw::from("55555"),
             term::ControlCodes::set_scroll_region(2, 4),
             term::control_codes().enable_scroll_region_origin_mode,
             term::ControlCodes::cursor_position(2, 3),

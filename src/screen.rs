@@ -445,13 +445,20 @@ impl Screen {
     }
 
     /// Erase whichever screen is currently active, not including scrollback,
-    /// leaving blanks painted with `fill` behind. Used to implement 'CSI 2 J'
-    /// and 'CSI 3 J' (which includes the scrollback).
-    pub fn erase(&mut self, include_scrollback: bool, fill: term::Color) {
+    /// leaving blanks painted with `fill` behind. Used to implement 'CSI 2 J'.
+    pub fn erase(&mut self, fill: term::Color) {
         self.pending_wrap = false;
         match &mut self.grid {
-            Grid::Scrollback(s) => s.erase(self.size, include_scrollback, fill),
+            Grid::Scrollback(s) => s.erase(self.size, fill),
             Grid::AltScreen(alt) => alt.erase(fill),
+        }
+    }
+
+    /// Drop the scrollback, leaving what is on the screen alone. Used to
+    /// implement 'CSI 3 J'. The alt screen has no scrollback to drop.
+    pub fn erase_scrollback(&mut self) {
+        if let Grid::Scrollback(s) = &mut self.grid {
+            s.erase_scrollback(self.size);
         }
     }
 
@@ -1006,7 +1013,7 @@ mod tests {
         let fill = term::Color::Idx(4);
 
         let mut screen = Screen::scrollback(100, Size { width: 80, height: 24 });
-        screen.erase(false, fill);
+        screen.erase(fill);
         screen.scroll_up(10, fill);
         screen.insert_lines(3, fill);
         screen.erase_to_end(fill);
