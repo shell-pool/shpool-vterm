@@ -1372,6 +1372,12 @@ impl vte::Perform for State {
                         [12] => self.cursor_blinking = Some(true),
                         [25] => self.modes.remove(Modes::CURSOR_HIDDEN),
                         [1004] => self.modes.insert(Modes::REPORT_FOCUS),
+                        // Switch to the alt screen as it was left. These are
+                        // older than 1049, and some terminfo entries still
+                        // use them, along with DECSC and DECRC.
+                        [47 | 1047] => self.enter_alt_screen(false),
+                        // Save the cursor, like DECSC.
+                        [1048] => self.save_cursor(),
                         // Switch to the alt screen, saving the cursor
                         // first and starting out with a blank screen.
                         [1049] => {
@@ -1434,6 +1440,11 @@ impl vte::Perform for State {
                         [12] => self.cursor_blinking = Some(false),
                         [25] => self.modes.insert(Modes::CURSOR_HIDDEN),
                         [1004] => self.modes.remove(Modes::REPORT_FOCUS),
+                        [47] => self.exit_alt_screen(false),
+                        // Erase the alt screen on the way out.
+                        [1047] => self.exit_alt_screen(true),
+                        // Restore the cursor, like DECRC.
+                        [1048] => self.restore_cursor(),
                         [1049] => {
                             self.exit_alt_screen(false);
                             self.restore_cursor();
