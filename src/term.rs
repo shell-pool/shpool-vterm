@@ -1575,8 +1575,9 @@ impl ControlCodes {
         ControlCode::OSC { params: smallvec![smallvec![b'2'], title], term: OSCTerm::default() }
     }
 
-    pub fn set_working_dir(host: SmallVec<[u8; 8]>, dir: SmallVec<[u8; 8]>) -> ControlCode {
-        ControlCode::OSC { params: smallvec![smallvec![b'7'], host, dir], term: OSCTerm::default() }
+    /// Takes the `file://host/path` URL of the working dir.
+    pub fn set_working_dir(url: SmallVec<[u8; 8]>) -> ControlCode {
+        ControlCode::OSC { params: smallvec![smallvec![b'7'], url], term: OSCTerm::default() }
     }
 
     pub fn start_link(params: SmallVec<[u8; 8]>, url: SmallVec<[u8; 8]>) -> ControlCode {

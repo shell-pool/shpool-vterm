@@ -1162,3 +1162,56 @@ frag! {
             term::ControlCodes::cursor_position(1, 1),
             term::control_codes().clear_attrs
 }
+
+frag! {
+    link_url_with_semicolons { scrollback_lines: 10, width: 20, height: 10 }
+    <= term::Raw::from("\x1b]8;id=1;http://a/?b=1;c=2\x1b\\"),
+       term::Raw::from("ab")
+    => ContentRegion::All =>
+            reset_codes,
+            term::ControlCodes::start_link(b"id=1"[..].into(), b"http://a/?b=1;c=2"[..].into()),
+            term::Raw::from("ab"),
+            term::control_codes().end_link,
+            term::ControlCodes::cursor_position(1, 3),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    link_empty_url_with_params_ends_link { scrollback_lines: 10, width: 20, height: 10 }
+    <= term::ControlCodes::start_link(smallvec![], smallvec![b'h', b't', b't', b'p']),
+       term::Raw::from("a"),
+       term::ControlCodes::start_link(b"id=1"[..].into(), smallvec![]),
+       term::Raw::from("b")
+    => ContentRegion::All =>
+            reset_codes,
+            term::ControlCodes::start_link(smallvec![], smallvec![b'h', b't', b't', b'p']),
+            term::Raw::from("a"),
+            term::control_codes().end_link,
+            term::Raw::from("b"),
+            term::ControlCodes::cursor_position(1, 3),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    link_over_long_url_ignored { scrollback_lines: 10, width: 20, height: 10 }
+    <= term::ControlCodes::start_link(smallvec![], format!("http://a/{}", "b".repeat(3000)).as_bytes().into()),
+       term::Raw::from("a")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("a"),
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    link_over_long_params_dropped { scrollback_lines: 10, width: 20, height: 10 }
+    <= term::ControlCodes::start_link(format!("id={}", "b".repeat(300)).as_bytes().into(), smallvec![b'h', b't', b't', b'p']),
+       term::Raw::from("a")
+    => ContentRegion::All =>
+            reset_codes,
+            term::ControlCodes::start_link(smallvec![], smallvec![b'h', b't', b't', b'p']),
+            term::Raw::from("a"),
+            term::control_codes().end_link,
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().clear_attrs
+}

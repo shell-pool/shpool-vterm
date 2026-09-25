@@ -49,6 +49,24 @@ pub mod term;
 
 const MAX_TITLE_STACK_DEPTH: usize = 64;
 
+/// The most bytes of free form OSC text, like a title or the working dir,
+/// that we hold on to. vte buffers whole OSC strings however long they get,
+/// and every one we store gets replayed on each reattach.
+const MAX_OSC_TEXT_LEN: usize = 8192;
+
+/// Limits on hyperlinks (OSC 8), which VTE uses too. Every cell of a link
+/// carries its own copy of the target, so these add up.
+const MAX_LINK_URL_LEN: usize = 2083;
+const MAX_LINK_PARAMS_LEN: usize = 250;
+
+/// The number of colors that OSC 4 can change: the 256 color palette, then
+/// xterm's special colors (bold, underline, blink, reverse and italic),
+/// which it numbers from 256 up.
+const NUM_PALETTE_COLORS: usize = 261;
+
+/// The longest color spec (like `rgb:ff/80/00`) we hold on to.
+const MAX_COLOR_SPEC_LEN: usize = 128;
+
 /// A representation of a terminal.
 pub struct Term {
     parser: vte::Parser,
@@ -252,8 +270,9 @@ struct State {
     /// The terminal icon name, as set by `OSC 0` and `OSC 1`.
     icon_name_stack: Vec<SmallVec<[u8; 8]>>,
     /// The terminal working directory (some terminal emulators use this
-    /// to know what directory to start new shells in).
-    working_dir: Option<WorkingDir>,
+    /// to know what directory to start new shells in), as the `file://` URL
+    /// that `OSC 7` sets it to.
+    working_dir: Option<SmallVec<[u8; 8]>>,
     /// A table mapping color index to a particular color spec.
     /// This is set by OSC 4. We use a tree for deterministic output
     /// to make testing easier. A hash would work just as well.
@@ -306,11 +325,6 @@ struct State {
     /// control codes as well.
     tabstops: BitVec,
     logger: log::Context,
-}
-
-struct WorkingDir {
-    host: SmallVec<[u8; 8]>,
-    dir: SmallVec<[u8; 8]>,
 }
 
 impl std::fmt::Display for State {
@@ -529,8 +543,7 @@ impl State {
         }
 
         if let Some(working_dir) = &self.working_dir {
-            ControlCodes::set_working_dir(working_dir.host.clone(), working_dir.dir.clone())
-                .term_input_into(buf);
+            ControlCodes::set_working_dir(working_dir.clone()).term_input_into(buf);
         }
 
         if !self.palette_overrides.is_empty() {
@@ -619,7 +632,7 @@ impl State {
                 return;
             }
 
-            if *color_spec != [b'?'] {
+            if *color_spec != [b'?'] && color_spec.len() <= MAX_COLOR_SPEC_LEN {
                 self.functional_colors[idx] = Some(Vec::from(*color_spec));
             }
 
@@ -808,27 +821,29 @@ impl vte::Perform for State {
         trace!(self.logger, "osc_dispatch: {:?}", params);
         self.last_print_char = None;
 
-        let mut params_iter = params.iter();
-        match params_iter.next() {
+        // vte splits the whole string on ';', but free form text like titles
+        // and URLs can contain ';' too, so commands that end in such text
+        // glue the rest of their params back together.
+        let rest = params.get(1..).unwrap_or(&[]);
+        let mut params_iter = rest.iter();
+        match params.first() {
             // Title manipulation
-            Some([b'0']) => if let Some(title) = params_iter.next() {
-                let title: SmallVec<[u8; 8]> = title.to_vec().into();
+            Some([b'0']) => if rest.is_empty() {
+                warn!(self.logger, "OSC 0 with no title param");
+            } else {
+                let title = osc_text(rest);
                 self.set_title(title.clone());
                 self.set_icon_name(title);
-            } else {
-                warn!(self.logger, "OSC 0 with no title param");
             },
-            Some([b'1']) => if let Some(icon_name) = params_iter.next() {
-                let icon_name: SmallVec<[u8; 8]> = icon_name.to_vec().into();
-                self.set_icon_name(icon_name);
-            } else {
+            Some([b'1']) => if rest.is_empty() {
                 warn!(self.logger, "OSC 1 with no icon_name param");
-            },
-            Some([b'2']) => if let Some(title) = params_iter.next() {
-                let title: SmallVec<[u8; 8]> = title.to_vec().into();
-                self.set_title(title);
             } else {
+                self.set_icon_name(osc_text(rest));
+            },
+            Some([b'2']) => if rest.is_empty() {
                 warn!(self.logger, "OSC 2 with no title param");
+            } else {
+                self.set_title(osc_text(rest));
             },
 
             // Color Palette
@@ -840,55 +855,63 @@ impl vte::Perform for State {
                     continue;
                 }
 
-                match std::str::from_utf8(idx) {
-                    Ok(s) => match s.parse::<usize>() {
-                        Ok(i) => {
-                            self.palette_overrides.insert(i, color_spec.to_vec());
-                        },
-                        Err(e) => warn!(self.logger, "OSC 4: idx is an invalid number '{}': {}", s, e),
+                match palette_idx(idx) {
+                    Some(i) if color_spec.len() <= MAX_COLOR_SPEC_LEN => {
+                        self.palette_overrides.insert(i, color_spec.to_vec());
                     },
-                    Err(e) => warn!(self.logger, "OSC 4: invalid idx '{:?}': {}", idx, e),
+                    _ => warn!(self.logger, "OSC 4: ignoring color {:?} = {:?}", idx, color_spec),
                 }
             },
-            Some([b'1', b'0', b'4']) => while let Some(idx) = params_iter.next() {
-                match std::str::from_utf8(idx) {
-                    Ok(s) => match s.parse::<usize>() {
-                        Ok(i) => {
-                            self.palette_overrides.remove(&i);
-                        },
-                        Err(e) => warn!(self.logger, "OSC 104: idx is an invalid number '{}': {}", s, e),
+            // With no indices, OSC 104 resets the whole palette.
+            Some([b'1', b'0', b'4']) if rest.iter().all(|idx| idx.is_empty()) =>
+                self.palette_overrides.clear(),
+            Some([b'1', b'0', b'4']) => for idx in rest.iter().filter(|idx| !idx.is_empty()) {
+                match palette_idx(idx) {
+                    Some(i) => {
+                        self.palette_overrides.remove(&i);
                     },
-                    Err(e) => warn!(self.logger, "OSC 104: invalid idx '{:?}': {}", idx, e),
+                    None => warn!(self.logger, "OSC 104: invalid idx '{:?}'", idx),
                 }
             },
 
-            // Working dir
-            Some([b'7']) => if let (Some(host), Some(dir)) = (params_iter.next(), params_iter.next()) {
-                self.working_dir = Some(WorkingDir {
-                    host: host.to_vec().into(),
-                    dir: dir.to_vec().into(),
-                });
-            } else {
-                warn!(self.logger, "OSC 7 with fewer than 2 params");
-            },
-
-            // Links. Depending on params, OSC 8 both starts and ends links.
-            Some([b'8']) => if let (Some(params), Some(url)) = (params_iter.next(), params_iter.next()) {
-                if params.is_empty() && url.is_empty() {
-                    self.cursor_attrs.link_target = None;
+            // Working dir, which shells send as a `file://host/path` URL.
+            // An empty one unsets it.
+            Some([b'7']) => {
+                let url = rest.join(&b';');
+                self.working_dir = if url.is_empty() {
+                    None
+                } else if url.len() > MAX_OSC_TEXT_LEN {
+                    warn!(self.logger, "OSC 7: ignoring over-long working dir");
+                    None
                 } else {
-                    self.cursor_attrs.link_target = Some(LinkTarget {
-                        params: SmallVec::from_slice(params),
-                        url: SmallVec::from_slice(url),
-                    });
-                }
-            } else {
-                self.cursor_attrs.link_target = None;
+                    Some(url.into())
+                };
+            },
+
+            // Links. Depending on params, OSC 8 both starts and ends links:
+            // an empty URL ends the current link, whatever the params say.
+            Some([b'8']) => {
+                let url = rest.get(1..).unwrap_or(&[]).join(&b';');
+                self.cursor_attrs.link_target = if url.is_empty() {
+                    None
+                } else if url.len() > MAX_LINK_URL_LEN {
+                    warn!(self.logger, "OSC 8: ignoring over-long link");
+                    None
+                } else {
+                    let params: &[u8] = match rest.first() {
+                        Some(&params) if params.len() <= MAX_LINK_PARAMS_LEN => params,
+                        _ => &[],
+                    };
+                    Some(LinkTarget { params: SmallVec::from_slice(params), url: url.into() })
+                };
             },
 
             // Functional colors (foreground, background and whatnot).
-            Some([b'1', x]) if b'0' <= *x && *x <= b'9' =>
+            Some([b'1', x]) if x.is_ascii_digit() =>
                 self.set_functional_color((*x - b'0') as usize, params_iter),
+            // OSC 110 through OSC 119 reset them one at a time.
+            Some([b'1', b'1', x]) if x.is_ascii_digit() =>
+                self.functional_colors[(*x - b'0') as usize] = None,
 
             Some([b'5', b'2']) => debug!(self.logger, "ignoring OSC 52 (clipboard)"),
             Some([b'9']) => debug!(self.logger, "ignoring OSC 9 (desktop notification)"),
@@ -1724,6 +1747,31 @@ fn parse_extended_color<'params>(
             }
             _ => None,
         }
+    }
+}
+
+/// Glues free form OSC text that vte split on ';' back together, cutting it
+/// off (on a char boundary) if it gets unreasonably long.
+fn osc_text(params: &[&[u8]]) -> SmallVec<[u8; 8]> {
+    let mut text = params.join(&b';');
+    if text.len() > MAX_OSC_TEXT_LEN {
+        let mut end = MAX_OSC_TEXT_LEN;
+        // Don't leave part of a UTF-8 sequence dangling off the end.
+        while end > MAX_OSC_TEXT_LEN - 3 && (text[end] & 0xc0) == 0x80 {
+            end -= 1;
+        }
+        text.truncate(end);
+    }
+    text.into()
+}
+
+/// Parses the index of a palette color, as used by OSC 4 and OSC 104.
+fn palette_idx(idx: &[u8]) -> Option<usize> {
+    let idx = std::str::from_utf8(idx).ok()?.parse::<usize>().ok()?;
+    if idx < NUM_PALETTE_COLORS {
+        Some(idx)
+    } else {
+        None
     }
 }
 
