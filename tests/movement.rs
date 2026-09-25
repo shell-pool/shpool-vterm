@@ -1122,3 +1122,104 @@ frag! {
             term::ControlCodes::cursor_position(5, 5),
             term::control_codes().clear_attrs
 }
+
+// CUU stops at the top of the scroll region when it starts out inside of it,
+// even without origin mode.
+frag! {
+    cursor_up_stops_at_scroll_region_top { scrollback_lines: 100, width: 5, height: 5 }
+    <= term::ControlCodes::set_scroll_region(2, 4),
+       term::ControlCodes::cursor_position(3, 1),
+       term::ControlCodes::cursor_up(5),
+       term::Raw::from("X")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Crlf::default(),
+            term::Raw::from("X"),
+            term::ControlCodes::set_scroll_region(2, 4),
+            term::ControlCodes::cursor_position(2, 2),
+            term::control_codes().clear_attrs
+}
+
+// It stops there coming from below the scroll region too.
+frag! {
+    cursor_up_from_below_scroll_region { scrollback_lines: 100, width: 5, height: 5 }
+    <= term::ControlCodes::set_scroll_region(2, 3),
+       term::ControlCodes::cursor_position(5, 1),
+       term::ControlCodes::cursor_up(5),
+       term::Raw::from("X")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Crlf::default(),
+            term::Raw::from("X"),
+            term::ControlCodes::set_scroll_region(2, 3),
+            term::ControlCodes::cursor_position(2, 2),
+            term::control_codes().clear_attrs
+}
+
+// Above the scroll region, CUU can go all the way to the top.
+frag! {
+    cursor_up_above_scroll_region { scrollback_lines: 100, width: 5, height: 5 }
+    <= term::ControlCodes::set_scroll_region(3, 5),
+       term::ControlCodes::cursor_position(2, 1),
+       term::ControlCodes::cursor_up(5),
+       term::Raw::from("X")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("X"),
+            term::ControlCodes::set_scroll_region(3, 5),
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().clear_attrs
+}
+
+// CUD stops at the bottom of the scroll region when it starts out above it.
+frag! {
+    cursor_down_stops_at_scroll_region_bottom { scrollback_lines: 100, width: 5, height: 5 }
+    <= term::ControlCodes::set_scroll_region(2, 3),
+       term::ControlCodes::cursor_down(5),
+       term::Raw::from("X")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::Raw::from("X"),
+            term::ControlCodes::set_scroll_region(2, 3),
+            term::ControlCodes::cursor_position(3, 2),
+            term::control_codes().clear_attrs
+}
+
+// Below the scroll region, CUD can go all the way to the bottom.
+frag! {
+    cursor_down_below_scroll_region { scrollback_lines: 100, width: 5, height: 5 }
+    <= term::ControlCodes::set_scroll_region(1, 2),
+       term::ControlCodes::cursor_position(4, 1),
+       term::ControlCodes::cursor_down(5),
+       term::Raw::from("X")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::Raw::from("X"),
+            term::ControlCodes::set_scroll_region(1, 2),
+            term::ControlCodes::cursor_position(5, 2),
+            term::control_codes().clear_attrs
+}
+
+// CNL and CPL stop at the scroll region the same way.
+frag! {
+    next_and_prev_line_stop_at_scroll_region { scrollback_lines: 100, width: 5, height: 5 }
+    <= term::ControlCodes::set_scroll_region(2, 4),
+       term::ControlCodes::cursor_position(3, 3),
+       term::Raw::from("\x1b[5EA\x1b[5FB")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Crlf::default(),
+            term::Raw::from("B"),
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::Raw::from("A"),
+            term::ControlCodes::set_scroll_region(2, 4),
+            term::ControlCodes::cursor_position(2, 2),
+            term::control_codes().clear_attrs
+}

@@ -1041,17 +1041,13 @@ impl vte::Perform for State {
             // CUU (Cursor Up)
             'A' if plain => {
                 let n = param_or(&mut params_iter, 1) as usize;
-                let screen = self.screen_mut();
-                screen.cursor.row = screen.cursor.row.saturating_sub(n);
-                screen.clamp();
+                self.screen_mut().cursor_up(n);
             }
             // CUD (Cursor Down)
             // VPR (Vertical Position Relative, CSI n e)
             'B' | 'e' if plain => {
                 let n = param_or(&mut params_iter, 1) as usize;
-                let screen = self.screen_mut();
-                screen.cursor.row += n;
-                screen.clamp();
+                self.screen_mut().cursor_down(n);
             }
             // CUF (Cursor Forward)
             // HPR (Horizontal Position Relative, CSI n a)
@@ -1072,17 +1068,15 @@ impl vte::Perform for State {
             'E' if plain => {
                 let n = param_or(&mut params_iter, 1) as usize;
                 let screen = self.screen_mut();
-                screen.cursor.row += n;
+                screen.cursor_down(n);
                 screen.cursor.col = 0;
-                screen.clamp();
             }
             // CPL (Cursor Prev Line)
             'F' if plain => {
                 let n = param_or(&mut params_iter, 1) as usize;
                 let screen = self.screen_mut();
-                screen.cursor.row = screen.cursor.row.saturating_sub(n);
+                screen.cursor_up(n);
                 screen.cursor.col = 0;
-                screen.clamp();
             }
             // HPA (Horizontal Position Absolute, CSI n `)
             // CHA (Cursor Horizontal Absolute, CSI n G)

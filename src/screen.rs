@@ -315,6 +315,24 @@ impl Screen {
             settle_cursor(saved_cursor, saved_pending_wrap, self.size);
     }
 
+    /// Move the cursor up `n` rows. It stops at the top of the scroll region,
+    /// unless it started out above it. This implements CUU.
+    pub fn cursor_up(&mut self, n: usize) {
+        let (top, _) = self.grid.scroll_region().as_region(&self.size).row_bounds();
+        let min = if self.cursor.row < top { 0 } else { top };
+        self.cursor.row = std::cmp::max(self.cursor.row.saturating_sub(n), min);
+        self.clamp();
+    }
+
+    /// Move the cursor down `n` rows. It stops at the bottom of the scroll
+    /// region, unless it started out below it. This implements CUD.
+    pub fn cursor_down(&mut self, n: usize) {
+        let (_, bottom) = self.grid.scroll_region().as_region(&self.size).row_bounds();
+        let end = if self.cursor.row < bottom { bottom } else { self.size.height };
+        self.cursor.row = std::cmp::min(self.cursor.row.saturating_add(n), end.saturating_sub(1));
+        self.clamp();
+    }
+
     /// Bring the cursor back within the region it may occupy after it has
     /// been explicitly moved.
     ///
