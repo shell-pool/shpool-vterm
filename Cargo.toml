@@ -29,4 +29,5 @@ bitflags = "2" # packed mode flags
 unstable-internal-test = []
 
 [dev-dependencies]
+arbitrary = { version = "1", features = ["derive"] }
 shpool-vterm = { path = ".", features = ["unstable-internal-test"] }
