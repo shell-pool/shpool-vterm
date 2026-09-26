@@ -141,6 +141,20 @@ impl Charsets {
         }
     }
 
+    /// The part of the charset state that DECSC saves: the designations and
+    /// the locking shift. Like in xterm, a pending single shift is not part
+    /// of it.
+    pub fn saved(&self) -> Charsets {
+        Charsets { single_shift: None, ..self.clone() }
+    }
+
+    /// Put back a charset state that `saved` saved. A pending single shift
+    /// stays pending, since it still applies to the next printed char.
+    pub fn restore(&mut self, saved: &Charsets) {
+        self.slots = saved.slots;
+        self.gl = saved.gl;
+    }
+
     /// Translate a printed char into the char that gets displayed, using up
     /// any pending single shift.
     pub fn translate(&mut self, c: char) -> char {
@@ -243,6 +257,21 @@ mod tests {
         for charset in [Charset::Ascii, Charset::Uk, Charset::DecSpecialGraphics] {
             assert_eq!(Charset::from_designator(charset.designator()), charset);
         }
+    }
+
+    #[test]
+    fn save_and_restore_leave_a_single_shift_alone() {
+        let mut charsets = Charsets::default();
+        charsets.designate(2, Charset::DecSpecialGraphics);
+        charsets.single_shift(2);
+        let saved = charsets.saved();
+        assert_eq!(charsets.translate('q'), '─');
+
+        charsets.restore(&saved);
+        assert_eq!(charsets.translate('q'), 'q');
+        charsets.single_shift(2);
+        charsets.restore(&saved);
+        assert_eq!(charsets.translate('q'), '─');
     }
 
     #[test]
