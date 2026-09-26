@@ -64,9 +64,9 @@ frag! {
        term::Raw::from("😊")
     => ContentRegion::All =>
             reset_codes,
-            term::Raw::from("A"),
-            term::Crlf::default(),
-            term::Raw::from("😊"),
+            // The emoji does not fit next to the A, so printing it wraps,
+            // just like it did in the first place.
+            term::Raw::from("A😊"),
             // The cursor is waiting to wrap after the emoji, which we can
             // only reproduce by printing it again.
             term::ControlCodes::cursor_position(2, 1),
@@ -79,9 +79,7 @@ frag! {
     <= term::Raw::from("a😊b")
     => ContentRegion::All =>
             reset_codes,
-            term::Raw::from("a😊"),
-            term::Crlf::default(),
-            term::Raw::from("b"),
+            term::Raw::from("a😊b"),
             term::ControlCodes::cursor_position(2, 2),
             term::control_codes().clear_attrs
 }

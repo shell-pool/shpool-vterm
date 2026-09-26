@@ -28,6 +28,20 @@ frag! {
             term::control_codes().clear_attrs
 }
 
+// Lines that wrapped on the alt screen stay joined too.
+frag! {
+    alt_screen_keeps_wrapped_lines_joined { scrollback_lines: 100, width: 3, height: 2 }
+    <= term::control_codes().enable_alt_screen,
+       term::Raw::from("abcd")
+    => ContentRegion::All =>
+            reset_codes,
+            empty_scrollback,
+            term::control_codes().enable_alt_screen,
+            term::Raw::from("abcd"),
+            term::ControlCodes::cursor_position(2, 2),
+            term::control_codes().clear_attrs
+}
+
 frag! {
     alt_screen_isolation { scrollback_lines: 100, width: 2, height: 2 }
     <= term::Raw::from("A"),
