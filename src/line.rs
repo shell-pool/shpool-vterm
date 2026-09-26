@@ -382,6 +382,35 @@ impl Line {
         self.trim_blanks();
     }
 
+    /// Like `insert_character`, but with the right margin at `right`. Only
+    /// the cells up to the margin shift over, and the ones that get pushed
+    /// past it are lost. Nothing happens at or past the margin.
+    pub fn insert_character_in(
+        &mut self,
+        width: usize,
+        col: usize,
+        right: usize,
+        n: usize,
+        fill: term::Color,
+    ) {
+        if right >= width {
+            self.insert_character(width, col, n, fill);
+            return;
+        }
+        if col >= right {
+            return;
+        }
+
+        let n = std::cmp::min(n, right - col);
+        self.pad_to(right);
+        self.blank_out_wide_char_at(col);
+        self.blank_out_wide_char_at(right - n);
+        self.blank_out_wide_char_at(right);
+        self.cells.drain(right - n..right);
+        self.cells.splice(col..col, std::iter::repeat(Cell::blank(fill)).take(n));
+        self.trim_blanks();
+    }
+
     /// Delete n cells at the current position, sucking cells to the
     /// right towards the cursor, and backfilling their old position
     /// with blanks painted with `fill`.
@@ -418,6 +447,35 @@ impl Line {
         self.trim_blanks();
     }
 
+    /// Like `delete_character`, but with the right margin at `right`. Only
+    /// the cells up to the margin get pulled in, and the backfill goes in
+    /// front of it. Nothing happens at or past the margin.
+    pub fn delete_character_in(
+        &mut self,
+        width: usize,
+        col: usize,
+        right: usize,
+        fill: term::Color,
+        n: usize,
+    ) {
+        if right >= width {
+            self.delete_character(width, col, fill, n);
+            return;
+        }
+        if col >= right {
+            return;
+        }
+
+        let n = std::cmp::min(n, right - col);
+        self.pad_to(right);
+        self.blank_out_wide_char_at(col);
+        self.blank_out_wide_char_at(col + n);
+        self.blank_out_wide_char_at(right);
+        self.cells.drain(col..col + n);
+        self.cells.splice(right - n..right - n, std::iter::repeat(Cell::blank(fill)).take(n));
+        self.trim_blanks();
+    }
+
     /// Blank out n characters to the right of the current cursor. Unlike
     /// delete, this leaves the cells in place, just clobbers their contents.
     ///
@@ -441,6 +499,19 @@ impl Line {
             self.cells[i] = blank.clone();
         }
         self.trim_blanks();
+    }
+
+    /// Put `cells` in place of the ones starting at `col`, handing back the
+    /// cells that were there. A wide char that straddles either end gets
+    /// blanked out first, since only one half of it would go.
+    pub fn swap_cells(&mut self, col: usize, cells: Vec<Cell>) -> Vec<Cell> {
+        let end = col + cells.len();
+        self.pad_to(end);
+        self.blank_out_wide_char_at(col);
+        self.blank_out_wide_char_at(end);
+        let swapped_out = self.cells.splice(col..end, cells).collect();
+        self.trim_blanks();
+        swapped_out
     }
 }
 
@@ -709,6 +780,48 @@ mod tests {
         let mut line = Line::new();
         line.set_cell(width, 0, Cell::new('a', term::Attrs::default()))?;
         assert!(matches!(line.shown_at(width), Cow::Borrowed(_)));
+
+        Ok(())
+    }
+
+    #[test]
+    fn insert_and_delete_before_right_margin() -> anyhow::Result<()> {
+        let width = 6;
+        let mut line = Line::new();
+        for (col, c) in "abcdef".chars().enumerate() {
+            line.set_cell(width, col, Cell::new(c, term::Attrs::default()))?;
+        }
+
+        // The margin is in front of the "e".
+        let mut inserted = line.clone();
+        inserted.insert_character_in(width, 1, 4, 1, term::Color::Default);
+        assert_eq!(format!("{inserted}"), "a*bcef\n");
+
+        let mut deleted = line.clone();
+        deleted.delete_character_in(width, 1, 4, term::Color::Default, 1);
+        assert_eq!(format!("{deleted}"), "acd*ef\n");
+
+        Ok(())
+    }
+
+    #[test]
+    fn swap_cells_through_wide() -> anyhow::Result<()> {
+        let width = 6;
+        let wide = Cell::new('😊', term::Attrs::default());
+        let x = Cell::new('x', term::Attrs::default());
+        let mut line = Line::new();
+        line.set_cell(width, 0, wide.clone())?;
+        line.set_cell(width, 2, x.clone())?;
+        line.set_cell(width, 3, wide.clone())?;
+
+        // The wide chars straddle the ends of the swapped cells, so they go
+        // entirely rather than leaving half of themselves behind. What is
+        // left of the one at the end is just part of the blank space past
+        // the end of the line now.
+        let y = Cell::new('y', term::Attrs::default());
+        let swapped_out = line.swap_cells(1, vec![y; 3]);
+        assert_eq!(swapped_out, vec![Cell::empty(), x, Cell::empty()]);
+        assert_eq!(format!("{line}"), "*yyy\n");
 
         Ok(())
     }
