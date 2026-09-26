@@ -229,15 +229,23 @@ impl Scrollback {
         size: crate::Size,
         dump_region: ContentRegion,
     ) {
-        let lines_iter: Box<dyn Iterator<Item = (usize, &Line)>> = match dump_region {
-            ContentRegion::All => Box::new(self.buf.iter().enumerate().rev()),
-            ContentRegion::Screen => Box::new(self.buf.iter().take(size.height).enumerate().rev()),
-            ContentRegion::BottomLines(nlines) => {
-                Box::new(self.buf.iter().take(nlines).enumerate().rev())
-            }
+        let nlines = match dump_region {
+            ContentRegion::All => self.buf.len(),
+            ContentRegion::Screen => size.height,
+            ContentRegion::BottomLines(nlines) => nlines,
         };
+        let nlines = std::cmp::min(nlines, self.buf.len());
 
-        for (i, line) in lines_iter {
+        // When there are fewer lines than rows on the screen, the lines go
+        // on the rows they came from rather than at the top of the screen.
+        // Everything else, like the cursor, gets put back at an absolute
+        // position, and has to end up in the same place relative to them.
+        let first_row = self.lines_below_grid_start(size).saturating_sub(nlines);
+        if first_row > 0 {
+            term::ControlCodes::cursor_position((first_row + 1) as u16, 1).term_input_into(buf);
+        }
+
+        for (i, line) in self.buf.iter().take(nlines).enumerate().rev() {
             line.term_input_into(buf);
             if i != 0 {
                 term::Crlf::default().term_input_into(buf);

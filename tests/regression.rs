@@ -1153,3 +1153,54 @@ fn zero_size_screen_works_after_a_resize() {
 
     assert_eq!(term.contents(ContentRegion::Screen), expected);
 }
+
+// Restoring fewer lines than the screen has puts them back on the rows they
+// were on, so that they are where the cursor is.
+frag! {
+    bottom_lines_go_back_on_their_rows { scrollback_lines: 100, width: 5, height: 4 }
+    <= term::Raw::from("aa\r\nbb\r\ncc\r\ndd")
+    => ContentRegion::BottomLines(2) =>
+            reset_codes,
+            term::ControlCodes::cursor_position(3, 1),
+            term::Raw::from("cc"),
+            term::Crlf::default(),
+            term::Raw::from("dd"),
+            term::ControlCodes::cursor_position(4, 3),
+            term::control_codes().clear_attrs
+}
+
+// Same when the screen is not full yet.
+frag! {
+    bottom_lines_of_a_partly_filled_screen_go_back_on_their_rows { scrollback_lines: 100, width: 5, height: 5 }
+    <= term::Raw::from("aa\r\nbb\r\ncc")
+    => ContentRegion::BottomLines(2) =>
+            reset_codes,
+            term::ControlCodes::cursor_position(2, 1),
+            term::Raw::from("bb"),
+            term::Crlf::default(),
+            term::Raw::from("cc"),
+            term::ControlCodes::cursor_position(3, 3),
+            term::control_codes().clear_attrs
+}
+
+// The alt screen gets painted over the main screen, but the main screen still
+// has to be right for when the app switches back to it.
+frag! {
+    bottom_lines_under_the_alt_screen_go_back_on_their_rows { scrollback_lines: 100, width: 5, height: 3 }
+    <= term::Raw::from("aa\r\nbb\r\ncc"),
+       term::control_codes().enable_alt_screen,
+       term::Raw::from("alt")
+    => ContentRegion::BottomLines(1) =>
+            reset_codes,
+            term::ControlCodes::cursor_position(3, 1),
+            term::Raw::from("cc"),
+            term::ControlCodes::cursor_position(3, 3),
+            term::control_codes().enable_alt_screen,
+            term::ControlCodes::cursor_position(1, 1),
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::Raw::from("  alt"),
+            term::ControlCodes::cursor_position(3, 5),
+            term::Raw::from("t"),
+            term::control_codes().clear_attrs
+}
