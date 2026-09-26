@@ -675,7 +675,7 @@ impl State {
     /// and cursor addressing depend on, into the active screen's slot.
     fn save_cursor(&mut self) {
         let attrs = self.cursor_attrs.clone();
-        let charsets = self.charsets.clone();
+        let charsets = self.charsets.saved();
         let screen = self.screen_mut();
         let pos = screen.cursor;
         let pending_wrap = screen.pending_wrap;
@@ -696,7 +696,7 @@ impl State {
         screen.clamp();
         screen.pending_wrap = pending_wrap;
         self.cursor_attrs = attrs;
-        self.charsets = charsets;
+        self.charsets.restore(&charsets);
     }
 
     /// RIS. Put the terminal back the way it was when it started. Like in

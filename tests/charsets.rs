@@ -167,6 +167,40 @@ frag! {
             term::ControlCodes::designate_charset(0, b'0')
 }
 
+// Like in xterm, DECSC and DECRC leave a pending single shift alone. It still
+// applies to the next char printed.
+frag! {
+    restore_cursor_keeps_a_pending_single_shift { scrollback_lines: 100, width: 10, height: 3 }
+    <= term::ControlCodes::designate_charset(2, b'0'),
+       term::control_codes().save_cursor,
+       term::control_codes().single_shift_2,
+       term::control_codes().restore_cursor,
+       term::Raw::from("qq")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("─q"),
+            term::ControlCodes::cursor_position(1, 3),
+            term::control_codes().clear_attrs,
+            term::ControlCodes::designate_charset(2, b'0')
+}
+
+// And a single shift that has been used up does not come back.
+frag! {
+    restore_cursor_does_not_bring_back_a_used_single_shift { scrollback_lines: 100, width: 10, height: 3 }
+    <= term::ControlCodes::designate_charset(2, b'0'),
+       term::control_codes().single_shift_2,
+       term::control_codes().save_cursor,
+       term::Raw::from("q"),
+       term::control_codes().restore_cursor,
+       term::Raw::from("q")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("q"),
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().clear_attrs,
+            term::ControlCodes::designate_charset(2, b'0')
+}
+
 frag! {
     soft_reset_resets_charsets { scrollback_lines: 100, width: 10, height: 3 }
     <= term::ControlCodes::designate_charset(0, b'0'),
