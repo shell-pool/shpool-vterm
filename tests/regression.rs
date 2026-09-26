@@ -66,7 +66,6 @@ frag! {
             term::Raw::from("11"),
             term::Crlf::default(),
             term::Raw::from("33"),
-            term::Crlf::default(),
             term::ControlCodes::cursor_position(2, 1),
             term::control_codes().clear_attrs
 }
@@ -91,7 +90,7 @@ frag! {
        term::ControlCodes::delete_character(3)
     => ContentRegion::All =>
             reset_codes,
-            term::Raw::from("ab   "),
+            term::Raw::from("ab"),
             term::ControlCodes::cursor_position(1, 3),
             term::control_codes().clear_attrs
 }
@@ -104,7 +103,7 @@ frag! {
        term::ControlCodes::delete_character(3)
     => ContentRegion::All =>
             reset_codes,
-            term::Raw::from("ab   "),
+            term::Raw::from("ab"),
             term::ControlCodes::cursor_position(1, 5),
             term::control_codes().clear_attrs
 }
@@ -117,7 +116,7 @@ frag! {
        term::ControlCodes::delete_character(3)
     => ContentRegion::All =>
             reset_codes,
-            term::Raw::from("ab   "),
+            term::Raw::from("ab"),
             term::ControlCodes::cursor_position(1, 5),
             term::control_codes().clear_attrs
 }
@@ -130,7 +129,7 @@ frag! {
        term::ControlCodes::delete_character(3)
     => ContentRegion::All =>
             reset_codes,
-            term::Raw::from("ab   "),
+            term::Raw::from("ab"),
             term::ControlCodes::cursor_position(1, 5),
             term::control_codes().clear_attrs
 }
@@ -146,7 +145,7 @@ frag! {
             reset_codes,
             term::Raw::from("ab"),
             term::Crlf::default(),
-            term::Raw::from("cd   "),
+            term::Raw::from("cd"),
             term::ControlCodes::cursor_position(2, 5),
             term::control_codes().clear_attrs
 }
@@ -229,6 +228,28 @@ frag! {
             term::control_codes().clear_attrs
 }
 
+// An app can pile as many combining marks onto a cell as it likes, but past
+// a point they only take up memory, so the cell stops taking them.
+#[test]
+fn combining_marks_pile_up_to_a_limit() {
+    use shpool_vterm::term::AsTermInput;
+
+    let mut term = shpool_vterm::Term::new(100, shpool_vterm::Size { width: 10, height: 10 });
+    term.process(b"e");
+    for _ in 0..100_000 {
+        term.process("\u{301}".as_bytes());
+    }
+    term.process(b"x");
+
+    let mut expected = vec![];
+    crate::support::frag::reset_codes.term_input_into(&mut expected);
+    let marks = "\u{301}".repeat(16);
+    term::Raw::from(format!("e{marks}x").as_str()).term_input_into(&mut expected);
+    term::ControlCodes::cursor_position(1, 3).term_input_into(&mut expected);
+    term::control_codes().clear_attrs.term_input_into(&mut expected);
+    assert_eq!(term.contents(ContentRegion::All), expected);
+}
+
 //
 // Scroll region bottom past the last row of the screen.
 //
@@ -256,8 +277,7 @@ frag! {
        term::ControlCodes::set_scroll_region(1, 3),
        term::ControlCodes::cursor_position(3, 1),
        term::Crlf::default(),
-       term::Crlf::default(),
-       term::control_codes().unset_scroll_region
+       term::Crlf::default()
     => ContentRegion::Screen =>
             reset_codes,
             term::Raw::from("ee"),
@@ -280,8 +300,7 @@ frag! {
        term::ControlCodes::set_scroll_region(1, 5),
        term::ControlCodes::cursor_position(3, 1),
        term::Crlf::default(),
-       term::Crlf::default(),
-       term::control_codes().unset_scroll_region
+       term::Crlf::default()
     => ContentRegion::Screen =>
             reset_codes,
             term::Raw::from("ee"),
@@ -305,7 +324,6 @@ frag! {
        term::ControlCodes::cursor_position(3, 1),
        term::Crlf::default(),
        term::Crlf::default(),
-       term::control_codes().unset_scroll_region,
        term::ControlCodes::insert_lines(1)
     => ContentRegion::Screen =>
             reset_codes,
@@ -328,7 +346,6 @@ frag! {
        term::ControlCodes::cursor_position(3, 1),
        term::Crlf::default(),
        term::Crlf::default(),
-       term::control_codes().unset_scroll_region,
        term::ControlCodes::delete_lines(1)
     => ContentRegion::Screen =>
             reset_codes,
@@ -358,13 +375,12 @@ frag! {
             term::Crlf::default(),
             term::Raw::from("cc"),
             term::Crlf::default(),
-            term::ControlCodes::set_scroll_region(1, 3),
-            term::ControlCodes::cursor_position(3, 3),
+            term::ControlCodes::cursor_position(1, 1),
             term::control_codes().clear_attrs
 }
 
 // Clamping the bottom can pull it up to or above the top, leaving a region
-// that describes no rows at all. There is nothing to scroll, so it is dropped.
+// that describes no rows at all. Like in xterm, the whole command is ignored.
 frag! {
     scroll_region_clamped_away { scrollback_lines: 100, width: 5, height: 3 }
     <= term::ControlCodes::set_scroll_region(5, 9)
@@ -374,15 +390,16 @@ frag! {
             term::control_codes().clear_attrs
 }
 
-// A shrinking resize strands a region that was in range when it was set, so
-// the clamp has to be reapplied there too. shpool resizes the spool on every
-// reattach, which is how a long lived session gets into this state.
+// A shrinking resize used to strand a region that was in range when it was
+// set. shpool resizes the spool on every reattach, which is how a long lived
+// session got into that state. Like in other terminals, a resize now drops
+// the region altogether.
 #[test]
-fn scroll_region_clamped_on_shrinking_resize() {
+fn scroll_region_dropped_on_shrinking_resize() {
     use shpool_vterm::term::AsTermInput;
 
     let mut input = vec![];
-    term::ControlCodes::set_scroll_region(1, 6).term_input_into(&mut input);
+    term::ControlCodes::set_scroll_region(2, 6).term_input_into(&mut input);
 
     let mut term = shpool_vterm::Term::new(100, shpool_vterm::Size { width: 5, height: 6 });
     term.process(input.as_slice());
@@ -390,22 +407,21 @@ fn scroll_region_clamped_on_shrinking_resize() {
 
     let mut expected = vec![];
     crate::support::frag::reset_codes.term_input_into(&mut expected);
-    term::ControlCodes::set_scroll_region(1, 3).term_input_into(&mut expected);
     term::ControlCodes::cursor_position(1, 1).term_input_into(&mut expected);
     term::control_codes().clear_attrs.term_input_into(&mut expected);
 
     assert_eq!(term.contents(ContentRegion::All), expected);
 }
 
-// Same, on the alt screen, where the stranded region also takes the session
+// Same, on the alt screen, where a stranded region used to take the session
 // down on the next scroll.
 #[test]
-fn alt_screen_scroll_region_clamped_on_shrinking_resize() {
+fn alt_screen_scroll_region_dropped_on_shrinking_resize() {
     use shpool_vterm::term::AsTermInput;
 
     let mut input = vec![];
     term::control_codes().enable_alt_screen.term_input_into(&mut input);
-    term::ControlCodes::set_scroll_region(1, 6).term_input_into(&mut input);
+    term::ControlCodes::set_scroll_region(2, 6).term_input_into(&mut input);
 
     let mut term = shpool_vterm::Term::new(100, shpool_vterm::Size { width: 5, height: 6 });
     term.process(input.as_slice());
@@ -421,8 +437,36 @@ fn alt_screen_scroll_region_clamped_on_shrinking_resize() {
     term::control_codes().enable_alt_screen.term_input_into(&mut expected);
     term::Crlf::default().term_input_into(&mut expected);
     term::Crlf::default().term_input_into(&mut expected);
-    term::ControlCodes::set_scroll_region(1, 3).term_input_into(&mut expected);
     term::ControlCodes::cursor_position(1, 1).term_input_into(&mut expected);
+    term::control_codes().clear_attrs.term_input_into(&mut expected);
+
+    assert_eq!(term.contents(ContentRegion::All), expected);
+}
+
+// Growing the screen drops the region too. Origin mode stays on, but with no
+// region it just addresses the whole screen.
+#[test]
+fn scroll_region_dropped_on_growing_resize() {
+    use shpool_vterm::term::AsTermInput;
+
+    let mut input = vec![];
+    term::ControlCodes::set_scroll_region(2, 3).term_input_into(&mut input);
+    term::control_codes().enable_scroll_region_origin_mode.term_input_into(&mut input);
+
+    let mut term = shpool_vterm::Term::new(100, shpool_vterm::Size { width: 5, height: 4 });
+    term.process(input.as_slice());
+    term.resize(shpool_vterm::Size { width: 5, height: 6 });
+
+    let mut more = vec![];
+    term::ControlCodes::cursor_position(1, 1).term_input_into(&mut more);
+    term::Raw::from("X").term_input_into(&mut more);
+    term.process(more.as_slice());
+
+    let mut expected = vec![];
+    crate::support::frag::reset_codes.term_input_into(&mut expected);
+    term::Raw::from("X").term_input_into(&mut expected);
+    term::control_codes().enable_scroll_region_origin_mode.term_input_into(&mut expected);
+    term::ControlCodes::cursor_position(1, 2).term_input_into(&mut expected);
     term::control_codes().clear_attrs.term_input_into(&mut expected);
 
     assert_eq!(term.contents(ContentRegion::All), expected);
@@ -458,32 +502,64 @@ frag! {
 }
 
 // A dump has to land correctly on a terminal in any state, so the prefix
-// clears margins and origin mode before it homes the cursor and erases.
+// switches off every mode the dump might replay and clears margins and
+// origin mode before it homes the cursor and erases.
 //
-// Spelled out rather than built from `reset_codes` so that the helper cannot
-// quietly track a regression here.
+// Spelled out byte for byte rather than built from `reset_codes` so that the
+// helper cannot quietly track a regression here.
 #[test]
-fn dump_prefix_clears_scroll_region_and_origin_mode() {
-    use shpool_vterm::term::AsTermInput;
-
-    let mut expected = vec![];
-    term::control_codes().end_link.term_input_into(&mut expected);
-    term::control_codes().clear_attrs.term_input_into(&mut expected);
-    term::control_codes().unset_scroll_region.term_input_into(&mut expected);
-    term::control_codes().disable_scroll_region_origin_mode.term_input_into(&mut expected);
-    term::ControlCodes::cursor_position(1, 1).term_input_into(&mut expected);
-    term::control_codes().clear_screen.term_input_into(&mut expected);
-    term::Raw::from("hi").term_input_into(&mut expected);
-    term::ControlCodes::cursor_position(1, 3).term_input_into(&mut expected);
-    term::control_codes().clear_attrs.term_input_into(&mut expected);
+fn dump_prefix_resets_terminal_modes() {
+    let prefix = [
+        "\x1b]8;;\x1b\\",                            // end any link
+        "\x1b[?1049l",                               // leave the alt screen
+        "\x1b[m",                                    // reset attrs
+        "\x1b[r",                                    // clear the scroll region
+        "\x1b[?69l",                                 // left/right margins off
+        "\x1b[?6l",                                  // origin mode off
+        "\x1b[4l",                                   // insert mode off
+        "\x1b[?7h",                                  // auto-wrap on
+        "\x1b(B\x1b)B\x1b*B\x1b+B\x0f",              // G0-G3 ascii, G0 in use
+        "\x1b[?25h",                                 // show the cursor
+        "\x1b[?1l",                                  // normal cursor keys
+        "\x1b>",                                     // normal keypad
+        "\x1b[?1000;1002;1003;1005;1006;1015;1016l", // mouse reporting off
+        "\x1b[?1004l",                               // focus reporting off
+        "\x1b[?2004l",                               // bracketed paste off
+        "\x1b[H",                                    // home
+        "\x1b7",                                     // save the reset cursor
+        "\x1b[J",                                    // erase
+    ];
+    let expected = format!("{}hi\x1b[1;3H\x1b[m", prefix.concat());
 
     crate::support::frag::round_trip_frag(
         b"hi",
-        expected.as_slice(),
+        expected.as_bytes(),
         100,
         shpool_vterm::Size { width: 5, height: 3 },
         ContentRegion::All,
     );
+}
+
+// The terminal a restore gets painted into is often still in whatever state
+// the previous session left it in, e.g. because the connection dropped while
+// a curses app was running. Restoring into it has to end up in the same state
+// as restoring into a fresh terminal.
+#[test]
+fn restore_resets_modes_left_over_in_the_client() {
+    let size = shpool_vterm::Size { width: 20, height: 5 };
+    let mut session = shpool_vterm::Term::new(100, size);
+    session.process(b"$ ls\r\nfoo  bar\r\n$ ");
+
+    let mut client = shpool_vterm::Term::new(100, size);
+    client.process(b"\x1b[3;3H\x1b[?1049h"); // saved cursor, alt screen
+    client.process(b"\x1b[1;31m\x1b[2;4r\x1b[?6h"); // attrs, margins, DECOM
+    client.process(b"\x1b[4h\x1b[?7l"); // insert mode, no auto-wrap
+    client.process(b"\x1b[?25l\x1b[?1h\x1b="); // hidden cursor, app keys
+    client.process(b"\x1b[?1002;1006h\x1b[?1004h\x1b[?2004h"); // reporting
+    client.process(b"\x1b(0\x1b)0\x1b*0\x1b+0\x0e"); // line drawing
+    client.process(&session.contents(ContentRegion::All));
+
+    assert_eq!(client.contents(ContentRegion::All), session.contents(ContentRegion::All));
 }
 
 // Reflow rebuilds the scrollback out of logical lines, and a blank line is a
@@ -547,9 +623,7 @@ fn blank_lines_survive_a_reflowing_resize() {
 
     let mut expected = vec![];
     crate::support::frag::reset_codes.term_input_into(&mut expected);
-    term::Raw::from("abc").term_input_into(&mut expected);
-    term::Crlf::default().term_input_into(&mut expected);
-    term::Raw::from("def").term_input_into(&mut expected);
+    term::Raw::from("abcdef").term_input_into(&mut expected);
     term::Crlf::default().term_input_into(&mut expected);
     term::Crlf::default().term_input_into(&mut expected);
     term::Raw::from("gh").term_input_into(&mut expected);
@@ -648,9 +722,7 @@ fn cursor_follows_its_row_when_reflow_adds_rows() {
 
     let mut expected = vec![];
     crate::support::frag::reset_codes.term_input_into(&mut expected);
-    term::Raw::from("abc").term_input_into(&mut expected);
-    term::Crlf::default().term_input_into(&mut expected);
-    term::Raw::from("def").term_input_into(&mut expected);
+    term::Raw::from("abcdef").term_input_into(&mut expected);
     term::Crlf::default().term_input_into(&mut expected);
     term::Raw::from("gh").term_input_into(&mut expected);
     term::ControlCodes::cursor_position(3, 3).term_input_into(&mut expected);
@@ -690,6 +762,128 @@ fn cursor_stays_on_the_bottom_row_when_the_height_shrinks() {
     assert_eq!(term.contents(ContentRegion::Screen), expected);
 }
 
+// Clearing the screen erases it and homes the cursor, which leaves the prompt
+// on the top row with a screen full of blank rows under it. Shrinking the
+// height has to drop those rows rather than push the prompt up into the
+// scrollback, which used to leave the cursor on an empty screen.
+#[test]
+fn shrinking_a_cleared_screen_keeps_the_prompt_on_it() {
+    use shpool_vterm::term::AsTermInput;
+
+    let mut input = vec![];
+    for row in ["11", "22", "33", "44"] {
+        term::Raw::from(row).term_input_into(&mut input);
+        term::Crlf::default().term_input_into(&mut input);
+    }
+    term::Raw::from("55").term_input_into(&mut input);
+    term::ControlCodes::cursor_position(1, 1).term_input_into(&mut input);
+    term::control_codes().erase_screen.term_input_into(&mut input);
+    term::Raw::from("$ ").term_input_into(&mut input);
+
+    let mut term = shpool_vterm::Term::new(100, shpool_vterm::Size { width: 5, height: 5 });
+    term.process(input.as_slice());
+    term.resize(shpool_vterm::Size { width: 5, height: 3 });
+
+    let mut expected = vec![];
+    crate::support::frag::reset_codes.term_input_into(&mut expected);
+    term::Raw::from("$ ").term_input_into(&mut expected);
+    term::ControlCodes::cursor_position(1, 3).term_input_into(&mut expected);
+    term::control_codes().clear_attrs.term_input_into(&mut expected);
+
+    assert_eq!(term.contents(ContentRegion::All), expected);
+}
+
+// Only as many blank rows go as it takes to keep what was on the screen on
+// it, and never the ones the cursor is on or above.
+#[test]
+fn shrinking_drops_blank_rows_from_below_the_cursor() {
+    use shpool_vterm::term::AsTermInput;
+
+    let mut input = vec![];
+    for row in ["11", "22", "33", "44"] {
+        term::Raw::from(row).term_input_into(&mut input);
+        term::Crlf::default().term_input_into(&mut input);
+    }
+    term::Raw::from("55").term_input_into(&mut input);
+    term::ControlCodes::cursor_position(2, 3).term_input_into(&mut input);
+    term::control_codes().erase_to_end.term_input_into(&mut input);
+
+    let mut term = shpool_vterm::Term::new(100, shpool_vterm::Size { width: 5, height: 5 });
+    term.process(input.as_slice());
+    term.resize(shpool_vterm::Size { width: 5, height: 2 });
+
+    let mut expected = vec![];
+    crate::support::frag::reset_codes.term_input_into(&mut expected);
+    term::Raw::from("11").term_input_into(&mut expected);
+    term::Crlf::default().term_input_into(&mut expected);
+    term::Raw::from("22").term_input_into(&mut expected);
+    term::ControlCodes::cursor_position(2, 3).term_input_into(&mut expected);
+    term::control_codes().clear_attrs.term_input_into(&mut expected);
+
+    assert_eq!(term.contents(ContentRegion::All), expected);
+}
+
+// Text below the cursor stays, and so do the blank rows above it. The screen
+// gets pushed up into the scrollback like before.
+#[test]
+fn shrinking_keeps_text_below_the_cursor() {
+    use shpool_vterm::term::AsTermInput;
+
+    let mut input = vec![];
+    for row in ["11", "22", "33", ""] {
+        term::Raw::from(row).term_input_into(&mut input);
+        term::Crlf::default().term_input_into(&mut input);
+    }
+    term::Raw::from("55").term_input_into(&mut input);
+    term::ControlCodes::cursor_position(3, 1).term_input_into(&mut input);
+
+    let mut term = shpool_vterm::Term::new(100, shpool_vterm::Size { width: 5, height: 5 });
+    term.process(input.as_slice());
+    term.resize(shpool_vterm::Size { width: 5, height: 3 });
+
+    let mut expected = vec![];
+    crate::support::frag::reset_codes.term_input_into(&mut expected);
+    term::Raw::from("33").term_input_into(&mut expected);
+    term::Crlf::default().term_input_into(&mut expected);
+    term::Crlf::default().term_input_into(&mut expected);
+    term::Raw::from("55").term_input_into(&mut expected);
+    term::ControlCodes::cursor_position(1, 1).term_input_into(&mut expected);
+    term::control_codes().clear_attrs.term_input_into(&mut expected);
+
+    assert_eq!(term.contents(ContentRegion::Screen), expected);
+}
+
+// Narrowing splits long lines into more rows, which pushes the screen up just
+// like shrinking the height does, and the blank rows at the bottom make up
+// for it the same way.
+#[test]
+fn narrowing_drops_blank_rows_from_below_the_cursor() {
+    use shpool_vterm::term::AsTermInput;
+
+    let mut input = vec![];
+    term::Raw::from("abcdef").term_input_into(&mut input);
+    term::Crlf::default().term_input_into(&mut input);
+    term::Raw::from("gh").term_input_into(&mut input);
+    term::Crlf::default().term_input_into(&mut input);
+    term::Raw::from("ij").term_input_into(&mut input);
+    term::ControlCodes::cursor_position(2, 3).term_input_into(&mut input);
+    term::control_codes().erase_to_end.term_input_into(&mut input);
+
+    let mut term = shpool_vterm::Term::new(100, shpool_vterm::Size { width: 6, height: 3 });
+    term.process(input.as_slice());
+    term.resize(shpool_vterm::Size { width: 3, height: 3 });
+
+    let mut expected = vec![];
+    crate::support::frag::reset_codes.term_input_into(&mut expected);
+    term::Raw::from("abcdef").term_input_into(&mut expected);
+    term::Crlf::default().term_input_into(&mut expected);
+    term::Raw::from("gh").term_input_into(&mut expected);
+    term::ControlCodes::cursor_position(3, 3).term_input_into(&mut expected);
+    term::control_codes().clear_attrs.term_input_into(&mut expected);
+
+    assert_eq!(term.contents(ContentRegion::All), expected);
+}
+
 // DECSC stores a row too, so it has the same problem as the live cursor: a
 // resize between the save and the restore moves the line out from under it.
 // Save on "55", park the live cursor elsewhere so a fix cannot get this right
@@ -727,7 +921,45 @@ fn saved_cursor_follows_its_row_across_a_resize() {
     term::Raw::from("44").term_input_into(&mut expected);
     term::Crlf::default().term_input_into(&mut expected);
     term::Raw::from("55X").term_input_into(&mut expected);
+    term::ControlCodes::cursor_position(5, 3).term_input_into(&mut expected);
+    term::control_codes().save_cursor.term_input_into(&mut expected);
     term::ControlCodes::cursor_position(5, 4).term_input_into(&mut expected);
+    term::control_codes().clear_attrs.term_input_into(&mut expected);
+
+    assert_eq!(term.contents(ContentRegion::Screen), expected);
+}
+
+// Restoring the cursor when nothing was saved homes it. The empty slot used
+// to be a saved cursor in the top left corner, which then followed its row
+// across a resize like any other saved cursor, here down onto "33".
+#[test]
+fn restoring_an_unsaved_cursor_homes_it_after_a_resize() {
+    use shpool_vterm::term::AsTermInput;
+
+    let mut input = vec![];
+    for row in ["11", "22", "33", "44"] {
+        term::Raw::from(row).term_input_into(&mut input);
+        term::Crlf::default().term_input_into(&mut input);
+    }
+    term::Raw::from("55").term_input_into(&mut input);
+
+    let mut term = shpool_vterm::Term::new(100, shpool_vterm::Size { width: 5, height: 3 });
+    term.process(input.as_slice());
+    term.resize(shpool_vterm::Size { width: 5, height: 5 });
+
+    let mut restore = vec![];
+    term::control_codes().restore_cursor.term_input_into(&mut restore);
+    term::Raw::from("X").term_input_into(&mut restore);
+    term.process(restore.as_slice());
+
+    let mut expected = vec![];
+    crate::support::frag::reset_codes.term_input_into(&mut expected);
+    term::Raw::from("X1").term_input_into(&mut expected);
+    for row in ["22", "33", "44", "55"] {
+        term::Crlf::default().term_input_into(&mut expected);
+        term::Raw::from(row).term_input_into(&mut expected);
+    }
+    term::ControlCodes::cursor_position(1, 2).term_input_into(&mut expected);
     term::control_codes().clear_attrs.term_input_into(&mut expected);
 
     assert_eq!(term.contents(ContentRegion::Screen), expected);
@@ -819,6 +1051,199 @@ frag! {
             term::Crlf::default(),
             term::Raw::from("55"),
             term::ControlCodes::set_scroll_region(2, 4),
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs
+}
+
+// The main screen only stores the rows that have been written to, but the
+// rows below them are still on the screen. A linefeed on the bottom row has
+// to scroll everything up past those blank rows, not just open another blank
+// row right below the content.
+frag! {
+    linefeed_at_the_bottom_scrolls_a_partially_filled_screen { scrollback_lines: 100, width: 5, height: 3 }
+    <= term::Raw::from("aa"), term::Crlf::default(),
+       term::Raw::from("bb"),
+       term::ControlCodes::cursor_position(3, 1),
+       term::Raw::from("\nX")
+    => ContentRegion::Screen =>
+            reset_codes,
+            term::Raw::from("bb"),
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::Raw::from("X"),
+            term::ControlCodes::cursor_position(3, 2),
+            term::control_codes().clear_attrs
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("aa"),
+            term::Crlf::default(),
+            term::Raw::from("bb"),
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::Raw::from("X"),
+            term::ControlCodes::cursor_position(3, 2),
+            term::control_codes().clear_attrs
+}
+
+// Same for SU.
+frag! {
+    scroll_up_moves_a_partially_filled_screen { scrollback_lines: 100, width: 5, height: 3 }
+    <= term::Raw::from("aa"), term::Crlf::default(),
+       term::Raw::from("bb"),
+       term::ControlCodes::scroll_up(1)
+    => ContentRegion::Screen =>
+            reset_codes,
+            term::Raw::from("bb"),
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::ControlCodes::cursor_position(2, 3),
+            term::control_codes().clear_attrs
+}
+
+// Scrolling by more than a screenful blanks the screen. The lines that were
+// on it go into the scrollback, but there is no need to follow them up with
+// thousands of blank lines.
+frag! {
+    huge_scroll_up_only_pushes_a_screenful { scrollback_lines: 100, width: 5, height: 2 }
+    <= term::Raw::from("aa"), term::Crlf::default(),
+       term::Raw::from("bb"),
+       term::ControlCodes::scroll_up(1000)
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("aa"),
+            term::Crlf::default(),
+            term::Raw::from("bb"),
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::ControlCodes::cursor_position(2, 3),
+            term::control_codes().clear_attrs
+}
+
+// A client that is not attached to a real terminal can report a size of zero.
+// Nothing fits on a screen like that, but it must not take the session down.
+#[test]
+fn zero_size_screen_survives_input() {
+    let sizes = [
+        shpool_vterm::Size { width: 0, height: 0 },
+        shpool_vterm::Size { width: 0, height: 3 },
+        shpool_vterm::Size { width: 5, height: 0 },
+    ];
+    for size in sizes {
+        let mut term = shpool_vterm::Term::new(100, size);
+        // Text, tab stops, cursor motion, saving and restoring the cursor
+        // and the alt screen all have to cope with there being no cells.
+        term.process(
+            b"hello\r\nworld\tX\x1bH\x1b[g\x1b[0W\x1b[2W\x1b[3;3H\x1b7\x1b8\
+              \x1b[?1049h\x1b[2Jalt\x1bM\x1b[?1049l",
+        );
+        for other in sizes {
+            term.resize(other);
+            term.process(b"more\r\n");
+            for region in [ContentRegion::All, ContentRegion::Screen, ContentRegion::BottomLines(3)]
+            {
+                term.contents(region);
+            }
+            let _ = term.to_string();
+        }
+    }
+}
+
+// Once it gets a real size, a session that started out with a zero size
+// behaves like any other.
+#[test]
+fn zero_size_screen_works_after_a_resize() {
+    use shpool_vterm::term::AsTermInput;
+
+    let mut term = shpool_vterm::Term::new(100, shpool_vterm::Size { width: 0, height: 0 });
+    term.process(b"lost");
+    term.resize(shpool_vterm::Size { width: 5, height: 3 });
+    term.process(b"ab");
+
+    let mut expected = vec![];
+    crate::support::frag::reset_codes.term_input_into(&mut expected);
+    term::Raw::from("ab").term_input_into(&mut expected);
+    term::ControlCodes::cursor_position(1, 3).term_input_into(&mut expected);
+    term::control_codes().clear_attrs.term_input_into(&mut expected);
+
+    assert_eq!(term.contents(ContentRegion::Screen), expected);
+}
+
+// Restoring fewer lines than the screen has puts them back on the rows they
+// were on, so that they are where the cursor is.
+frag! {
+    bottom_lines_go_back_on_their_rows { scrollback_lines: 100, width: 5, height: 4 }
+    <= term::Raw::from("aa\r\nbb\r\ncc\r\ndd")
+    => ContentRegion::BottomLines(2) =>
+            reset_codes,
+            term::ControlCodes::cursor_position(3, 1),
+            term::Raw::from("cc"),
+            term::Crlf::default(),
+            term::Raw::from("dd"),
+            term::ControlCodes::cursor_position(4, 3),
+            term::control_codes().clear_attrs
+}
+
+// Same when the screen is not full yet.
+frag! {
+    bottom_lines_of_a_partly_filled_screen_go_back_on_their_rows { scrollback_lines: 100, width: 5, height: 5 }
+    <= term::Raw::from("aa\r\nbb\r\ncc")
+    => ContentRegion::BottomLines(2) =>
+            reset_codes,
+            term::ControlCodes::cursor_position(2, 1),
+            term::Raw::from("bb"),
+            term::Crlf::default(),
+            term::Raw::from("cc"),
+            term::ControlCodes::cursor_position(3, 3),
+            term::control_codes().clear_attrs
+}
+
+// The alt screen gets painted over the main screen, but the main screen still
+// has to be right for when the app switches back to it.
+frag! {
+    bottom_lines_under_the_alt_screen_go_back_on_their_rows { scrollback_lines: 100, width: 5, height: 3 }
+    <= term::Raw::from("aa\r\nbb\r\ncc"),
+       term::control_codes().enable_alt_screen,
+       term::Raw::from("alt")
+    => ContentRegion::BottomLines(1) =>
+            reset_codes,
+            term::ControlCodes::cursor_position(3, 1),
+            term::Raw::from("cc"),
+            term::ControlCodes::cursor_position(3, 3),
+            term::control_codes().enable_alt_screen,
+            term::ControlCodes::cursor_position(1, 1),
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::Raw::from("  alt"),
+            term::ControlCodes::cursor_position(3, 5),
+            term::Raw::from("t"),
+            term::control_codes().clear_attrs
+}
+
+// Clearing the screen leaves its rows stored, but blank rows at the bottom of
+// a screen that has not filled up yet are no different from the rows below
+// the content that nothing has been written to. Restoring the bottom lines
+// of it should restore the prompt rather than a couple of those blank rows.
+frag! {
+    bottom_lines_of_a_cleared_screen_include_the_prompt { scrollback_lines: 100, width: 5, height: 3 }
+    <= term::Raw::from("11\r\n22\r\n33"),
+       term::ControlCodes::cursor_position(1, 1),
+       term::control_codes().erase_screen,
+       term::Raw::from("$ ")
+    => ContentRegion::BottomLines(2) =>
+            reset_codes,
+            term::Raw::from("$ "),
+            term::ControlCodes::cursor_position(1, 3),
+            term::control_codes().clear_attrs
+}
+
+// A link gets left out of the saved cursor when it is restored, and without
+// it, a cursor saved at home restores just like an empty slot.
+frag! {
+    saved_cursor_with_nothing_but_a_link_is_not_restored { scrollback_lines: 100, width: 5, height: 2 }
+    <= term::Raw::from("\x1b]8;;http://x/\x1b\\"),
+       term::control_codes().save_cursor
+    => ContentRegion::All =>
+            reset_codes,
             term::ControlCodes::cursor_position(1, 1),
             term::control_codes().clear_attrs
 }

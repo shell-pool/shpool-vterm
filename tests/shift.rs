@@ -61,9 +61,6 @@ frag! {
     => ContentRegion::All =>
             reset_codes,
             term::Raw::from("11"),
-            term::Crlf::default(),
-            term::Crlf::default(),
-            term::Crlf::default(),
             term::ControlCodes::cursor_position(2, 1),
             term::control_codes().clear_attrs
 }
@@ -174,7 +171,6 @@ frag! {
             term::Raw::from("33"),
             term::Crlf::default(),
             term::Raw::from("44"),
-            term::Crlf::default(),
             term::ControlCodes::cursor_position(2, 1),
             term::control_codes().clear_attrs
 }
@@ -216,9 +212,6 @@ frag! {
     => ContentRegion::All =>
             reset_codes,
             term::Raw::from("11"),
-            term::Crlf::default(),
-            term::Crlf::default(),
-            term::Crlf::default(),
             term::ControlCodes::cursor_position(2, 1),
             term::control_codes().clear_attrs
 }
@@ -307,7 +300,7 @@ frag! {
        term::ControlCodes::delete_character(1)
     => ContentRegion::All =>
             reset_codes,
-            term::Raw::from("13   "),
+            term::Raw::from("13"),
             term::ControlCodes::cursor_position(1, 2),
             term::control_codes().clear_attrs
 }
@@ -319,7 +312,7 @@ frag! {
        term::ControlCodes::delete_character(2)
     => ContentRegion::All =>
             reset_codes,
-            term::Raw::from("3    "),
+            term::Raw::from("3"),
             term::ControlCodes::cursor_position(1, 1),
             term::control_codes().clear_attrs
 }
@@ -331,7 +324,7 @@ frag! {
        term::ControlCodes::delete_character(1)
     => ContentRegion::All =>
             reset_codes,
-            term::Raw::from("12   "),
+            term::Raw::from("12"),
             term::ControlCodes::cursor_position(1, 3),
             term::control_codes().clear_attrs
 }
@@ -340,14 +333,29 @@ frag! {
     delete_char_with_backfill_attrs { scrollback_lines: 100, width: 5, height: 4 }
     <= term::Raw::from("123"),
        term::ControlCodes::cursor_position(1, 2),
-       term::ControlCodes::fgcolor_idx(1),
+       term::ControlCodes::bgcolor_idx(4),
        term::ControlCodes::delete_character(1)
     => ContentRegion::All =>
             reset_codes,
             term::Raw::from("13  "),
-            term::ControlCodes::fgcolor_idx(1),
+            term::ControlCodes::bgcolor_idx(4),
             term::Raw::from(" "),
-            term::control_codes().fgcolor_default,
+            term::control_codes().bgcolor_default,
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().clear_attrs,
+            term::ControlCodes::bgcolor_idx(4)
+}
+
+// The backfill only gets the background color, like real terminals do.
+frag! {
+    delete_char_backfill_ignores_fgcolor { scrollback_lines: 100, width: 5, height: 4 }
+    <= term::Raw::from("123"),
+       term::ControlCodes::cursor_position(1, 2),
+       term::ControlCodes::fgcolor_idx(1),
+       term::ControlCodes::delete_character(1)
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("13"),
             term::ControlCodes::cursor_position(1, 2),
             term::control_codes().clear_attrs,
             term::ControlCodes::fgcolor_idx(1)
@@ -381,15 +389,29 @@ frag! {
     erase_char_with_attrs { scrollback_lines: 100, width: 5, height: 4 }
     <= term::Raw::from("123"),
        term::ControlCodes::cursor_position(1, 2),
-       term::ControlCodes::fgcolor_idx(1),
+       term::ControlCodes::bgcolor_idx(4),
        term::ControlCodes::erase_character(1)
     => ContentRegion::All =>
             reset_codes,
             term::Raw::from("1"),
-            term::ControlCodes::fgcolor_idx(1),
+            term::ControlCodes::bgcolor_idx(4),
             term::Raw::from(" "),
-            term::control_codes().fgcolor_default,
+            term::control_codes().bgcolor_default,
             term::Raw::from("3"),
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().clear_attrs,
+            term::ControlCodes::bgcolor_idx(4)
+}
+
+frag! {
+    erase_char_ignores_fgcolor { scrollback_lines: 100, width: 5, height: 4 }
+    <= term::Raw::from("123"),
+       term::ControlCodes::cursor_position(1, 2),
+       term::ControlCodes::fgcolor_idx(1),
+       term::ControlCodes::erase_character(1)
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("1 3"),
             term::ControlCodes::cursor_position(1, 2),
             term::control_codes().clear_attrs,
             term::ControlCodes::fgcolor_idx(1)
@@ -401,8 +423,10 @@ frag! {
        term::ControlCodes::erase_character(1)
     => ContentRegion::All =>
             reset_codes,
-            term::Raw::from("12345"),
-            term::ControlCodes::cursor_position(1, 6),
+            // Filling the line leaves the cursor on the last column, so that
+            // is the char that gets erased.
+            term::Raw::from("1234"),
+            term::ControlCodes::cursor_position(1, 5),
             term::control_codes().clear_attrs
 }
 
@@ -476,4 +500,57 @@ frag! {
             term::ControlCodes::cursor_position(1, 5),
             term::control_codes().clear_attrs,
             term::control_codes().enable_insert_mode
+}
+
+// IL and DL move the cursor to the start of the line.
+frag! {
+    insert_line_goes_to_line_start { scrollback_lines: 100, width: 5, height: 3 }
+    <= term::Raw::from("abc\r\ndef"),
+       term::ControlCodes::cursor_position(1, 3),
+       term::ControlCodes::insert_lines(1),
+       term::Raw::from("X")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("X"),
+            term::Crlf::default(),
+            term::Raw::from("abc"),
+            term::Crlf::default(),
+            term::Raw::from("def"),
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    delete_line_goes_to_line_start { scrollback_lines: 100, width: 5, height: 3 }
+    <= term::Raw::from("abc\r\ndef"),
+       term::ControlCodes::cursor_position(1, 3),
+       term::ControlCodes::delete_lines(1),
+       term::Raw::from("X")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("Xef"),
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().clear_attrs
+}
+
+// Outside of the scroll region, IL and DL don't move the cursor either.
+frag! {
+    insert_and_delete_line_outside_scroll_region_keep_cursor
+        { scrollback_lines: 100, width: 5, height: 3 }
+    <= term::Raw::from("abc\r\ndef\r\nghi"),
+       term::ControlCodes::set_scroll_region(1, 2),
+       term::ControlCodes::cursor_position(3, 3),
+       term::ControlCodes::insert_lines(1),
+       term::ControlCodes::delete_lines(1),
+       term::Raw::from("X")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("abc"),
+            term::Crlf::default(),
+            term::Raw::from("def"),
+            term::Crlf::default(),
+            term::Raw::from("ghX"),
+            term::ControlCodes::set_scroll_region(1, 2),
+            term::ControlCodes::cursor_position(3, 4),
+            term::control_codes().clear_attrs
 }

@@ -241,8 +241,38 @@ frag! {
             term::Raw::from("AC"),
             term::Crlf::default(),
             term::Raw::from("B"),
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().save_cursor,
             term::ControlCodes::cursor_position(1, 3),
             term::control_codes().clear_attrs
+}
+
+// Like in xterm, CSI s and CSI u save and restore everything that DECSC and
+// DECRC do, not just the position.
+frag! {
+    scp_rcp_restore_attrs_and_charsets { scrollback_lines: 100, width: 10, height: 3 }
+    <= term::control_codes().bold,
+       term::ControlCodes::designate_charset(0, b'0'),
+       term::control_codes().save_cursor_position,
+       term::control_codes().clear_attrs,
+       term::control_codes().designate_g0_us_ascii,
+       term::control_codes().restore_cursor_position,
+       term::Raw::from("q")
+    => ContentRegion::All =>
+            reset_codes,
+            term::control_codes().bold,
+            term::Raw::from("─"),
+            term::control_codes().reset_font_weight,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().bold,
+            term::ControlCodes::designate_charset(0, b'0'),
+            term::control_codes().save_cursor,
+            term::control_codes().reset_font_weight,
+            term::control_codes().designate_g0_us_ascii,
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().clear_attrs,
+            term::control_codes().bold,
+            term::ControlCodes::designate_charset(0, b'0')
 }
 
 frag! {
@@ -321,7 +351,7 @@ frag! {
             term::Crlf::default(),
             term::Raw::from("X"),
             term::ControlCodes::set_scroll_region(2, 4),
-            term::ControlCodes::cursor_position(3, 2),
+            term::ControlCodes::cursor_position(1, 1),
             term::control_codes().clear_attrs
 }
 
@@ -434,7 +464,7 @@ frag! {
             reset_codes,
             term::Raw::from("A"),
             term::ControlCodes::set_scroll_region(2, 5),
-            term::ControlCodes::cursor_position(1, 2),
+            term::ControlCodes::cursor_position(1, 1),
             term::control_codes().clear_attrs
 }
 
@@ -453,12 +483,12 @@ frag! {
     <= term::ControlCodes::set_scroll_region(2, 3),
        term::control_codes().enable_scroll_region_origin_mode,
        term::ControlCodes::cursor_position(1, 1),
-       term::ControlCodes::cursor_up(1),
-       term::control_codes().disable_scroll_region_origin_mode
+       term::ControlCodes::cursor_up(1)
     => ContentRegion::All =>
             reset_codes,
             term::ControlCodes::set_scroll_region(2, 3),
-            term::ControlCodes::cursor_position(2, 1),
+            term::control_codes().enable_scroll_region_origin_mode,
+            term::ControlCodes::cursor_position(1, 1),
             term::control_codes().clear_attrs
 }
 
@@ -467,12 +497,12 @@ frag! {
     <= term::ControlCodes::set_scroll_region(2, 3),
        term::control_codes().enable_scroll_region_origin_mode,
        term::ControlCodes::cursor_position(2, 1),
-       term::ControlCodes::cursor_down(1),
-       term::control_codes().disable_scroll_region_origin_mode
+       term::ControlCodes::cursor_down(1)
     => ContentRegion::All =>
             reset_codes,
             term::ControlCodes::set_scroll_region(2, 3),
-            term::ControlCodes::cursor_position(3, 1),
+            term::control_codes().enable_scroll_region_origin_mode,
+            term::ControlCodes::cursor_position(2, 1),
             term::control_codes().clear_attrs
 }
 
@@ -489,7 +519,7 @@ frag! {
             term::Crlf::default(),
             term::Raw::from(" X"),
             term::ControlCodes::set_scroll_region(2, 3),
-            term::ControlCodes::cursor_position(3, 3),
+            term::ControlCodes::cursor_position(1, 1),
             term::control_codes().clear_attrs
 }
 
@@ -523,7 +553,7 @@ frag! {
             term::Crlf::default(),
             term::Raw::from(" X"),
             term::ControlCodes::set_scroll_region(2, 3),
-            term::ControlCodes::cursor_position(3, 3),
+            term::ControlCodes::cursor_position(1, 1),
             term::control_codes().clear_attrs
 }
 
@@ -742,6 +772,8 @@ frag! {
             reset_codes,
             term::Raw::from("A"),
             term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().save_cursor,
+            term::ControlCodes::cursor_position(1, 2),
             term::control_codes().clear_attrs
 }
 
@@ -801,6 +833,22 @@ frag! {
             term::Crlf::default(),
             term::Raw::from("2"),
             term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().clear_attrs
+}
+
+// Unlike IL, RI doesn't move the cursor to the start of the line when it
+// scrolls.
+frag! {
+    reverse_index_scroll_keeps_column { scrollback_lines: 100, width: 5, height: 3 }
+    <= term::Raw::from("abc"),
+       term::control_codes().reverse_index,
+       term::Raw::from("X")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("   X"),
+            term::Crlf::default(),
+            term::Raw::from("abc"),
+            term::ControlCodes::cursor_position(1, 5),
             term::control_codes().clear_attrs
 }
 
@@ -888,5 +936,398 @@ frag! {
             term::Raw::from("3"),
             term::ControlCodes::set_scroll_region(1, 3),
             term::ControlCodes::cursor_position(3, 2),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    scroll_region_homes_cursor { scrollback_lines: 100, width: 10, height: 10 }
+    <= term::Raw::from("abc"),
+       term::ControlCodes::cursor_position(5, 5),
+       term::ControlCodes::set_scroll_region(2, 4),
+       term::Raw::from("X")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("Xbc"),
+            term::ControlCodes::set_scroll_region(2, 4),
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    scroll_region_homes_cursor_in_origin_mode { scrollback_lines: 100, width: 10, height: 10 }
+    <= term::control_codes().enable_scroll_region_origin_mode,
+       term::ControlCodes::cursor_position(5, 5),
+       term::ControlCodes::set_scroll_region(3, 6),
+       term::Raw::from("X")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::Raw::from("X"),
+            term::ControlCodes::set_scroll_region(3, 6),
+            term::control_codes().enable_scroll_region_origin_mode,
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    scroll_region_cancels_pending_wrap { scrollback_lines: 100, width: 5, height: 5 }
+    <= term::Raw::from("abcde"),
+       term::ControlCodes::set_scroll_region(2, 4),
+       term::Raw::from("X")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("Xbcde"),
+            term::ControlCodes::set_scroll_region(2, 4),
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    scroll_region_top_only { scrollback_lines: 100, width: 10, height: 10 }
+    <= term::Raw::from("\x1b[3r")
+    => ContentRegion::All =>
+            reset_codes,
+            term::ControlCodes::set_scroll_region(3, 10),
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    scroll_region_whole_screen { scrollback_lines: 100, width: 10, height: 10 }
+    <= term::ControlCodes::set_scroll_region(2, 4),
+       term::ControlCodes::set_scroll_region(1, 10)
+    => ContentRegion::All =>
+            reset_codes,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs
+}
+
+// A region has to span at least two rows. Anything else leaves both the
+// region and the cursor alone.
+frag! {
+    scroll_region_invalid_ignored { scrollback_lines: 100, width: 10, height: 10 }
+    <= term::ControlCodes::set_scroll_region(2, 5),
+       term::ControlCodes::cursor_position(4, 4),
+       term::ControlCodes::set_scroll_region(5, 5),
+       term::ControlCodes::set_scroll_region(6, 3),
+       term::ControlCodes::set_scroll_region(11, 20)
+    => ContentRegion::All =>
+            reset_codes,
+            term::ControlCodes::set_scroll_region(2, 5),
+            term::ControlCodes::cursor_position(4, 4),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    origin_mode_homes_cursor { scrollback_lines: 100, width: 10, height: 10 }
+    <= term::ControlCodes::set_scroll_region(3, 6),
+       term::ControlCodes::cursor_position(8, 5),
+       term::control_codes().enable_scroll_region_origin_mode,
+       term::Raw::from("X")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::Raw::from("X"),
+            term::ControlCodes::set_scroll_region(3, 6),
+            term::control_codes().enable_scroll_region_origin_mode,
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    origin_mode_reset_homes_cursor { scrollback_lines: 100, width: 10, height: 10 }
+    <= term::ControlCodes::set_scroll_region(3, 6),
+       term::control_codes().enable_scroll_region_origin_mode,
+       term::ControlCodes::cursor_position(2, 5),
+       term::control_codes().disable_scroll_region_origin_mode,
+       term::Raw::from("X")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("X"),
+            term::ControlCodes::set_scroll_region(3, 6),
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().clear_attrs
+}
+
+// VT and FF move down a row just like LF.
+frag! {
+    vertical_tab_and_form_feed { scrollback_lines: 100, width: 10, height: 10 }
+    <= term::Raw::from("A\x0bB\x0cC")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("A"),
+            term::Crlf::default(),
+            term::Raw::from(" B"),
+            term::Crlf::default(),
+            term::Raw::from("  C"),
+            term::ControlCodes::cursor_position(3, 4),
+            term::control_codes().clear_attrs
+}
+
+// IND moves down a row without going back to the start of it.
+frag! {
+    index { scrollback_lines: 100, width: 10, height: 10 }
+    <= term::Raw::from("A\x1bDB")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("A"),
+            term::Crlf::default(),
+            term::Raw::from(" B"),
+            term::ControlCodes::cursor_position(2, 3),
+            term::control_codes().clear_attrs
+}
+
+// IND scrolls at the bottom of the scroll region.
+frag! {
+    index_scrolls_region { scrollback_lines: 100, width: 5, height: 3 }
+    <= term::Raw::from("1\r\n2\r\n3"),
+       term::ControlCodes::set_scroll_region(1, 2),
+       term::ControlCodes::cursor_position(2, 1),
+       term::Raw::from("\x1bD")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("2"),
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::Raw::from("3"),
+            term::ControlCodes::set_scroll_region(1, 2),
+            term::ControlCodes::cursor_position(2, 1),
+            term::control_codes().clear_attrs
+}
+
+// NEL goes to the start of the next row.
+frag! {
+    next_line { scrollback_lines: 100, width: 10, height: 10 }
+    <= term::Raw::from("AB\x1bEC")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("AB"),
+            term::Crlf::default(),
+            term::Raw::from("C"),
+            term::ControlCodes::cursor_position(2, 2),
+            term::control_codes().clear_attrs
+}
+
+// NEL scrolls at the bottom of the screen.
+frag! {
+    next_line_scrolls { scrollback_lines: 100, width: 5, height: 2 }
+    <= term::Raw::from("1\r\n23\x1bE4")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("1"),
+            term::Crlf::default(),
+            term::Raw::from("23"),
+            term::Crlf::default(),
+            term::Raw::from("4"),
+            term::ControlCodes::cursor_position(2, 2),
+            term::control_codes().clear_attrs
+}
+
+// HPR moves right like CUF.
+frag! {
+    horizontal_position_relative { scrollback_lines: 100, width: 10, height: 10 }
+    <= term::Raw::from("A\x1b[2aB\x1b[aC\x1b[20aD")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("A  B C   D"),
+            term::ControlCodes::cursor_position(1, 10),
+            term::Raw::from("D"),
+            term::control_codes().clear_attrs
+}
+
+// VPR moves down like CUD.
+frag! {
+    vertical_position_relative { scrollback_lines: 100, width: 5, height: 5 }
+    <= term::Raw::from("A\x1b[2eB\x1b[eC\x1b[20eD")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("A"),
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::Raw::from(" B"),
+            term::Crlf::default(),
+            term::Raw::from("  C"),
+            term::Crlf::default(),
+            term::Raw::from("   D"),
+            term::ControlCodes::cursor_position(5, 5),
+            term::control_codes().clear_attrs
+}
+
+// CUU stops at the top of the scroll region when it starts out inside of it,
+// even without origin mode.
+frag! {
+    cursor_up_stops_at_scroll_region_top { scrollback_lines: 100, width: 5, height: 5 }
+    <= term::ControlCodes::set_scroll_region(2, 4),
+       term::ControlCodes::cursor_position(3, 1),
+       term::ControlCodes::cursor_up(5),
+       term::Raw::from("X")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Crlf::default(),
+            term::Raw::from("X"),
+            term::ControlCodes::set_scroll_region(2, 4),
+            term::ControlCodes::cursor_position(2, 2),
+            term::control_codes().clear_attrs
+}
+
+// It stops there coming from below the scroll region too.
+frag! {
+    cursor_up_from_below_scroll_region { scrollback_lines: 100, width: 5, height: 5 }
+    <= term::ControlCodes::set_scroll_region(2, 3),
+       term::ControlCodes::cursor_position(5, 1),
+       term::ControlCodes::cursor_up(5),
+       term::Raw::from("X")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Crlf::default(),
+            term::Raw::from("X"),
+            term::ControlCodes::set_scroll_region(2, 3),
+            term::ControlCodes::cursor_position(2, 2),
+            term::control_codes().clear_attrs
+}
+
+// Above the scroll region, CUU can go all the way to the top.
+frag! {
+    cursor_up_above_scroll_region { scrollback_lines: 100, width: 5, height: 5 }
+    <= term::ControlCodes::set_scroll_region(3, 5),
+       term::ControlCodes::cursor_position(2, 1),
+       term::ControlCodes::cursor_up(5),
+       term::Raw::from("X")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("X"),
+            term::ControlCodes::set_scroll_region(3, 5),
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().clear_attrs
+}
+
+// CUD stops at the bottom of the scroll region when it starts out above it.
+frag! {
+    cursor_down_stops_at_scroll_region_bottom { scrollback_lines: 100, width: 5, height: 5 }
+    <= term::ControlCodes::set_scroll_region(2, 3),
+       term::ControlCodes::cursor_down(5),
+       term::Raw::from("X")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::Raw::from("X"),
+            term::ControlCodes::set_scroll_region(2, 3),
+            term::ControlCodes::cursor_position(3, 2),
+            term::control_codes().clear_attrs
+}
+
+// Below the scroll region, CUD can go all the way to the bottom.
+frag! {
+    cursor_down_below_scroll_region { scrollback_lines: 100, width: 5, height: 5 }
+    <= term::ControlCodes::set_scroll_region(1, 2),
+       term::ControlCodes::cursor_position(4, 1),
+       term::ControlCodes::cursor_down(5),
+       term::Raw::from("X")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::Raw::from("X"),
+            term::ControlCodes::set_scroll_region(1, 2),
+            term::ControlCodes::cursor_position(5, 2),
+            term::control_codes().clear_attrs
+}
+
+// CNL and CPL stop at the scroll region the same way.
+frag! {
+    next_and_prev_line_stop_at_scroll_region { scrollback_lines: 100, width: 5, height: 5 }
+    <= term::ControlCodes::set_scroll_region(2, 4),
+       term::ControlCodes::cursor_position(3, 3),
+       term::Raw::from("\x1b[5EA\x1b[5FB")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Crlf::default(),
+            term::Raw::from("B"),
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::Raw::from("A"),
+            term::ControlCodes::set_scroll_region(2, 4),
+            term::ControlCodes::cursor_position(2, 2),
+            term::control_codes().clear_attrs
+}
+
+// DECSC saves origin mode along with the position, and DECRC turns it back on
+// without homing the cursor.
+frag! {
+    restore_cursor_restores_origin_mode { scrollback_lines: 100, width: 5, height: 5 }
+    <= term::ControlCodes::set_scroll_region(2, 4),
+       term::control_codes().enable_scroll_region_origin_mode,
+       term::control_codes().save_cursor,
+       term::control_codes().disable_scroll_region_origin_mode,
+       term::control_codes().restore_cursor,
+       term::Raw::from("X")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Crlf::default(),
+            term::Raw::from("X"),
+            term::control_codes().enable_scroll_region_origin_mode,
+            term::ControlCodes::cursor_position(2, 1),
+            term::control_codes().save_cursor,
+            term::control_codes().disable_scroll_region_origin_mode,
+            term::ControlCodes::set_scroll_region(2, 4),
+            term::control_codes().enable_scroll_region_origin_mode,
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().clear_attrs
+}
+
+// It turns it back off too, and the cursor goes back to where it was, even
+// though that is outside of the scroll region.
+frag! {
+    restore_cursor_turns_origin_mode_off { scrollback_lines: 100, width: 5, height: 5 }
+    <= term::ControlCodes::set_scroll_region(2, 3),
+       term::ControlCodes::cursor_position(5, 2),
+       term::control_codes().save_cursor,
+       term::control_codes().enable_scroll_region_origin_mode,
+       term::control_codes().restore_cursor,
+       term::Raw::from("X")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::Raw::from(" X"),
+            term::ControlCodes::cursor_position(5, 2),
+            term::control_codes().save_cursor,
+            term::ControlCodes::set_scroll_region(2, 3),
+            term::ControlCodes::cursor_position(5, 3),
+            term::control_codes().clear_attrs
+}
+
+// A position saved in origin mode stays inside the scroll region, even if the
+// region has shrunk since.
+frag! {
+    restore_cursor_stays_in_the_scroll_region { scrollback_lines: 100, width: 5, height: 5 }
+    <= term::ControlCodes::set_scroll_region(2, 5),
+       term::control_codes().enable_scroll_region_origin_mode,
+       term::ControlCodes::cursor_position(4, 1),
+       term::control_codes().save_cursor,
+       term::ControlCodes::set_scroll_region(2, 3),
+       term::control_codes().restore_cursor,
+       term::Raw::from("X")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Crlf::default(),
+            term::Crlf::default(),
+            term::Raw::from("X"),
+            // The saved cursor is outside of the scroll region now, so it
+            // has to be restored before the region is.
+            term::control_codes().enable_scroll_region_origin_mode,
+            term::ControlCodes::cursor_position(5, 1),
+            term::control_codes().save_cursor,
+            term::control_codes().disable_scroll_region_origin_mode,
+            term::ControlCodes::set_scroll_region(2, 3),
+            term::control_codes().enable_scroll_region_origin_mode,
+            term::ControlCodes::cursor_position(2, 2),
             term::control_codes().clear_attrs
 }

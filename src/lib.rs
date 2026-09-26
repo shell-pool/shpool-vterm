@@ -16,6 +16,7 @@ use std::collections::BTreeMap;
 
 use crate::{
     cell::Cell,
+    charset::{Charset, Charsets},
     screen::{SavedCursor, Screen},
     term::{
         AsTermInput, BlinkStyle, ControlCodes, FontWeight, FrameStyle, LinkTarget, OriginMode,
@@ -35,6 +36,7 @@ mod log;
 
 mod altscreen;
 mod cell;
+mod charset;
 mod line;
 mod screen;
 mod scrollback;
@@ -46,6 +48,24 @@ mod term;
 pub mod term;
 
 const MAX_TITLE_STACK_DEPTH: usize = 64;
+
+/// The most bytes of free form OSC text, like a title or the working dir,
+/// that we hold on to. vte buffers whole OSC strings however long they get,
+/// and every one we store gets replayed on each reattach.
+const MAX_OSC_TEXT_LEN: usize = 8192;
+
+/// Limits on hyperlinks (OSC 8), which VTE uses too. Every cell of a link
+/// carries its own copy of the target, so these add up.
+const MAX_LINK_URL_LEN: usize = 2083;
+const MAX_LINK_PARAMS_LEN: usize = 250;
+
+/// The number of colors that OSC 4 can change: the 256 color palette, then
+/// xterm's special colors (bold, underline, blink, reverse and italic),
+/// which it numbers from 256 up.
+const NUM_PALETTE_COLORS: usize = 261;
+
+/// The longest color spec (like `rgb:ff/80/00`) we hold on to.
+const MAX_COLOR_SPEC_LEN: usize = 128;
 
 /// A representation of a terminal.
 pub struct Term {
@@ -125,23 +145,68 @@ impl Term {
     /// reset the emulator to the contents of this Term instance.
     pub fn contents(&self, dump_region: ContentRegion) -> Vec<u8> {
         let mut buf = vec![];
+        let controls = term::control_codes();
 
         // Reset alone does not terminate active links, so before
         // we issue a reset, we'll issue an end link to fully
         // reset the link.
-        term::control_codes().end_link.term_input_into(&mut buf);
-
-        term::control_codes().clear_attrs.term_input_into(&mut buf);
+        controls.end_link.term_input_into(&mut buf);
 
         // We cannot know what state the terminal we are restoring into is
-        // in, and a leftover scroll region or origin mode would scroll the
-        // contents we are about to paint. Clear them before homing the
-        // cursor, since origin mode moves where home is.
-        term::control_codes().unset_scroll_region.term_input_into(&mut buf);
-        term::control_codes().disable_scroll_region_origin_mode.term_input_into(&mut buf);
+        // in. Often it is whatever state the last session left it in when
+        // the connection dropped, so every mode the restore might replay
+        // has to be switched off here, or it will outlive the app that set
+        // it.
+        //
+        // Leaving the alt screen goes first. xterm restores the saved
+        // cursor, along with its attrs, origin mode and charsets, when it
+        // leaves the alt screen, which would undo any reset sent before.
+        // Painting onto a stranded alt screen would also throw away every
+        // line that scrolls off the top of it.
+        controls.disable_alt_screen.term_input_into(&mut buf);
+        controls.clear_attrs.term_input_into(&mut buf);
+
+        // A leftover scroll region or origin mode would scroll the
+        // contents we are about to paint, and leftover margins would squeeze
+        // them in between. Turning left/right margin mode off drops the
+        // margins. Clear all of these before homing the cursor, since origin
+        // mode moves where home is.
+        controls.unset_scroll_region.term_input_into(&mut buf);
+        controls.disable_left_right_margin_mode.term_input_into(&mut buf);
+        controls.disable_scroll_region_origin_mode.term_input_into(&mut buf);
+
+        // Insert mode would shove the contents we paint to the right,
+        // without auto-wrap long lines would pile up in the last column,
+        // and a line drawing charset would turn letters into box parts.
+        controls.disable_insert_mode.term_input_into(&mut buf);
+        controls.enable_autowrap.term_input_into(&mut buf);
+        controls.designate_g0_us_ascii.term_input_into(&mut buf);
+        controls.designate_g1_us_ascii.term_input_into(&mut buf);
+        controls.designate_g2_us_ascii.term_input_into(&mut buf);
+        controls.designate_g3_us_ascii.term_input_into(&mut buf);
+        buf.push(term::SHIFT_IN);
+
+        // An app that hid the cursor and never got the chance to show it
+        // again would leave it hidden for good.
+        controls.show_cursor.term_input_into(&mut buf);
+
+        // These change what the terminal sends rather than what it shows,
+        // so leftovers turn keypresses, mouse movement, focus changes and
+        // pastes into garbage input for whatever is running now.
+        controls.disable_application_cursor_keys.term_input_into(&mut buf);
+        controls.disable_application_keypad_mode.term_input_into(&mut buf);
+        ControlCodes::dec_private_modes_reset(&MOUSE_MODES).term_input_into(&mut buf);
+        controls.disable_report_focus.term_input_into(&mut buf);
+        controls.disable_paste_mode.term_input_into(&mut buf);
 
         term::ControlCodes::cursor_position(1, 1).term_input_into(&mut buf);
-        term::control_codes().clear_screen.term_input_into(&mut buf);
+        // With the attrs, charsets and origin mode all back to their
+        // defaults, saving the cursor here leaves one that restores the same
+        // way as nothing saved at all, which the dump replaces if the app
+        // saved one. Otherwise an app that restores the cursor without
+        // saving it first would get whatever the last session saved.
+        controls.save_cursor.term_input_into(&mut buf);
+        controls.clear_screen.term_input_into(&mut buf);
         self.state.dump_contents_into(&mut buf, dump_region);
 
         buf
@@ -214,8 +279,9 @@ struct State {
     /// The terminal icon name, as set by `OSC 0` and `OSC 1`.
     icon_name_stack: Vec<SmallVec<[u8; 8]>>,
     /// The terminal working directory (some terminal emulators use this
-    /// to know what directory to start new shells in).
-    working_dir: Option<WorkingDir>,
+    /// to know what directory to start new shells in), as the `file://` URL
+    /// that `OSC 7` sets it to.
+    working_dir: Option<SmallVec<[u8; 8]>>,
     /// A table mapping color index to a particular color spec.
     /// This is set by OSC 4. We use a tree for deterministic output
     /// to make testing easier. A hash would work just as well.
@@ -256,16 +322,18 @@ struct State {
     in_paste_mode: bool,
     /// Tracks insertion / replacement mode (IRM). Controlled via `CSI 4 {h,l}`.
     insert_mode: bool,
+    /// Tracks auto-wrap mode (DECAWM). When it is off, chars written at the
+    /// right edge of the screen overwrite the last column instead of wrapping
+    /// onto the next line. Controlled via `CSI ? 7 {h,l}`.
+    autowrap: bool,
+    /// The charsets printed chars get translated through. Apps switch to
+    /// the DEC special graphics set to draw lines and boxes.
+    charsets: Charsets,
     /// Tab stop columns. By default, these are spaced 8 cols apart
     /// starting at col 9, but they can be directly manipulated by certain
     /// control codes as well.
     tabstops: BitVec,
     logger: log::Context,
-}
-
-struct WorkingDir {
-    host: SmallVec<[u8; 8]>,
-    dir: SmallVec<[u8; 8]>,
 }
 
 impl std::fmt::Display for State {
@@ -306,6 +374,8 @@ impl State {
             report_focus: false,
             in_paste_mode: false,
             insert_mode: false,
+            autowrap: true,
+            charsets: Charsets::default(),
             tabstops: bitvec![0; size.width],
             last_print_char: None,
             logger: log::Context::None,
@@ -353,6 +423,14 @@ impl State {
             if i > 0 && i % 8 == 0 {
                 self.tabstops.set(i, true);
             }
+        }
+    }
+
+    /// Set or clear the tab stop at `col`. A screen with no columns has
+    /// nowhere to put one.
+    fn set_tabstop(&mut self, col: usize, on: bool) {
+        if col < self.tabstops.len() {
+            self.tabstops.set(col, on);
         }
     }
 
@@ -410,7 +488,7 @@ impl State {
             ScreenMode::Alt => {
                 // Restore the regular scrollback first so that after the user
                 // exits their curses app, they can still see shell history.
-                self.scrollback.dump_contents_into(buf, dump_region.clone());
+                self.scrollback.dump_contents_before_switch_into(buf, dump_region.clone());
 
                 // Re-enable alt screen, then dump the contents. This is
                 // not actually super important in practice because basically
@@ -418,15 +496,13 @@ impl State {
                 // consider exposing a knob to disable alt-screen dumping
                 // since it might make things less flickery. Not worth doing
                 // for now though.
+                //
+                // Like DECSC, this saves the cursor along with its attrs,
+                // charsets and origin mode, which leaving the alt screen puts
+                // back. The scrollback restore left all of those the way the
+                // app had them saved, so that is what gets saved here.
                 term::control_codes().enable_alt_screen.term_input_into(buf);
-
-                // Switching screens does not clear the scroll region or
-                // origin mode the scrollback restore just set, and neither
-                // is per-screen in a real terminal, so we have to clear them
-                // ourselves. This has to happen before the contents get
-                // painted, since it is the paint that a stranded scroll
-                // region corrupts.
-                self.scrollback.dump_global_state_reset_into(buf);
+                self.scrollback.dump_switch_reset_into(buf);
 
                 self.altscreen.dump_contents_into(buf, dump_region)
             }
@@ -482,17 +558,14 @@ impl State {
         }
 
         if let Some(working_dir) = &self.working_dir {
-            ControlCodes::set_working_dir(working_dir.host.clone(), working_dir.dir.clone())
-                .term_input_into(buf);
+            ControlCodes::set_working_dir(working_dir.clone()).term_input_into(buf);
         }
 
-        if !self.palette_overrides.is_empty() {
-            ControlCodes::set_color_indices(
-                self.palette_overrides
-                    .iter()
-                    .map(|(idx, color_spec)| (*idx, SmallVec::from(color_spec.as_slice()))),
-            )
-            .term_input_into(buf);
+        // One OSC per color, since terminals only take so many params in a
+        // single OSC. vte takes 16, which is only enough for 7 colors.
+        for (idx, color_spec) in self.palette_overrides.iter() {
+            let color = (*idx, SmallVec::from(color_spec.as_slice()));
+            ControlCodes::set_color_indices(std::iter::once(color)).term_input_into(buf);
         }
 
         if self.cursor_hidden {
@@ -519,6 +592,11 @@ impl State {
         }
         if self.insert_mode {
             controls.enable_insert_mode.term_input_into(buf);
+        }
+        // This has to come after the screen contents, since restoring a
+        // pending wrap relies on the terminal wrapping.
+        if !self.autowrap {
+            controls.disable_autowrap.term_input_into(buf);
         }
         for (idx, mode) in MOUSE_MODES.iter().enumerate() {
             if self.mouse_modes[idx] {
@@ -549,6 +627,11 @@ impl State {
 
             functional_color_idx += 1;
         }
+
+        // The screen holds chars that have already been through the
+        // charsets, so painting it has to happen with plain ascii in place.
+        // Switch the charsets over last, once there is nothing left to paint.
+        self.charsets.dump_into(buf);
     }
 
     /// Set a run within the functional colors table starting at the given
@@ -562,7 +645,7 @@ impl State {
                 return;
             }
 
-            if *color_spec != [b'?'] {
+            if *color_spec != [b'?'] && color_spec.len() <= MAX_COLOR_SPEC_LEN {
                 self.functional_colors[idx] = Some(Vec::from(*color_spec));
             }
 
@@ -586,31 +669,146 @@ impl State {
         }
     }
 
-    fn write_char_at_cursor(&mut self, cell: Cell) {
-        let insert_mode = self.insert_mode;
+    /// DECOM. Switching origin mode either way homes the cursor, which is the
+    /// top of the scroll region once origin mode is on.
+    fn set_origin_mode(&mut self, origin_mode: OriginMode) {
         let screen = self.screen_mut();
+        screen.set_origin_mode(origin_mode);
+        screen.set_cursor(term::Pos { row: 1, col: 1 });
+        screen.clamp();
+    }
 
-        // In insert mode (ECMA-48 IRM), incoming characters do not overwrite
-        // existing text under the cursor. Instead, existing characters are
-        // shifted to the right, dropping any characters that spill past the
-        // terminal width.
-        //
-        // `Line::insert_character` does not write `cell` itself; it inserts
-        // blank cells to make room for `cell.width()`. The subsequent
-        // call to `screen.write_at_cursor(cell)` then writes the actual
-        // character into the newly opened space at the cursor position
-        // and advances the cursor.
-        if insert_mode {
-            let width = screen.size.width;
-            let col = screen.cursor.col;
-            if col < width {
-                if let Some(l) = screen.get_line_mut() {
-                    l.insert_character(width, col, cell.width() as usize);
-                }
+    /// DECSC. Save the cursor position, along with the state that printing
+    /// and cursor addressing depend on, into the active screen's slot.
+    fn save_cursor(&mut self) {
+        let attrs = self.cursor_attrs.clone();
+        let charsets = self.charsets.saved();
+        let screen = self.screen_mut();
+        let pos = screen.cursor;
+        let pending_wrap = screen.pending_wrap;
+        let origin_mode = screen.origin_mode();
+        screen.saved_cursor = Some(SavedCursor { pos, attrs, pending_wrap, charsets, origin_mode });
+    }
+
+    /// DECRC. Put back whatever `save_cursor` saved for the active screen.
+    fn restore_cursor(&mut self) {
+        let screen = self.screen_mut();
+        let SavedCursor { pos, attrs, pending_wrap, charsets, origin_mode } =
+            screen.saved_cursor_or_home();
+        // Unlike DECOM, this does not home the cursor.
+        screen.set_origin_mode(origin_mode);
+        screen.cursor = pos;
+        // The scroll region might have changed since the save, and in origin
+        // mode the cursor has to end up inside it, like in xterm.
+        screen.clamp();
+        screen.pending_wrap = pending_wrap;
+        self.cursor_attrs = attrs;
+        self.charsets.restore(&charsets);
+    }
+
+    /// RIS. Put the terminal back the way it was when it started. Like in
+    /// xterm and kitty, that clears both screens and the scrollback too.
+    ///
+    /// The size and the scrollback limit are not up to the app, so they
+    /// stay. So do the titles and the working dir, which describe the
+    /// session rather than the state of the terminal. xterm keeps its title
+    /// as well, and the colors set by OSC 10 through 19.
+    fn hard_reset(&mut self) {
+        let size = self.scrollback.size;
+        let scrollback_lines = self.scrollback.scrollback_lines().unwrap_or(size.height);
+        let mut fresh = State::new(scrollback_lines, size);
+        fresh.set_logger(self.logger.clone());
+        fresh.title_stack = std::mem::take(&mut self.title_stack);
+        fresh.icon_name_stack = std::mem::take(&mut self.icon_name_stack);
+        fresh.working_dir = self.working_dir.take();
+        fresh.functional_colors = std::mem::take(&mut self.functional_colors);
+        *self = fresh;
+    }
+
+    /// DECSTR. Reset the modes and state that apps tend to leave behind, but
+    /// leave the screen contents and the cursor where they are.
+    ///
+    /// This resets what xterm resets, which is what DEC terminals did apart
+    /// from turning autowrap on rather than off. The tab stops get reset as
+    /// well, like in kitty.
+    fn soft_reset(&mut self) {
+        self.cursor_hidden = false;
+        self.cursor_style = term::CursorStyle::Default;
+        self.cursor_blinking = None;
+        self.insert_mode = false;
+        self.autowrap = true;
+        self.application_cursor_keys_enabled = false;
+        self.application_keypad_mode_enabled = false;
+        self.cursor_attrs = term::Attrs::default();
+        self.charsets = Charsets::default();
+        self.palette_overrides.clear();
+        self.tabstops.fill(false);
+        let width = self.tabstops.len();
+        self.fill_tabstops(0, width);
+
+        // Unlike DECSTBM and DECOM, this does not home the cursor.
+        let screen = self.screen_mut();
+        screen.set_scroll_region(term::ScrollRegion::TrackSize);
+        screen.set_left_right_margin_mode(false);
+        screen.set_origin_mode(OriginMode::Term);
+        screen.saved_cursor = None;
+    }
+
+    /// Switch to the alt screen. With `erase`, the alt screen gets erased
+    /// with the current background color too, even if it was already active.
+    ///
+    /// Like in xterm, the alt screen otherwise keeps whatever it held the
+    /// last time it was active.
+    fn enter_alt_screen(&mut self, erase: bool) {
+        if matches!(self.screen_mode, ScreenMode::Scrollback) {
+            self.altscreen.take_shared_state(&self.scrollback);
+            self.screen_mode = ScreenMode::Alt;
+        }
+        if erase {
+            self.altscreen.erase(&Cell::blank(&self.cursor_attrs));
+        }
+    }
+
+    /// Switch back to the main screen. With `erase`, the alt screen gets
+    /// erased with the current background color on the way out.
+    fn exit_alt_screen(&mut self, erase: bool) {
+        if matches!(self.screen_mode, ScreenMode::Alt) {
+            if erase {
+                self.altscreen.erase(&Cell::blank(&self.cursor_attrs));
+            }
+            self.scrollback.take_shared_state(&self.altscreen);
+            self.screen_mode = ScreenMode::Scrollback;
+        }
+    }
+
+    /// Move the cursor forward to the `n`th tab stop after it. This
+    /// implements HT and CHT.
+    fn tab_forward(&mut self, n: usize) {
+        let mut col = self.screen().cursor.col;
+        for _ in 0..n {
+            col += 1;
+            while col < self.tabstops.len() && !self.tabstops.get(col).is_some_and(|b| *b) {
+                col += 1;
+            }
+            if col >= self.tabstops.len() {
+                break;
             }
         }
 
-        if let Err(e) = screen.write_at_cursor(cell) {
+        // A tab stops at the last column, or in front of the right margin
+        // if the cursor is not past it yet. If the cursor is already there it
+        // does not move at all, and a pending wrap stays pending.
+        let screen = self.screen_mut();
+        let col = std::cmp::min(col, screen.line_end().saturating_sub(1));
+        if col != screen.cursor.col {
+            screen.cursor.col = col;
+            screen.clamp();
+        }
+    }
+
+    fn write_char_at_cursor(&mut self, cell: Cell) {
+        let (insert_mode, autowrap) = (self.insert_mode, self.autowrap);
+        if let Err(e) = self.screen_mut().write_at_cursor(cell, insert_mode, autowrap) {
             warn!(self.logger, "writing char at cursor: {:?}", e);
         }
     }
@@ -626,7 +824,14 @@ impl State {
     fn add_modifier_char(&mut self, c: char) {
         let screen = self.screen_mut();
         let width = screen.size.width;
-        let Some(mut col) = screen.cursor.col.checked_sub(1) else {
+        // With a wrap pending, the cursor stays on top of the cell it just
+        // moved past rather than to the right of it.
+        let col = if screen.pending_wrap {
+            Some(screen.cursor.col)
+        } else {
+            screen.cursor.col.checked_sub(1)
+        };
+        let Some(mut col) = col else {
             return;
         };
 
@@ -658,6 +863,9 @@ enum ScreenMode {
 impl vte::Perform for State {
     fn print(&mut self, c: char) {
         trace!(self.logger, "print: {}", c);
+        // Store the char that gets displayed rather than the one that was
+        // sent, so the dump doesn't depend on the charsets.
+        let c = self.charsets.translate(c);
 
         match UnicodeWidthChar::width(c) {
             // Control chars have no printable form. vte routes the C0 set to
@@ -685,41 +893,23 @@ impl vte::Perform for State {
         self.last_print_char = None;
         trace!(self.logger, "execute: byte {}", byte);
         match byte {
-            b'\n' => {
-                let screen = self.screen_mut();
-                let (scroll_top, scroll_bottom) =
-                    screen.scroll_region(false).as_region(&screen.size).row_bounds();
-                let within_scroll =
-                    scroll_top <= screen.cursor.row && screen.cursor.row < scroll_bottom;
-                screen.cursor.row += 1;
-                if within_scroll {
-                    if screen.cursor.row >= scroll_bottom {
-                        screen.scroll_up(1);
-                        screen.cursor.row -= 1;
-                    }
-                } else {
-                    screen.clamp();
-                }
+            // LF, along with VT and FF, which terminals treat as LF too.
+            b'\n' | 0x0b | 0x0c => {
+                let fill = Cell::blank(&self.cursor_attrs);
+                self.screen_mut().linefeed(&fill);
             }
-            b'\r' => self.screen_mut().cursor.col = 0,
-            b'\t' => {
-                let mut col = self.screen().cursor.col;
-                col += 1;
-                while col < self.tabstops.len() && !self.tabstops.get(col).is_some_and(|b| *b) {
-                    col += 1;
-                }
-
-                let screen = self.screen_mut();
-                screen.cursor.col = col;
-                screen.clamp();
-            }
+            b'\r' => self.screen_mut().carriage_return(),
+            b'\t' => self.tab_forward(1),
             b'\x08' => {
                 // backspace
-                let screen = self.screen_mut();
-                screen.cursor.col = screen.cursor.col.saturating_sub(1);
+                self.screen_mut().cursor_back(1);
             }
             // bell, ignore
             b'\x07' => {}
+            // SO (Shift Out) and SI (Shift In) switch printed chars over to
+            // the G1 charset and back to G0.
+            term::SHIFT_OUT => self.charsets.lock_shift(1),
+            term::SHIFT_IN => self.charsets.lock_shift(0),
             _ => {
                 warn!(self.logger, "execute: unhandled byte {}", byte);
             }
@@ -760,27 +950,29 @@ impl vte::Perform for State {
         trace!(self.logger, "osc_dispatch: {:?}", params);
         self.last_print_char = None;
 
-        let mut params_iter = params.iter();
-        match params_iter.next() {
+        // vte splits the whole string on ';', but free form text like titles
+        // and URLs can contain ';' too, so commands that end in such text
+        // glue the rest of their params back together.
+        let rest = params.get(1..).unwrap_or(&[]);
+        let mut params_iter = rest.iter();
+        match params.first() {
             // Title manipulation
-            Some([b'0']) => if let Some(title) = params_iter.next() {
-                let title: SmallVec<[u8; 8]> = title.to_vec().into();
+            Some([b'0']) => if rest.is_empty() {
+                warn!(self.logger, "OSC 0 with no title param");
+            } else {
+                let title = osc_text(rest);
                 self.set_title(title.clone());
                 self.set_icon_name(title);
-            } else {
-                warn!(self.logger, "OSC 0 with no title param");
             },
-            Some([b'1']) => if let Some(icon_name) = params_iter.next() {
-                let icon_name: SmallVec<[u8; 8]> = icon_name.to_vec().into();
-                self.set_icon_name(icon_name);
-            } else {
+            Some([b'1']) => if rest.is_empty() {
                 warn!(self.logger, "OSC 1 with no icon_name param");
-            },
-            Some([b'2']) => if let Some(title) = params_iter.next() {
-                let title: SmallVec<[u8; 8]> = title.to_vec().into();
-                self.set_title(title);
             } else {
+                self.set_icon_name(osc_text(rest));
+            },
+            Some([b'2']) => if rest.is_empty() {
                 warn!(self.logger, "OSC 2 with no title param");
+            } else {
+                self.set_title(osc_text(rest));
             },
 
             // Color Palette
@@ -792,55 +984,63 @@ impl vte::Perform for State {
                     continue;
                 }
 
-                match std::str::from_utf8(idx) {
-                    Ok(s) => match s.parse::<usize>() {
-                        Ok(i) => {
-                            self.palette_overrides.insert(i, color_spec.to_vec());
-                        },
-                        Err(e) => warn!(self.logger, "OSC 4: idx is an invalid number '{}': {}", s, e),
+                match palette_idx(idx) {
+                    Some(i) if color_spec.len() <= MAX_COLOR_SPEC_LEN => {
+                        self.palette_overrides.insert(i, color_spec.to_vec());
                     },
-                    Err(e) => warn!(self.logger, "OSC 4: invalid idx '{:?}': {}", idx, e),
+                    _ => warn!(self.logger, "OSC 4: ignoring color {:?} = {:?}", idx, color_spec),
                 }
             },
-            Some([b'1', b'0', b'4']) => while let Some(idx) = params_iter.next() {
-                match std::str::from_utf8(idx) {
-                    Ok(s) => match s.parse::<usize>() {
-                        Ok(i) => {
-                            self.palette_overrides.remove(&i);
-                        },
-                        Err(e) => warn!(self.logger, "OSC 104: idx is an invalid number '{}': {}", s, e),
+            // With no indices, OSC 104 resets the whole palette.
+            Some([b'1', b'0', b'4']) if rest.iter().all(|idx| idx.is_empty()) =>
+                self.palette_overrides.clear(),
+            Some([b'1', b'0', b'4']) => for idx in rest.iter().filter(|idx| !idx.is_empty()) {
+                match palette_idx(idx) {
+                    Some(i) => {
+                        self.palette_overrides.remove(&i);
                     },
-                    Err(e) => warn!(self.logger, "OSC 104: invalid idx '{:?}': {}", idx, e),
+                    None => warn!(self.logger, "OSC 104: invalid idx '{:?}'", idx),
                 }
             },
 
-            // Working dir
-            Some([b'7']) => if let (Some(host), Some(dir)) = (params_iter.next(), params_iter.next()) {
-                self.working_dir = Some(WorkingDir {
-                    host: host.to_vec().into(),
-                    dir: dir.to_vec().into(),
-                });
-            } else {
-                warn!(self.logger, "OSC 7 with fewer than 2 params");
-            },
-
-            // Links. Depending on params, OSC 8 both starts and ends links.
-            Some([b'8']) => if let (Some(params), Some(url)) = (params_iter.next(), params_iter.next()) {
-                if params.is_empty() && url.is_empty() {
-                    self.cursor_attrs.link_target = None;
+            // Working dir, which shells send as a `file://host/path` URL.
+            // An empty one unsets it.
+            Some([b'7']) => {
+                let url = rest.join(&b';');
+                self.working_dir = if url.is_empty() {
+                    None
+                } else if url.len() > MAX_OSC_TEXT_LEN {
+                    warn!(self.logger, "OSC 7: ignoring over-long working dir");
+                    None
                 } else {
-                    self.cursor_attrs.link_target = Some(LinkTarget {
-                        params: SmallVec::from_slice(params),
-                        url: SmallVec::from_slice(url),
-                    });
-                }
-            } else {
-                self.cursor_attrs.link_target = None;
+                    Some(url.into())
+                };
+            },
+
+            // Links. Depending on params, OSC 8 both starts and ends links:
+            // an empty URL ends the current link, whatever the params say.
+            Some([b'8']) => {
+                let url = rest.get(1..).unwrap_or(&[]).join(&b';');
+                self.cursor_attrs.link_target = if url.is_empty() {
+                    None
+                } else if url.len() > MAX_LINK_URL_LEN {
+                    warn!(self.logger, "OSC 8: ignoring over-long link");
+                    None
+                } else {
+                    let params: &[u8] = match rest.first() {
+                        Some(&params) if params.len() <= MAX_LINK_PARAMS_LEN => params,
+                        _ => &[],
+                    };
+                    Some(LinkTarget { params: SmallVec::from_slice(params), url: url.into() })
+                };
             },
 
             // Functional colors (foreground, background and whatnot).
-            Some([b'1', x]) if b'0' <= *x && *x <= b'9' =>
+            Some([b'1', x]) if x.is_ascii_digit() =>
                 self.set_functional_color((*x - b'0') as usize, params_iter),
+            // OSC 110 through OSC 119 reset them one at a time.
+            Some([b'1', b'1', x]) if x.is_ascii_digit() =>
+                self.functional_colors[(*x - b'0') as usize] = None,
 
             Some([b'5', b'2']) => debug!(self.logger, "ignoring OSC 52 (clipboard)"),
             Some([b'9']) => debug!(self.logger, "ignoring OSC 9 (desktop notification)"),
@@ -885,64 +1085,63 @@ impl vte::Perform for State {
             self.last_print_char = None;
         }
 
+        // Private markers (`?`, `>`, `<`, `=`) and intermediate bytes
+        // (`SP`, `$`, `!`, ...) turn a final byte into a completely different
+        // command, e.g. `CSI > 4 ; 2 m` sets key modifier options rather than
+        // underline + faint and `CSI ? 1 ; 1 ; 0 S` is a graphics query rather
+        // than a scroll. Every arm must check that the intermediates are the
+        // ones it expects, or we will mangle the screen when an application
+        // sends a sequence we don't otherwise know about.
+        let plain = intermediates.is_empty();
+
         match action {
             // CUU (Cursor Up)
-            'A' => {
+            'A' if plain => {
                 let n = param_or(&mut params_iter, 1) as usize;
-                let screen = self.screen_mut();
-                screen.cursor.row = screen.cursor.row.saturating_sub(n);
-                screen.clamp();
+                self.screen_mut().cursor_up(n);
             }
             // CUD (Cursor Down)
-            'B' => {
+            // VPR (Vertical Position Relative, CSI n e)
+            'B' | 'e' if plain => {
                 let n = param_or(&mut params_iter, 1) as usize;
-                let screen = self.screen_mut();
-                screen.cursor.row += n;
-                screen.clamp();
+                self.screen_mut().cursor_down(n);
             }
             // CUF (Cursor Forward)
-            'C' => {
+            // HPR (Horizontal Position Relative, CSI n a)
+            'C' | 'a' if plain => {
                 let n = param_or(&mut params_iter, 1) as usize;
-                let screen = self.screen_mut();
-                screen.cursor.col += n;
-                screen.clamp();
+                self.screen_mut().cursor_forward(n);
             }
             // CUF (Cursor Backwards)
-            'D' => {
+            'D' if plain => {
                 let n = param_or(&mut params_iter, 1) as usize;
-                let screen = self.screen_mut();
-                screen.cursor.col = screen.cursor.col.saturating_sub(n);
-                screen.clamp();
+                self.screen_mut().cursor_back(n);
             }
             // CNL (Cursor Next Line)
-            'E' => {
+            'E' if plain => {
                 let n = param_or(&mut params_iter, 1) as usize;
                 let screen = self.screen_mut();
-                screen.cursor.row += n;
-                screen.cursor.col = 0;
-                screen.clamp();
+                screen.cursor_down(n);
+                screen.carriage_return();
             }
             // CPL (Cursor Prev Line)
-            'F' => {
+            'F' if plain => {
                 let n = param_or(&mut params_iter, 1) as usize;
                 let screen = self.screen_mut();
-                screen.cursor.row = screen.cursor.row.saturating_sub(n);
-                screen.cursor.col = 0;
-                screen.clamp();
+                screen.cursor_up(n);
+                screen.carriage_return();
             }
             // HPA (Horizontal Position Absolute, CSI n `)
             // CHA (Cursor Horizontal Absolute, CSI n G)
-            '`' | 'G' => {
+            '`' | 'G' if plain => {
                 let n = param_or(&mut params_iter, 1) as usize;
-                let n = n.saturating_sub(1); // translate to 0 indexing
-
                 let screen = self.screen_mut();
-                screen.cursor.col = n;
+                screen.set_cursor_col(n);
                 screen.clamp();
             }
             // HVP (Horizontal and Vertical Position)
             // CUP (Cursor Set Position)
-            'f' | 'H' => {
+            'f' | 'H' if plain => {
                 // parse the params and adjust 1 indexing to 0 indexing
                 let row = param_or(&mut params_iter, 1) as usize;
                 let col = param_or(&mut params_iter, 1) as usize;
@@ -951,64 +1150,71 @@ impl vte::Perform for State {
                 screen.clamp();
             }
             // ED (Erase in Display)
-            'J' => while let Some(code) = params_iter.next() {
+            // DECSED (Selective Erase in Display, CSI ? n J). We don't track
+            // the protected attribute (DECSCA), so this is the same as ED.
+            'J' if plain || intermediates == [b'?'] => while let Some(code) = params_iter.next() {
+                let fill = Cell::blank(&self.cursor_attrs);
                 match code {
-                    [] | [0] => self.screen_mut().erase_to_end(),
-                    [1] => self.screen_mut().erase_from_start(),
-                    [2] => self.screen_mut().erase(false),
-                    [3] => self.screen_mut().erase(true),
+                    [] | [0] => self.screen_mut().erase_to_end(&fill),
+                    [1] => self.screen_mut().erase_from_start(&fill),
+                    [2] => self.screen_mut().erase(&fill),
+                    // Only the main screen has scrollback, but it goes
+                    // even if the alt screen is up.
+                    [3] => self.scrollback.erase_scrollback(),
                     _ => warn!(self.logger, "unhandled 'CSI {:?} J'", code),
                 }
             }
             // EL (Erase in Line)
-            'K' => while let Some(code) = params_iter.next() {
-                match code {
-                    [] | [0] => {
-                        let screen = self.screen_mut();
-                        let col = screen.cursor.col;
-                        if let Some(l) = screen.get_line_mut() {
-                            l.erase(line::Section::ToEnd(col));
-                        }
+            // DECSEL (Selective Erase in Line, CSI ? n K), see DECSED above.
+            'K' if plain || intermediates == [b'?'] => while let Some(code) = params_iter.next() {
+                let col = self.screen().cursor.col;
+                let section = match code {
+                    [] | [0] => line::Section::ToEnd(col),
+                    [1] => line::Section::StartTo(col),
+                    [2] => line::Section::Whole,
+                    _ => {
+                        warn!(self.logger, "unhandled 'CSI {:?} K'", code);
+                        continue;
                     }
-                    [1] => {
-                        let screen = self.screen_mut();
-                        let col = screen.cursor.col;
-                        if let Some(l) = screen.get_line_mut() {
-                            l.erase(line::Section::StartTo(col));
-                        }
-                    }
-                    [2] => if let Some(l) = self.screen_mut().get_line_mut() {
-                        l.erase(line::Section::Whole);
-                    }
-                    _ => warn!(self.logger, "unhandled 'CSI {:?} K'", code),
+                };
+
+                let fill = Cell::blank(&self.cursor_attrs);
+                let screen = self.screen_mut();
+                screen.pending_wrap = false;
+                let width = screen.size.width;
+                if let Some(l) = screen.line_to_erase(&fill) {
+                    l.erase(width, section, &fill);
                 }
             }
             // IL (Insert Line)
-            'L' => {
+            'L' if plain => {
                 let n = param_or(&mut params_iter, 1) as usize;
-                self.screen_mut().insert_lines(n);
+                let fill = Cell::blank(&self.cursor_attrs);
+                self.screen_mut().insert_lines(n, &fill);
             }
             // DL (Delete Line)
-            'M' => {
+            'M' if plain => {
                 let n = param_or(&mut params_iter, 1) as usize;
-                self.screen_mut().delete_lines(n);
+                let fill = Cell::blank(&self.cursor_attrs);
+                self.screen_mut().delete_lines(n, &fill);
             }
             // SU (Scroll Up)
-            'S' => {
+            'S' if plain => {
                 let n = param_or(&mut params_iter, 1) as usize;
-                self.screen_mut().scroll_up(n as usize);
+                let fill = Cell::blank(&self.cursor_attrs);
+                self.screen_mut().scroll_up(n as usize, &fill);
             }
             // CTC (Cusor Tabulation Control)
-            'W' => {
+            'W' if plain => {
                 let code = param_or(&mut params_iter, 0) as usize;
                 match code {
                     0 => {
                         let col = self.screen().cursor.col;
-                        self.tabstops.set(col, true);
+                        self.set_tabstop(col, true);
                     },
                     2 => {
                         let col = self.screen().cursor.col;
-                        self.tabstops.set(col, false);
+                        self.set_tabstop(col, false);
                     }
                     5 => {
                         self.tabstops.fill(false);
@@ -1016,8 +1222,22 @@ impl vte::Perform for State {
                     _ => warn!(self.logger, "unhandled 'CSI {:?} W'", code),
                 }
             }
+            // DECST8C (Set Tab at Every 8 Columns, CSI ? 5 W)
+            'W' if intermediates == [b'?'] => match param_or(&mut params_iter, 0) {
+                5 => {
+                    self.tabstops.fill(false);
+                    let width = self.tabstops.len();
+                    self.fill_tabstops(0, width);
+                }
+                code => warn!(self.logger, "unhandled 'CSI ? {:?} W'", code),
+            }
+            // CHT (Cursor Horizontal Tabulation)
+            'I' if plain => {
+                let n = param_or(&mut params_iter, 1) as usize;
+                self.tab_forward(n);
+            }
             // CBT (Cursor Backward Tabulation)
-            'Z' if intermediates.is_empty() => {
+            'Z' if plain => {
                 let n = param_or(&mut params_iter, 1) as usize;
                 let mut col = self.screen().cursor.col;
                 for _ in 0..n {
@@ -1035,50 +1255,42 @@ impl vte::Perform for State {
                 screen.clamp();
             }
             // SD (Scroll Down)
-            'T' => {
+            //
+            // xterm also has a five param form of `CSI T` that starts mouse
+            // highlight tracking, which has nothing to do with scrolling.
+            'T' if plain && params.len() <= 1 => {
                 let n = param_or(&mut params_iter, 1) as usize;
-                self.screen_mut().scroll_down(n as usize);
+                let fill = Cell::blank(&self.cursor_attrs);
+                self.screen_mut().scroll_down(n as usize, &fill);
             }
 
             // ICH (Insert Character)
-            '@' => {
+            '@' if plain => {
                 let n = param_or(&mut params_iter, 1) as usize;
-
-                let screen = self.screen_mut();
-                let width = screen.size.width;
-                let col = screen.cursor.col;
-                if let Some(l) = screen.get_line_mut() {
-                    l.insert_character(width, col, n);
-                }
+                let fill = Cell::blank(&self.cursor_attrs);
+                self.screen_mut().insert_chars(n, &fill);
             }
             // DCH (Delete Character)
-            'P' => {
+            'P' if plain => {
                 let n = param_or(&mut params_iter, 1) as usize;
-
-                let attrs = self.cursor_attrs.clone();
-
-                let screen = self.screen_mut();
-                let width = screen.size.width;
-                let col = screen.cursor.col;
-                if let Some(l) = screen.get_line_mut() {
-                    l.delete_character(width, col, &attrs, n);
-                }
+                let fill = Cell::blank(&self.cursor_attrs);
+                self.screen_mut().delete_chars(n, &fill);
             }
             // ECH (Erase Character)
-            'X' => {
+            'X' if plain => {
                 let n = param_or(&mut params_iter, 1) as usize;
 
-                let attrs = self.cursor_attrs.clone();
-
+                let fill = Cell::blank(&self.cursor_attrs);
                 let screen = self.screen_mut();
+                screen.pending_wrap = false;
                 let width = screen.size.width;
                 let col = screen.cursor.col;
-                if let Some(l) = screen.get_line_mut() {
-                    l.erase_character(width, col, &attrs, n);
+                if let Some(l) = screen.line_to_erase(&fill) {
+                    l.erase_character(width, col, &fill, n);
                 }
             }
             // REP (Repeat Preceding Character)
-            'b' if intermediates.is_empty() => if let Some(c) = self.last_print_char {
+            'b' if plain => if let Some(c) = self.last_print_char {
                 let n = param_or(&mut params_iter, 1) as usize;
 
                 let cell = Cell::new(c, self.cursor_attrs.clone());
@@ -1088,22 +1300,32 @@ impl vte::Perform for State {
             }
             'c' => debug!(self.logger, "CSI ... c - device attribute query"),
             // VPA (Vertical Line Position Absolute)
-            'd' => {
+            'd' if plain => {
                 let row = param_or(&mut params_iter, 1) as usize;
-                let col = self.screen().cursor.col + 1;
                 let screen = self.screen_mut();
-                screen.set_cursor(term::Pos { row, col });
+                screen.set_cursor_row(row);
                 screen.clamp();
             }
 
-            // SCP (Save Cursor Position)
-            's' => {
-                let screen = self.screen_mut();
-                let cursor = screen.cursor.clone();
-                screen.saved_cursor.pos = cursor;
+            // DECSLRM (Set Left and Right Margins). While left/right margin
+            // mode is on, this takes `CSI s` over from SCOSC. tmux sends it
+            // without any params to drop the margins it set.
+            's' if plain && self.screen().left_right_margin_mode() => {
+                let width = self.screen().size.width;
+                // Like in xterm, a right margin that is missing or off the
+                // screen means the last column.
+                let left = param_or(&mut params_iter, 1) as usize;
+                let right = match maybe_param(&mut params_iter) {
+                    Some(r) if (r as usize) <= width => r as usize,
+                    _ => width,
+                };
+                self.screen_mut().set_left_right_margins(left.saturating_sub(1), right);
             }
+            // SCOSC (Save Cursor, CSI s). Like in xterm, this saves the same
+            // state as DECSC, not just the position.
+            's' if plain => self.save_cursor(),
             // Window Title Operations
-            't' => while let Some(code) = params_iter.next() {
+            't' if plain => while let Some(code) = params_iter.next() {
                 match code {
                     [] | [0] => debug!(self.logger, "CSI 0 t - ignoring"),
                     [14, ..] => debug!(self.logger, "CSI 14 t - pixel size query"),
@@ -1141,20 +1363,16 @@ impl vte::Perform for State {
                     _ => warn!(self.logger, "unhandled CSI ... {:?} t", code),
                 }
             }
-            // RCP (Restore Cursor Position)
-            'u' => {
-                let screen = self.screen_mut();
-                screen.cursor = screen.saved_cursor.pos;
-                screen.clamp();
-            }
+            // SCORC (Restore Cursor, CSI u), which is DECRC all over again.
+            'u' if plain => self.restore_cursor(),
 
             // TBC (Tabulation Clear, CSI 3 g, CSI 0 g, CSI g)
-            'g' => {
+            'g' if plain => {
                 let code = param_or(&mut params_iter, 0) as usize;
                 match code {
                     0 => {
                         let col = self.screen().cursor.col;
-                        self.tabstops.set(col, false);
+                        self.set_tabstop(col, false);
                     },
                     3 => {
                         self.tabstops.fill(false);
@@ -1186,16 +1404,25 @@ impl vte::Perform for State {
                         // Smooth Scroll Mode (DECSCLM). Visual display scrolling timing
                         // is irrelevant in a headless virtual terminal.
                         [4] => {},
-                        [6] => self.screen_mut().set_origin_mode(OriginMode::ScrollRegion),
+                        [6] => self.set_origin_mode(OriginMode::ScrollRegion),
+                        [7] => self.autowrap = true,
                         [12] => self.cursor_blinking = Some(true),
                         [25] => self.cursor_hidden = false,
+                        // DECLRMM (Left Right Margin Mode), which lets
+                        // DECSLRM set margins.
+                        [69] => self.screen_mut().set_left_right_margin_mode(true),
                         [1004] => self.report_focus = true,
-                        // enable alt screen
+                        // Switch to the alt screen as it was left. These are
+                        // older than 1049, and some terminfo entries still
+                        // use them, along with DECSC and DECRC.
+                        [47 | 1047] => self.enter_alt_screen(false),
+                        // Save the cursor, like DECSC.
+                        [1048] => self.save_cursor(),
+                        // Switch to the alt screen, saving the cursor
+                        // first and starting out with a blank screen.
                         [1049] => {
-                            // The alt-screen gets reset upon entry, so we need to
-                            // clobber it here.
-                            self.altscreen = Screen::alt(self.altscreen.size);
-                            self.screen_mode = ScreenMode::Alt;
+                            self.save_cursor();
+                            self.enter_alt_screen(true);
                         }
                         [2004] => self.in_paste_mode = true,
                         // Means "pause visual rendering." We are not rendering
@@ -1248,11 +1475,21 @@ impl vte::Perform for State {
                         // Jump Scroll Mode (DECSCLM). Visual display scrolling timing
                         // is irrelevant in a headless virtual terminal.
                         [4] => {},
-                        [6] => self.screen_mut().set_origin_mode(OriginMode::Term),
+                        [6] => self.set_origin_mode(OriginMode::Term),
+                        [7] => self.autowrap = false,
                         [12] => self.cursor_blinking = Some(false),
                         [25] => self.cursor_hidden = true,
+                        [69] => self.screen_mut().set_left_right_margin_mode(false),
                         [1004] => self.report_focus = false,
-                        [1049] => self.screen_mode = ScreenMode::Scrollback,
+                        [47] => self.exit_alt_screen(false),
+                        // Erase the alt screen on the way out.
+                        [1047] => self.exit_alt_screen(true),
+                        // Restore the cursor, like DECRC.
+                        [1048] => self.restore_cursor(),
+                        [1049] => {
+                            self.exit_alt_screen(false);
+                            self.restore_cursor();
+                        }
                         [2004] => self.in_paste_mode = false,
                         // Means "resume & flush visual rendering." We are
                         // not rendering anything visually so we don't care.
@@ -1295,23 +1532,23 @@ impl vte::Perform for State {
             },
 
             // cell attribute manipulation
-            'm' => while let Some(param) = params_iter.next() {
+            'm' if plain => while let Some(param) = params_iter.next() {
                 match param {
                     [] | [0] => self.cursor_attrs = term::Attrs::default(),
 
                     // Underline Handling
-                    // TODO: there are lots of other underline styles. To fix,
-                    // we need to update attrs.
                     //
-                    // Kitty extensions:
-                    //      CSI 4 : 3 m => curly
-                    //      CSI 4 : 2 m => double
-                    //
-                    // Other:
-                    //      CSI 58 ; 2 ; r ; g ; b m => RGB colored underline
-                    [4] => self.cursor_attrs.underline = Some(UnderlineStyle::Single),
-                    [21] => self.cursor_attrs.underline = Some(UnderlineStyle::Double),
-                    [24] => self.cursor_attrs.underline = None,
+                    // Kitty extends SGR 4 with a subparameter that picks the
+                    // underline style: `CSI 4:0 m` turns underlining off
+                    // and 4:1 through 4:5 select single, double, curly,
+                    // dotted and dashed underlines. Most modern terminals
+                    // understand it.
+                    [4] | [4, 1] => self.cursor_attrs.underline = Some(UnderlineStyle::Single),
+                    [21] | [4, 2] => self.cursor_attrs.underline = Some(UnderlineStyle::Double),
+                    [4, 3] => self.cursor_attrs.underline = Some(UnderlineStyle::Curly),
+                    [4, 4] => self.cursor_attrs.underline = Some(UnderlineStyle::Dotted),
+                    [4, 5] => self.cursor_attrs.underline = Some(UnderlineStyle::Dashed),
+                    [24] | [4, 0] => self.cursor_attrs.underline = None,
 
                     // Font Weight Handling.
                     [1] => self.cursor_attrs.font_weight = Some(FontWeight::Bold),
@@ -1396,19 +1633,9 @@ impl vte::Perform for State {
             }
             'p' => match intermediates {
                 // DECSTR (DEC Soft Terminal Reset)
-                [b'!'] => {
-                    self.tabstops.fill(false);
-                    let width = self.screen().size.width;
-                    self.fill_tabstops(0, width);
-                    self.cursor_style = term::CursorStyle::Default;
-                    self.cursor_attrs = term::Attrs::default();
-                    self.cursor_blinking = None;
-                    self.insert_mode = false;
-
-                    warn!(self.logger, "DECSTR only partially handled");
-                }
-                // DECRQM (DEC Request Mode Private)
-                [b'?', b'$'] => {
+                [b'!'] => self.soft_reset(),
+                // DECRQM (DEC Request Mode, both the private and ANSI forms)
+                [b'?', b'$'] | [b'$'] => {
                     // TODO(#4): actuate query state machine.
                     //
                     // In the future, we'll want to expose an API that
@@ -1438,30 +1665,40 @@ impl vte::Perform for State {
                 }
             },
             // DECSTBM (Set Scroll Region)
-            'r' => {
-                let top = maybe_param(&mut params_iter);
-                let bottom = maybe_param(&mut params_iter);
+            'r' if plain => {
+                let height = self.screen().size.height;
+                // Like in xterm, a bottom that is missing or off the screen
+                // means the last row.
+                let top = param_or(&mut params_iter, 1) as usize;
+                let bottom = match maybe_param(&mut params_iter) {
+                    Some(b) if (b as usize) <= height => b as usize,
+                    _ => height,
+                };
 
-                let screen = self.screen_mut();
-                screen.set_scroll_region(match (top, bottom) {
-                    (None, None) => term::ScrollRegion::TrackSize,
-                    (Some(t), None) => term::ScrollRegion::Window {
-                        top: t.saturating_sub(1) as usize,
-                        bottom: screen.size.height,
-                    },
-                    (None, Some(b)) => term::ScrollRegion::Window {
-                        top: 0,
-                        bottom: b as usize,
-                    },
-                    (Some(t), Some(b)) => term::ScrollRegion::Window {
-                        top: t.saturating_sub(1) as usize,
-                        bottom: b as usize,
-                    }
-                });
+                // A region has to be at least two rows high, and anything
+                // else gets ignored.
+                if top < bottom {
+                    let screen = self.screen_mut();
+                    screen.set_scroll_region(if top == 1 && bottom == height {
+                        term::ScrollRegion::TrackSize
+                    } else {
+                        term::ScrollRegion::Window { top: top - 1, bottom }
+                    });
+                    // Setting the region homes the cursor, which is the top
+                    // of the region itself in origin mode.
+                    screen.set_cursor(term::Pos { row: 1, col: 1 });
+                    screen.clamp();
+                }
             }
 
             _ => {
-                warn!(self.logger, "unhandled action {}", action);
+                warn!(
+                    self.logger,
+                    "unhandled CSI command: CSI {:?} {:?} {}",
+                    intermediates,
+                    params.iter().collect::<Vec<&[u16]>>(),
+                    action
+                );
             }
         }
     }
@@ -1476,55 +1713,78 @@ impl vte::Perform for State {
 
         match (intermediates, byte) {
             // save cursor (ESC 7)
-            ([], b'7') => {
-                let attrs = self.cursor_attrs.clone();
-                let screen = self.screen_mut();
-                let pos = screen.cursor.clone();
-                screen.saved_cursor = SavedCursor { pos, attrs };
-            }
+            ([], b'7') => self.save_cursor(),
             // restore cursor (ESC 8)
-            ([], b'8') => {
+            ([], b'8') => self.restore_cursor(),
+            // IND (Index) moves the cursor down a row, just like LF.
+            ([], b'D') => {
+                let fill = Cell::blank(&self.cursor_attrs);
+                self.screen_mut().linefeed(&fill);
+            }
+            // NEL (Next Line) is CR LF in one. Like in xterm, the LF goes
+            // first, so it is the column the cursor starts out in that
+            // decides whether it scrolls between the margins.
+            ([], b'E') => {
+                let fill = Cell::blank(&self.cursor_attrs);
                 let screen = self.screen_mut();
-                screen.cursor = screen.saved_cursor.pos;
-                self.cursor_attrs = screen.saved_cursor.attrs.clone();
+                screen.linefeed(&fill);
+                screen.carriage_return();
             }
             // HTS (Horizontal Tabluation Set, ESC H)
             ([], b'H') => {
                 let col = self.screen().cursor.col;
-                self.tabstops.set(col, true);
+                self.set_tabstop(col, true);
             }
             // RI (Reverse Index)
             ([], b'M') => {
+                let fill = Cell::blank(&self.cursor_attrs);
                 let screen = self.screen_mut();
+                screen.pending_wrap = false;
                 let (scroll_top, _) =
                     screen.scroll_region(false).as_region(&screen.size).row_bounds();
 
                 if screen.cursor.row == scroll_top {
-                    screen.insert_lines(1);
+                    // Outside of the margins, the cursor just stays put.
+                    if screen.cursor_between_margins() {
+                        screen.scroll_down(1, &fill);
+                    }
                 } else if screen.cursor.row > 0 {
                     screen.cursor.row -= 1;
                 }
             }
             // RIS (Reset to Initial State)
-            ([], b'c') => {
-                self.tabstops.fill(false);
-                let width = self.screen().size.width;
-                self.fill_tabstops(0, width);
-                self.cursor_style = term::CursorStyle::Default;
-                self.cursor_attrs = term::Attrs::default();
-                self.cursor_blinking = None;
-                self.insert_mode = false;
-
-                warn!(self.logger, "RIS only partially handled");
-            }
+            ([], b'c') => self.hard_reset(),
 
             // DECKPAM / DECKPNM (application and numeric keypad mode)
             ([], b'=') => self.application_keypad_mode_enabled = true,
             ([], b'>') => self.application_keypad_mode_enabled = false,
 
-            // Designates US-ASCII or UK-ASCII as a G0-G3 character set. We handle
-            // utf-8, which is a superset of ascii, so this is a no-op.
-            ([b'(' | b')' | b'*' | b'+'], b'B' | b'A') => {}
+            // SCS (Select Character Set) designates a set of 94 chars into
+            // one of the G0-G3 slots.
+            ([b'('], designator) => {
+                self.charsets.designate(0, Charset::from_designator(designator))
+            }
+            ([b')'], designator) => {
+                self.charsets.designate(1, Charset::from_designator(designator))
+            }
+            ([b'*'], designator) => {
+                self.charsets.designate(2, Charset::from_designator(designator))
+            }
+            ([b'+'], designator) => {
+                self.charsets.designate(3, Charset::from_designator(designator))
+            }
+            // Sets of 96 chars only make sense for the upper half of an 8 bit
+            // charset, which utf-8 leaves no room for.
+            ([b'-' | b'.' | b'/'], _) => debug!(self.logger, "ignoring 96 char set designation"),
+            // LS2 / LS3 (Locking Shift 2 / 3)
+            ([], b'n') => self.charsets.lock_shift(2),
+            ([], b'o') => self.charsets.lock_shift(3),
+            // SS2 / SS3 (Single Shift 2 / 3)
+            ([], b'N') => self.charsets.single_shift(2),
+            ([], b'O') => self.charsets.single_shift(3),
+            // Select utf-8 (ESC % G) or the terminal's default encoding
+            // (ESC % @). We only speak utf-8.
+            ([b'%'], b'G' | b'@') => {}
 
             // OSC terminators that get sent to the esc handler as well,
             // we can ignore them.
@@ -1605,6 +1865,31 @@ fn parse_extended_color<'params>(
             }
             _ => None,
         }
+    }
+}
+
+/// Glues free form OSC text that vte split on ';' back together, cutting it
+/// off (on a char boundary) if it gets unreasonably long.
+fn osc_text(params: &[&[u8]]) -> SmallVec<[u8; 8]> {
+    let mut text = params.join(&b';');
+    if text.len() > MAX_OSC_TEXT_LEN {
+        let mut end = MAX_OSC_TEXT_LEN;
+        // Don't leave part of a UTF-8 sequence dangling off the end.
+        while end > MAX_OSC_TEXT_LEN - 3 && (text[end] & 0xc0) == 0x80 {
+            end -= 1;
+        }
+        text.truncate(end);
+    }
+    text.into()
+}
+
+/// Parses the index of a palette color, as used by OSC 4 and OSC 104.
+fn palette_idx(idx: &[u8]) -> Option<usize> {
+    let idx = std::str::from_utf8(idx).ok()?.parse::<usize>().ok()?;
+    if idx < NUM_PALETTE_COLORS {
+        Some(idx)
+    } else {
+        None
     }
 }
 

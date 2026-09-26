@@ -20,6 +20,15 @@ use crate::term::{self, AsTermInput};
 
 static EMPTY_CELL: OnceLock<Cell> = OnceLock::new();
 
+/// The most zero width chars a cell holds on top of the char it starts with.
+///
+/// Nothing stops an app from piling combining marks onto the same cell for
+/// as long as it likes, and every one of them would take up memory and make
+/// the restore longer. Real text never needs anywhere near this many, and
+/// terminals don't keep them either: xterm keeps 2 by default, and 5 at
+/// most.
+const MAX_ZERO_WIDTH_CHARS: usize = 16;
+
 // A shared empty cell const. Should be used to generate empty cell
 // references when needed to avoid duplicating empty cells to reference
 // everywhere.
@@ -91,14 +100,22 @@ impl Cell {
         Cell { grapheme_cluster: smallvec![], width: 0, empty: true, wide_padding: false, attrs }
     }
 
-    pub fn wide_pad() -> Self {
-        Cell {
-            grapheme_cluster: smallvec![],
-            width: 0,
-            empty: true,
-            wide_padding: true,
-            attrs: term::Attrs::default(),
-        }
+    /// The blank cell that erasing, inserting blanks and scrolling leave
+    /// behind while `attrs` are the current attrs.
+    ///
+    /// Terminals paint these with the current background color, which is
+    /// what lets apps fill the screen with a color just by clearing it
+    /// ("bce" in terminfo), but none of the other attrs carry over. A blank
+    /// that got erased while underline was on is not underlined.
+    pub fn blank(attrs: &term::Attrs) -> Self {
+        Cell::empty_with_attrs(term::Attrs { bgcolor: attrs.bgcolor, ..term::Attrs::default() })
+    }
+
+    /// The padding that fills the columns to the right of a wide char. It
+    /// gets the attrs of the wide char so that attr runs don't get broken up
+    /// in the middle of it.
+    pub fn wide_pad(attrs: term::Attrs) -> Self {
+        Cell { grapheme_cluster: smallvec![], width: 0, empty: true, wide_padding: true, attrs }
     }
 
     /// Append a zero width modifier char to the grapheme cluster.
@@ -113,7 +130,9 @@ impl Cell {
             "only zero width chars may be added to an existing cell"
         );
 
-        self.grapheme_cluster.push(c);
+        if self.grapheme_cluster.len() <= MAX_ZERO_WIDTH_CHARS {
+            self.grapheme_cluster.push(c);
+        }
     }
 
     pub fn width(&self) -> u8 {
@@ -132,6 +151,26 @@ impl Cell {
 
     pub fn attrs(&self) -> &term::Attrs {
         &self.attrs
+    }
+
+    /// True for a cell that looks just like one nothing has been written to:
+    /// a blank without any attrs that would show up on a blank.
+    pub fn looks_unused(&self) -> bool {
+        self.is_erased() && matches!(self.attrs.bgcolor, term::Color::Default)
+    }
+
+    /// True for a cell that looks like erasing left it behind: a blank
+    /// without any attrs that would show up on a blank, other than a
+    /// background color.
+    pub fn is_erased(&self) -> bool {
+        let attrs = &self.attrs;
+        self.is_empty()
+            && !self.is_wide_padding()
+            && !attrs.inverse
+            && attrs.underline.is_none()
+            && !attrs.strikethrough
+            && !attrs.overline
+            && attrs.framed.is_none()
     }
 }
 

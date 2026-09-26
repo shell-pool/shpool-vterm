@@ -28,7 +28,6 @@ frag! {
             term::ControlCodes::start_link(smallvec![], smallvec![b'h', b't', b't', b'p']),
             term::Raw::from("abcde"),
             term::control_codes().end_link,
-            term::Crlf::default(),
             term::ControlCodes::start_link(smallvec![], smallvec![b'h', b't', b't', b'p']),
             term::Raw::from("f"),
             term::control_codes().end_link,
@@ -298,6 +297,107 @@ frag! {
 }
 
 frag! {
+    curly_underline { scrollback_lines: 100, width: 100, height: 100 }
+    <= term::Raw::from("a"),
+       term::control_codes().curly_underline,
+       term::Raw::from("b"),
+       term::control_codes().undo_underline,
+       term::Raw::from("a")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("a"),
+            term::control_codes().curly_underline,
+            term::Raw::from("b"),
+            term::control_codes().undo_underline,
+            term::Raw::from("a"),
+            term::ControlCodes::cursor_position(1, 4),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    dotted_underline { scrollback_lines: 100, width: 100, height: 100 }
+    <= term::Raw::from("a"),
+       term::control_codes().dotted_underline,
+       term::Raw::from("b"),
+       term::control_codes().undo_underline,
+       term::Raw::from("a")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("a"),
+            term::control_codes().dotted_underline,
+            term::Raw::from("b"),
+            term::control_codes().undo_underline,
+            term::Raw::from("a"),
+            term::ControlCodes::cursor_position(1, 4),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    dashed_underline { scrollback_lines: 100, width: 100, height: 100 }
+    <= term::Raw::from("a"),
+       term::control_codes().dashed_underline,
+       term::Raw::from("b"),
+       term::control_codes().undo_underline,
+       term::Raw::from("a")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("a"),
+            term::control_codes().dashed_underline,
+            term::Raw::from("b"),
+            term::control_codes().undo_underline,
+            term::Raw::from("a"),
+            term::ControlCodes::cursor_position(1, 4),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    underline_style_subparams { scrollback_lines: 10, width: 20, height: 10 }
+    <= term::Raw::from("\x1b[4:1ma\x1b[4:2mb\x1b[4:3mc\x1b[4:4md\x1b[4:5me\x1b[4:0mf")
+    => ContentRegion::All =>
+            reset_codes,
+            term::control_codes().underline,
+            term::Raw::from("a\x1b[24;21mb\x1b[24;4:3mc\x1b[24;4:4md\x1b[24;4:5me"),
+            term::control_codes().undo_underline,
+            term::Raw::from("f"),
+            term::ControlCodes::cursor_position(1, 7),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    unknown_underline_style_is_ignored { scrollback_lines: 10, width: 20, height: 10 }
+    <= term::Raw::from("\x1b[4:3ma\x1b[4:9mb")
+    => ContentRegion::All =>
+            reset_codes,
+            term::control_codes().curly_underline,
+            term::Raw::from("ab"),
+            term::control_codes().undo_underline,
+            term::ControlCodes::cursor_position(1, 3),
+            term::control_codes().clear_attrs,
+            term::control_codes().curly_underline
+}
+
+frag! {
+    colored_curly_underline { scrollback_lines: 10, width: 20, height: 10 }
+    <= term::Raw::from("\x1b[4:3;58:2::255:0:0mtypo\x1b[4:0;59m ok")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("\x1b[58;2;255;0;0;4:3mtypo\x1b[59;24m ok"),
+            term::ControlCodes::cursor_position(1, 8),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    underline_style_of_pen_survives_restore { scrollback_lines: 10, width: 20, height: 10 }
+    <= term::Raw::from("a\x1b[4:5m")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("a"),
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().clear_attrs,
+            term::control_codes().dashed_underline
+}
+
+frag! {
     save_restore_cursor_attrs { scrollback_lines: 100, width: 10, height: 10 }
     <= term::control_codes().bold,
        term::Raw::from("A"),
@@ -313,6 +413,10 @@ frag! {
             term::Raw::from("AC"),
             term::control_codes().reset_font_weight,
             term::Raw::from("B"),
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().bold,
+            term::control_codes().save_cursor,
+            term::control_codes().reset_font_weight,
             term::ControlCodes::cursor_position(1, 3),
             term::control_codes().clear_attrs,
             term::control_codes().bold
@@ -890,6 +994,9 @@ frag! {
             term::ControlCodes::start_link(smallvec![], smallvec![b'h', b't', b't', b'p']),
             term::Raw::from("AC"),
             term::control_codes().end_link,
+            // Like for the cursor attrs, the link is left out.
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().save_cursor,
             term::ControlCodes::cursor_position(1, 3),
             term::control_codes().clear_attrs
 }
@@ -981,6 +1088,10 @@ frag! {
             term::Raw::from("AC"),
             term::control_codes().underline_color_default,
             term::Raw::from("B"),
+            term::ControlCodes::cursor_position(1, 2),
+            term::ControlCodes::underline_color_rgb(1, 2, 3),
+            term::control_codes().save_cursor,
+            term::control_codes().underline_color_default,
             term::ControlCodes::cursor_position(1, 3),
             term::control_codes().clear_attrs,
             term::ControlCodes::underline_color_rgb(1, 2, 3)
@@ -1160,5 +1271,58 @@ frag! {
     => ContentRegion::All =>
             reset_codes,
             term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    link_url_with_semicolons { scrollback_lines: 10, width: 20, height: 10 }
+    <= term::Raw::from("\x1b]8;id=1;http://a/?b=1;c=2\x1b\\"),
+       term::Raw::from("ab")
+    => ContentRegion::All =>
+            reset_codes,
+            term::ControlCodes::start_link(b"id=1"[..].into(), b"http://a/?b=1;c=2"[..].into()),
+            term::Raw::from("ab"),
+            term::control_codes().end_link,
+            term::ControlCodes::cursor_position(1, 3),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    link_empty_url_with_params_ends_link { scrollback_lines: 10, width: 20, height: 10 }
+    <= term::ControlCodes::start_link(smallvec![], smallvec![b'h', b't', b't', b'p']),
+       term::Raw::from("a"),
+       term::ControlCodes::start_link(b"id=1"[..].into(), smallvec![]),
+       term::Raw::from("b")
+    => ContentRegion::All =>
+            reset_codes,
+            term::ControlCodes::start_link(smallvec![], smallvec![b'h', b't', b't', b'p']),
+            term::Raw::from("a"),
+            term::control_codes().end_link,
+            term::Raw::from("b"),
+            term::ControlCodes::cursor_position(1, 3),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    link_over_long_url_ignored { scrollback_lines: 10, width: 20, height: 10 }
+    <= term::ControlCodes::start_link(smallvec![], format!("http://a/{}", "b".repeat(3000)).as_bytes().into()),
+       term::Raw::from("a")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("a"),
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    link_over_long_params_dropped { scrollback_lines: 10, width: 20, height: 10 }
+    <= term::ControlCodes::start_link(format!("id={}", "b".repeat(300)).as_bytes().into(), smallvec![b'h', b't', b't', b'p']),
+       term::Raw::from("a")
+    => ContentRegion::All =>
+            reset_codes,
+            term::ControlCodes::start_link(smallvec![], smallvec![b'h', b't', b't', b'p']),
+            term::Raw::from("a"),
+            term::control_codes().end_link,
+            term::ControlCodes::cursor_position(1, 2),
             term::control_codes().clear_attrs
 }

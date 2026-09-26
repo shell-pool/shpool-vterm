@@ -9,12 +9,30 @@ pub struct reset_codes;
 
 impl shpool_vterm::term::AsTermInput for reset_codes {
     fn term_input_into(&self, buf: &mut Vec<u8>) {
-        shpool_vterm::term::control_codes().end_link.term_input_into(buf);
-        shpool_vterm::term::control_codes().clear_attrs.term_input_into(buf);
-        shpool_vterm::term::control_codes().unset_scroll_region.term_input_into(buf);
-        shpool_vterm::term::control_codes().disable_scroll_region_origin_mode.term_input_into(buf);
+        let controls = shpool_vterm::term::control_codes();
+        controls.end_link.term_input_into(buf);
+        controls.disable_alt_screen.term_input_into(buf);
+        controls.clear_attrs.term_input_into(buf);
+        controls.unset_scroll_region.term_input_into(buf);
+        controls.disable_left_right_margin_mode.term_input_into(buf);
+        controls.disable_scroll_region_origin_mode.term_input_into(buf);
+        controls.disable_insert_mode.term_input_into(buf);
+        controls.enable_autowrap.term_input_into(buf);
+        controls.designate_g0_us_ascii.term_input_into(buf);
+        controls.designate_g1_us_ascii.term_input_into(buf);
+        controls.designate_g2_us_ascii.term_input_into(buf);
+        controls.designate_g3_us_ascii.term_input_into(buf);
+        term::Raw::from("\x0f").term_input_into(buf);
+        controls.show_cursor.term_input_into(buf);
+        controls.disable_application_cursor_keys.term_input_into(buf);
+        controls.disable_application_keypad_mode.term_input_into(buf);
+        term::ControlCodes::dec_private_modes_reset(&[1000, 1002, 1003, 1005, 1006, 1015, 1016])
+            .term_input_into(buf);
+        controls.disable_report_focus.term_input_into(buf);
+        controls.disable_paste_mode.term_input_into(buf);
         shpool_vterm::term::ControlCodes::cursor_position(1, 1).term_input_into(buf);
-        shpool_vterm::term::control_codes().clear_screen.term_input_into(buf);
+        controls.save_cursor.term_input_into(buf);
+        controls.clear_screen.term_input_into(buf);
     }
 }
 
@@ -121,9 +139,7 @@ impl vte::Perform for PrettyTerm {
         match byte {
             b'\n' => write!(self.into, "<\\n>\n").unwrap(),
             b'\r' => write!(self.into, "<\\r>").unwrap(),
-            _ => {
-                eprintln!("pp: unhandled byte {}", byte);
-            }
+            _ => write!(self.into, "<{:#04x}>", byte).unwrap(),
         }
     }
 

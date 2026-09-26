@@ -17,15 +17,13 @@
 //! a complete terminal representation in lib.rs.
 
 use crate::{
-    cell::Cell,
+    cell::{self, Cell},
     line::{self, Line},
     log,
     term::{self, AsTermInput, OriginMode, Pos, ScrollRegion},
     ContentRegion,
 };
 use std::collections::VecDeque;
-
-use anyhow::{anyhow, Context};
 
 // A scrollback stores the termianal state for the main screen.
 // Alt screen state is stored seperately.
@@ -54,6 +52,10 @@ pub(crate) struct Scrollback {
 pub(crate) struct CursorAnchor {
     pub row: AnchorRow,
     pub col: usize,
+    /// Set if the cursor is waiting to wrap, in which case `col` is just past
+    /// the last column. That is the same spot in the logical line as the
+    /// start of the row below, but the cursor has not moved down to it yet.
+    pub pending_wrap: bool,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -63,18 +65,6 @@ pub(crate) enum AnchorRow {
     /// This many rows below the last stored line, where a program has moved
     /// the cursor down without writing anything.
     BelowContent(usize),
-}
-
-/// Follows a single anchor through a reflow.
-struct AnchorTracker {
-    /// The anchored line, counted from the top so that we can spot it as we
-    /// drain the old buffer. Its index from the bottom is no use here:
-    /// splitting a line below it renumbers the buffer underneath us.
-    line: Option<usize>,
-    /// How far into the logical line the anchored cell sits.
-    offset: Option<usize>,
-    /// Which of the new grid lines it came out on, counted from the top.
-    grid_line: Option<usize>,
 }
 
 impl std::fmt::Display for Scrollback {
@@ -123,15 +113,6 @@ impl Scrollback {
         self.lines = scrollback_lines;
     }
 
-    /// Set the cell at the given grid coordinates.
-    pub fn set(&mut self, size: crate::Size, pos: Pos, cell: Cell) -> anyhow::Result<()> {
-        if let Some(line) = self.get_line_mut(size, pos.row) {
-            return line.set_cell(size.width, pos.col, cell);
-        }
-
-        Ok(())
-    }
-
     fn add_line(&mut self, line: Line) {
         self.buf.push_front(line);
         while self.buf.len() > self.lines {
@@ -152,7 +133,15 @@ impl Scrollback {
     /// mean the same thing before and after a resize.
     /// A position relative to the stored lines does, which is what lets the
     /// cursor stay on the line it was on.
-    pub fn anchor_cursor(&self, size: crate::Size, cursor: Pos) -> CursorAnchor {
+    ///
+    /// A cursor with a wrap pending should be passed in just past the last
+    /// column.
+    pub fn anchor_cursor(
+        &self,
+        size: crate::Size,
+        cursor: Pos,
+        pending_wrap: bool,
+    ) -> CursorAnchor {
         let row = match self.idx_from_bottom(size, cursor.row) {
             Some(idx) => AnchorRow::Line(idx),
             // A program can walk the cursor below the last line we have data
@@ -161,7 +150,7 @@ impl Scrollback {
             None => AnchorRow::BelowContent(cursor.row - self.lines_below_grid_start(size)),
         };
 
-        CursorAnchor { row, col: cursor.col }
+        CursorAnchor { row, col: cursor.col, pending_wrap }
     }
 
     /// Turn an anchor back into a screen position against the current buffer.
@@ -178,140 +167,215 @@ impl Scrollback {
         Pos { row, col: anchor.col }
     }
 
+    /// Drop the blank rows at the bottom of the buffer that would otherwise
+    /// push the content that was on the screen up into the scrollback once it
+    /// no longer fits.
+    ///
+    /// Clearing the screen erases it and homes the cursor, which leaves the
+    /// prompt sitting on top of a screen full of blank rows. When the screen
+    /// gets shorter, or narrower lines take up more rows, it is those rows
+    /// that should go rather than the prompt. `top` is where the top of the
+    /// screen was before the resize. Rows are only dropped from below every
+    /// one of `anchors`, which get moved to stay on the rows they were on.
+    pub fn trim_blank_rows(
+        &mut self,
+        size: crate::Size,
+        top: CursorAnchor,
+        anchors: &mut [CursorAnchor],
+    ) {
+        // Nothing is stored, so there is nothing to drop.
+        let AnchorRow::Line(top_idx) = top.row else {
+            return;
+        };
+        // A screen with no rows is most likely just a passing state while a
+        // window gets resized, so don't throw anything away over it.
+        if size.height == 0 {
+            return;
+        }
+
+        let overflow = (top_idx + 1).saturating_sub(size.height);
+        let below_anchors = anchors
+            .iter()
+            .map(|anchor| match anchor.row {
+                AnchorRow::Line(idx) => idx,
+                // Every stored row is above this cursor.
+                AnchorRow::BelowContent(_) => 0,
+            })
+            .min()
+            .unwrap_or(usize::MAX);
+        let max = std::cmp::min(overflow, below_anchors);
+
+        let is_blank = |line: &Line| !line.is_wrapped && line.cells.iter().all(Cell::looks_unused);
+        let mut n = 0;
+        // The rest of a wrapped line is part of it, blank or not.
+        while n < max
+            && self.buf.get(n).is_some_and(is_blank)
+            && !self.buf.get(n + 1).is_some_and(|line| line.is_wrapped)
+        {
+            n += 1;
+        }
+        self.buf.drain(..n);
+
+        for anchor in anchors.iter_mut() {
+            if let AnchorRow::Line(idx) = &mut anchor.row {
+                *idx -= n;
+            }
+        }
+    }
+
     pub fn dump_contents_into(
         &self,
         buf: &mut Vec<u8>,
         size: crate::Size,
         dump_region: ContentRegion,
     ) {
-        let lines_iter: Box<dyn Iterator<Item = (usize, &Line)>> = match dump_region {
-            ContentRegion::All => Box::new(self.buf.iter().enumerate().rev()),
-            ContentRegion::Screen => Box::new(self.buf.iter().take(size.height).enumerate().rev()),
-            ContentRegion::BottomLines(nlines) => {
-                Box::new(self.buf.iter().take(nlines).enumerate().rev())
-            }
+        // Blank rows at the bottom of a screen that is not full yet look just
+        // like the rows below the content that nothing has been written to,
+        // which the restore leaves blank without being told. Once there is
+        // scrollback, the bottom rows hold everything above them in place.
+        let blank_rows = if self.buf.len() <= size.height {
+            self.buf.iter().take_while(|line| line.cells.iter().all(Cell::looks_unused)).count()
+        } else {
+            0
         };
 
-        for (i, line) in lines_iter {
-            line.term_input_into(buf);
-            if i != 0 {
-                term::Crlf::default().term_input_into(buf);
-            }
+        let nlines = match dump_region {
+            ContentRegion::All => self.buf.len(),
+            ContentRegion::Screen => size.height,
+            ContentRegion::BottomLines(nlines) => nlines,
+        };
+        let nlines = std::cmp::min(nlines, self.buf.len() - blank_rows);
+
+        // When there are fewer lines than rows on the screen, the lines go
+        // on the rows they came from rather than at the top of the screen.
+        // Everything else, like the cursor, gets put back at an absolute
+        // position, and has to end up in the same place relative to them.
+        let first_row = self.lines_below_grid_start(size).saturating_sub(blank_rows + nlines);
+        if first_row > 0 {
+            term::ControlCodes::cursor_position((first_row + 1) as u16, 1).term_input_into(buf);
         }
 
-        self.scroll_region.term_input_into(buf);
+        let lines = self.buf.iter().skip(blank_rows).take(nlines).rev();
+        line::dump_lines_into(buf, size.width, lines);
     }
 
-    /// Re-chop the buffer into grid lines of `new_width`, moving each of
-    /// `anchors` along with the cell it names.
-    pub fn reflow(&mut self, new_width: usize, anchors: &mut [CursorAnchor]) {
-        let mut new_scrollback = VecDeque::with_capacity(self.buf.len());
-        let mut logical_line = VecDeque::new();
+    /// Re-chop the buffer, which is laid out at `old_width`, into grid lines
+    /// of `new_width`, moving each of `anchors` along with the cell it names.
+    pub fn reflow(&mut self, old_width: usize, new_width: usize, anchors: &mut [CursorAnchor]) {
+        if new_width == 0 {
+            // Nothing can be laid out on a zero width screen. Leave the lines
+            // alone so that they can still be reflowed properly once the
+            // screen gets a real size again.
+            return;
+        }
 
-        let mut trackers: Vec<AnchorTracker> = anchors
+        let old_len = self.buf.len();
+        // The anchored lines, counted from the top so that we can spot them
+        // as we go through the old buffer. Their index from the bottom is no
+        // use here: splitting a line below them renumbers the buffer.
+        let anchor_lines: Vec<Option<usize>> = anchors
             .iter()
-            .map(|anchor| AnchorTracker {
-                line: match anchor.row {
-                    AnchorRow::Line(idx) => Some(self.buf.len() - 1 - idx),
-                    // Nothing is stored at the cursor, so there is no cell to
-                    // follow and the gap carries over untouched.
-                    AnchorRow::BelowContent(_) => None,
-                },
-                offset: None,
-                grid_line: None,
+            .map(|anchor| match anchor.row {
+                AnchorRow::Line(idx) => old_len.checked_sub(idx + 1),
+                // Nothing is stored at the cursor, so there is no cell to
+                // follow and the gap carries over untouched.
+                AnchorRow::BelowContent(_) => None,
             })
             .collect();
-        let mut logical_len = 0;
-        let mut drained = 0;
+        // How far into the current logical line each anchored cell sits.
+        let mut offsets: Vec<Option<usize>> = vec![None; anchors.len()];
+        // The new line each anchor came out on, counted from the top, and
+        // its column on that line.
+        let mut new_positions: Vec<Option<(usize, usize)>> = vec![None; anchors.len()];
 
-        while let Some(grid_line) = self.buf.pop_back() {
-            for (tracker, anchor) in trackers.iter_mut().zip(anchors.iter()) {
-                if tracker.line == Some(drained) {
-                    tracker.offset = Some(logical_len + anchor.col);
-                    tracker.line = None;
+        // The new lines, top to bottom.
+        let mut new_lines: Vec<Line> = Vec::with_capacity(old_len);
+        let mut logical_line: Vec<Cell> = vec![];
+        let old_buf = std::mem::take(&mut self.buf);
+        for (i, line) in old_buf.into_iter().rev().enumerate() {
+            for ((offset, anchor_line), anchor) in
+                offsets.iter_mut().zip(anchor_lines.iter()).zip(anchors.iter())
+            {
+                if *anchor_line == Some(i) {
+                    *offset = Some(logical_line.len() + anchor.col);
                 }
             }
-            drained += 1;
-            logical_len += grid_line.cells.len();
 
-            let is_wrapped = grid_line.is_wrapped;
-            logical_line.push_back(grid_line);
+            // Erasing or scrolling with a background color set paints the
+            // line out to the right edge, and at the new width it should
+            // still reach the edge rather than stop at the old one.
+            let edge_fill = line
+                .cells
+                .last()
+                .filter(|c| line.cells.len() >= old_width && c.is_erased() && !c.looks_unused())
+                .cloned();
+            logical_line.extend(line.cells);
+            // The last line has nothing to continue onto, even if it claims
+            // to wrap.
+            if line.is_wrapped && i + 1 < old_len {
+                continue;
+            }
 
-            if !is_wrapped {
-                // We've gotten to the end of the logical line. We now
-                // need to chop it up into grid lines by the new width.
-                let lines_before = new_scrollback.len();
-                let mut line = Line::new();
-                while let Some(chunk) = logical_line.pop_front() {
-                    let remainder = new_width - line.cells.len();
-                    if chunk.cells.len() < remainder {
-                        line.cells.extend_from_slice(chunk.cells.as_slice());
+            let mut rows = rewrap(&mut logical_line, new_width, edge_fill.is_some());
+            let pad = edge_fill.as_ref().unwrap_or(cell::empty());
+            for (offset, new_pos) in offsets.iter_mut().zip(new_positions.iter_mut()) {
+                let Some(offset) = offset.take() else {
+                    continue;
+                };
 
-                        if line.cells.len() == new_width {
-                            new_scrollback.push_front(line);
-                            line = Line::new();
-                        }
-                    } else {
-                        // Complete the partial line.
-                        line.cells.extend_from_slice(&chunk.cells[..remainder]);
-                        line.is_wrapped = chunk.cells.len() > remainder || !logical_line.is_empty();
-                        new_scrollback.push_front(line);
-                        line = Line::new();
-
-                        let remaining_chunks: Vec<_> =
-                            chunk.cells[remainder..].chunks(new_width).collect();
-                        for (i, c) in remaining_chunks.iter().enumerate() {
-                            line.cells.extend_from_slice(c);
-                            if i < remaining_chunks.len() - 1 {
-                                line.is_wrapped = true;
-                            } else {
-                                line.is_wrapped = !logical_line.is_empty();
-                            }
-
-                            if line.cells.len() == new_width {
-                                new_scrollback.push_front(line);
-                                line = Line::new();
-                            }
-                        }
-                    }
+                // The anchored cell is on the last row that starts at or
+                // before it.
+                let mut nth = rows.iter().rposition(|(start, _)| *start <= offset).unwrap_or(0);
+                let mut col = offset - rows[nth].0;
+                // A cursor out in the blank space past the end of the content
+                // can end up beyond the end of the last row. Give it rows to
+                // sit on rather than moving it back, so that it keeps its
+                // place in the logical line.
+                //
+                // Only stored cells count towards the offsets into a logical
+                // line, so any row that the cursor sits at the end of or past
+                // gets padded out to the full width. Otherwise the text that
+                // gets written there would be pulled back into the blank
+                // space by the next reflow.
+                while col > new_width {
+                    pad_line(&mut rows[nth].1, new_width, pad);
+                    rows[nth].1.is_wrapped = true;
+                    let start = rows[nth].0 + new_width;
+                    rows.push((start, Line::new()));
+                    nth += 1;
+                    col -= new_width;
                 }
-
-                // A logical line that ended exactly on the width boundary has
-                // already been fully flushed, so the leftover is not a row. A
-                // logical line that flushed nothing at all was blank, and a
-                // blank line still occupies a row.
-                if !line.cells.is_empty() || new_scrollback.len() == lines_before {
-                    new_scrollback.push_front(line);
+                if col == new_width {
+                    pad_line(&mut rows[nth].1, new_width, pad);
                 }
+                *new_pos = Some((new_lines.len() + nth, col));
+            }
+            if let (Some(fill), Some((_, last_row))) = (&edge_fill, rows.last_mut()) {
+                pad_line(last_row, new_width, fill);
+            }
+            new_lines.extend(rows.into_iter().map(|(_, row)| row));
+            logical_line.clear();
+        }
 
-                for (tracker, anchor) in trackers.iter_mut().zip(anchors.iter_mut()) {
-                    if let Some(offset) = tracker.offset.take() {
-                        let produced = new_scrollback.len() - lines_before;
-                        let nth = offset / new_width;
-                        anchor.col = if nth < produced {
-                            offset % new_width
-                        } else {
-                            // Parked past the end of its own logical line, so
-                            // there is no cell to follow down. Settle on the
-                            // last row the line produced and let the caller
-                            // clamp the column.
-                            new_width
-                        };
-                        tracker.grid_line =
-                            Some(lines_before + nth.min(produced.saturating_sub(1)));
-                    }
-                }
-                logical_len = 0;
+        for (anchor, new_pos) in anchors.iter_mut().zip(new_positions) {
+            if let Some((nth, col)) = new_pos {
+                anchor.row = AnchorRow::Line(new_lines.len() - 1 - nth);
+                anchor.col = col;
+                // Just past the end of a row is where the cursor would be
+                // waiting to wrap if the line had been written at this width,
+                // so that is what it does now, whether or not it was before.
+                anchor.pending_wrap = col == new_width;
             }
         }
 
-        for (tracker, anchor) in trackers.iter().zip(anchors.iter_mut()) {
-            if let Some(nth) = tracker.grid_line {
-                anchor.row = AnchorRow::Line(new_scrollback.len() - 1 - nth);
-            }
+        // The bottom line goes at the front of the buffer.
+        self.buf = new_lines.into_iter().rev().collect();
+        // Narrowing makes for more lines, and the ones that no longer fit in
+        // the scrollback fall off the top. An anchor on one of them resolves
+        // to the top row.
+        while self.buf.len() > self.lines {
+            self.buf.pop_back();
         }
-
-        self.buf = new_scrollback;
     }
 
     // Resolve a logical offset in the visible grid to an actual Line.
@@ -351,152 +415,117 @@ impl Scrollback {
         Some(grid_start - 1 - row)
     }
 
-    /// Write the given cell at the given cursor position, returning the next
-    /// cursor position.
-    pub fn write_at_cursor(
-        &mut self,
-        size: crate::Size,
-        mut cursor: Pos,
-        cell: Cell,
-    ) -> anyhow::Result<Pos> {
-        if size.width < 1 {
-            return Err(anyhow!("cannot write to zero width terminal grid"));
+    /// The line at the given screen row, ready to be written to.
+    ///
+    /// We only store the rows that have been written to, so this has to fill
+    /// in the blank rows between the last stored line and the one we want.
+    /// Returns None if the row is not on the screen.
+    pub fn materialize_line(&mut self, size: crate::Size, row: usize) -> Option<&mut Line> {
+        if row >= size.height {
+            return None;
         }
 
-        // We do the wrapping before writing a cell rather than after
-        // doing so to allow the user to avoid setting the wrap bit
-        // by entering \r\n right after writing the very rightmost
-        // cell.
-        if cursor.col >= size.width {
-            if let Some(line) = self.get_line_mut(size, cursor.row) {
-                line.is_wrapped = true;
-            } else {
-                return Err(anyhow!("unexpectedly missing line when setting wrap marker"));
-            }
-
-            cursor.col = 0;
-            cursor.row += 1;
-        }
-
-        // If we've run off the end, add a new line and clamp.
-        if cursor.row >= size.height {
-            self.add_line(Line::new());
-            cursor.row -= 1;
-        }
-
-        assert!(self.lines >= size.height);
-        while self.buf.len() < cursor.row + 1 {
-            // TODO: these lines will all count as having
-            // not been wrapped and will be retained on reflow.
-            // Is that actually what we want?
+        while self.buf.len() < row + 1 {
             self.add_line(Line::new());
         }
+        self.get_line_mut(size, row)
+    }
 
-        if cursor.col + cell.width() as usize >= size.width + 1 {
-            if let Some(line) = self.get_line_mut(size, cursor.row) {
-                line.is_wrapped = true;
-            } else {
-                return Err(anyhow!(
-                    "unexpectedly missing line when setting wide char wrap marker"
-                ));
-            }
-
-            cursor.col = 0;
-            cursor.row += 1;
-
-            if self.buf.len() < cursor.row + 1 {
-                self.add_line(Line::new())
-            }
+    /// Store every screen row down to and including `row` if `fill` has a
+    /// background color to paint.
+    ///
+    /// The rows below the last stored line are blank already, which is all
+    /// an erase or scroll has to leave behind when it has no color to paint
+    /// with. Blanks painted with a background color have to be stored.
+    fn materialize_for_fill(&mut self, size: crate::Size, row: usize, fill: &Cell) {
+        if fill.attrs().has_attrs() {
+            self.materialize_line(size, std::cmp::min(row, size.height.saturating_sub(1)));
         }
-
-        let mut npad = cell.width().saturating_sub(1);
-        self.set(size, cursor, cell).context("setting main cell")?;
-        cursor.col += 1;
-        while npad > 0 {
-            assert!(cursor.col < size.width);
-
-            self.set(size, cursor, Cell::wide_pad()).context("padding after wide char")?;
-            cursor.col += 1;
-            npad -= 1;
-        }
-
-        Ok(cursor)
     }
 
     //
     // Command Handlers
     //
 
-    pub fn erase_to_end(&mut self, size: crate::Size, cursor: Pos) {
-        if let Some(snip_line) = self.get_line_mut(size, cursor.row) {
-            snip_line.erase(line::Section::ToEnd(cursor.col));
-        }
+    /// ED 0 (CSI 0 J). Erase from the cursor to the end of the screen. Like
+    /// the rest of ED, this covers the whole screen whatever the scroll
+    /// region and origin mode are.
+    pub fn erase_to_end(&mut self, size: crate::Size, cursor: Pos, fill: &Cell) {
+        self.materialize_for_fill(size, size.height.saturating_sub(1), fill);
 
-        let end = match (self.origin_mode, &self.scroll_region) {
-            (OriginMode::ScrollRegion, ScrollRegion::Window { bottom, .. }) => *bottom,
-            _ => size.height,
-        };
-        for i in cursor.row + 1..end {
+        if let Some(snip_line) = self.get_line_mut(size, cursor.row) {
+            snip_line.erase(size.width, line::Section::ToEnd(cursor.col), fill);
+        }
+        for i in cursor.row + 1..size.height {
             if let Some(snip_line) = self.get_line_mut(size, i) {
-                snip_line.erase(line::Section::Whole);
+                snip_line.erase(size.width, line::Section::Whole, fill);
             }
         }
     }
 
-    pub fn erase_from_start(&mut self, size: crate::Size, cursor: Pos) {
-        let start = match (self.origin_mode, &self.scroll_region) {
-            (OriginMode::ScrollRegion, ScrollRegion::Window { top, .. }) => *top,
-            _ => 0,
-        };
+    /// ED 1 (CSI 1 J). Erase from the top of the screen to the cursor.
+    pub fn erase_from_start(&mut self, size: crate::Size, cursor: Pos, fill: &Cell) {
+        self.materialize_for_fill(size, cursor.row, fill);
 
-        for i in start..cursor.row {
+        for i in 0..cursor.row {
             if let Some(snip_line) = self.get_line_mut(size, i) {
-                snip_line.erase(line::Section::Whole);
+                snip_line.erase(size.width, line::Section::Whole, fill);
             }
         }
         if let Some(snip_line) = self.get_line_mut(size, cursor.row) {
-            snip_line.erase(line::Section::StartTo(cursor.col));
+            snip_line.erase(size.width, line::Section::StartTo(cursor.col), fill);
         }
     }
 
-    pub fn erase(&mut self, size: crate::Size, include_scrollback: bool) {
-        if include_scrollback {
-            self.buf.truncate(0);
-            return;
-        }
+    /// ED 2 (CSI 2 J). Erase the whole screen, but not the scrollback.
+    pub fn erase(&mut self, size: crate::Size, fill: &Cell) {
+        self.materialize_for_fill(size, size.height.saturating_sub(1), fill);
 
-        let (start, end) = match (self.origin_mode, &self.scroll_region) {
-            (OriginMode::ScrollRegion, ScrollRegion::Window { top, bottom }) => (*top, *bottom),
-            _ => (0, size.height),
-        };
-
-        for i in start..end {
+        for i in 0..size.height {
             if let Some(snip_line) = self.get_line_mut(size, i) {
-                snip_line.erase(line::Section::Whole);
+                snip_line.erase(size.width, line::Section::Whole, fill);
             }
         }
+    }
+
+    /// ED 3 (CSI 3 J). Drop the scrollback, leaving the screen alone.
+    pub fn erase_scrollback(&mut self, size: crate::Size) {
+        self.buf.truncate(self.lines_below_grid_start(size));
     }
 
     /// SU (CSI S). Move the content of the scroll region up by `n` rows,
-    /// opening blank rows at the bottom. Also what a linefeed at the bottom
-    /// of the scroll region does.
+    /// opening rows of `fill` at the bottom. Also what a linefeed at the
+    /// bottom of the scroll region does.
     ///
     /// With no scroll region the rows that leave the top of the screen stay
     /// in the buffer as scrollback, which is why this is not just
     /// `delete_lines` at the top of the screen.
-    pub fn scroll_up(&mut self, size: &crate::Size, n: usize) {
+    pub fn scroll_up(&mut self, size: &crate::Size, n: usize, fill: &Cell) {
         match self.scroll_region {
             ScrollRegion::TrackSize => {
-                for _ in 0..n {
+                // The rows below the last stored line have no storage, but
+                // they are still on the screen and the content has to move
+                // up past them. Fill them in so that the new lines really
+                // land at the bottom of the screen rather than right below
+                // the content.
+                while self.buf.len() < size.height {
                     self.add_line(Line::new());
+                }
+
+                // Scrolling by more than a screenful just blanks the screen,
+                // so there is no point in pushing even more blank lines into
+                // the scrollback.
+                for _ in 0..std::cmp::min(n, size.height) {
+                    self.add_line(Line::blank(size.width, fill));
                 }
             }
             ScrollRegion::Window { top, bottom } => {
+                self.materialize_for_fill(*size, bottom.saturating_sub(1), fill);
                 if bottom - top < n {
                     // just clobber everything
                     for i in top..bottom {
                         if let Some(line) = self.get_line_mut(*size, i) {
-                            line.erase(line::Section::Whole);
+                            line.erase(size.width, line::Section::Whole, fill);
                         }
                     }
                 } else {
@@ -507,7 +536,7 @@ impl Scrollback {
                             if let Some(from_line) = from_line {
                                 *to_line = from_line;
                             } else {
-                                to_line.erase(line::Section::Whole);
+                                to_line.erase(size.width, line::Section::Whole, fill);
                             }
                         } else {
                             warn!(self.logger, "scrollback::scroll_up: out of bounds shuffle");
@@ -515,7 +544,7 @@ impl Scrollback {
                     }
                     for i in 0..n {
                         if let Some(line) = self.get_line_mut(*size, top + to_shuffle + i) {
-                            line.erase(line::Section::Whole);
+                            line.erase(size.width, line::Section::Whole, fill);
                         } else {
                             warn!(self.logger, "scrollback::scroll_up: out of bounds backfill");
                         }
@@ -526,19 +555,19 @@ impl Scrollback {
     }
 
     /// SD (CSI T). Move the content of the scroll region down by `n` rows,
-    /// opening blank rows at the top. Rows pushed past the bottom of the
+    /// opening rows of `fill` at the top. Rows pushed past the bottom of the
     /// region are lost. Also what a reverse index at the top of the scroll
     /// region does.
-    pub fn scroll_down(&mut self, size: &crate::Size, n: usize) {
+    pub fn scroll_down(&mut self, size: &crate::Size, n: usize, fill: &Cell) {
         let top = match self.scroll_region {
             ScrollRegion::TrackSize => 0,
             ScrollRegion::Window { top, .. } => top,
         };
 
-        self.insert_lines(&Pos { row: top, col: 0 }, size, n);
+        self.insert_lines(&Pos { row: top, col: 0 }, size, n, fill);
     }
 
-    pub fn insert_lines(&mut self, cursor: &Pos, size: &crate::Size, n: usize) {
+    pub fn insert_lines(&mut self, cursor: &Pos, size: &crate::Size, n: usize, fill: &Cell) {
         let bottom = match self.scroll_region {
             ScrollRegion::TrackSize => size.height,
             ScrollRegion::Window { top, bottom } => {
@@ -550,6 +579,7 @@ impl Scrollback {
                 bottom
             }
         };
+        self.materialize_for_fill(*size, bottom.saturating_sub(1), fill);
 
         let grid_start = self.lines_below_grid_start(*size);
         let row_idx = match self.idx_from_bottom(*size, cursor.row) {
@@ -573,7 +603,7 @@ impl Scrollback {
 
         let lines_to_insert = std::cmp::min(n, bottom - cursor.row);
         for _ in 0..lines_to_insert {
-            self.buf.push_front(Line::new());
+            self.buf.push_front(Line::blank(size.width, fill));
         }
 
         // Up until the bottom of the scroll region, backfill
@@ -594,7 +624,7 @@ impl Scrollback {
         }
     }
 
-    pub fn delete_lines(&mut self, cursor: &Pos, size: &crate::Size, n: usize) {
+    pub fn delete_lines(&mut self, cursor: &Pos, size: &crate::Size, n: usize, fill: &Cell) {
         let bottom = match self.scroll_region {
             ScrollRegion::TrackSize => size.height,
             ScrollRegion::Window { top, bottom } => {
@@ -606,6 +636,7 @@ impl Scrollback {
                 bottom
             }
         };
+        self.materialize_for_fill(*size, bottom.saturating_sub(1), fill);
 
         let grid_start = self.lines_below_grid_start(*size);
         let row_idx = match self.idx_from_bottom(*size, cursor.row) {
@@ -640,7 +671,7 @@ impl Scrollback {
         // Inject the blank lines we need to put in at the bottom of the
         // scrollback region.
         for _ in 0..lines_to_delete {
-            self.buf.push_front(Line::new());
+            self.buf.push_front(Line::blank(size.width, fill));
         }
 
         // Past the scroll region, backfill from the start of the
@@ -650,5 +681,73 @@ impl Scrollback {
             let take_idx = backfill_past_scroll_region - 1 - i;
             self.buf.push_front(std::mem::replace(&mut lines_below_cursor[take_idx], Line::new()));
         }
+    }
+}
+
+/// Chop a logical line up into rows of at most `width` cells, returning each
+/// row along with the offset into the logical line that it starts at.
+///
+/// `painted_to_edge` says that the line was painted with a background color
+/// out to the right edge. The blanks it was painted with get trimmed off as
+/// well, since the caller paints the last row out to the new edge instead.
+///
+/// `width` must not be zero.
+fn rewrap(cells: &mut Vec<Cell>, width: usize, painted_to_edge: bool) -> Vec<(usize, Line)> {
+    // Blank cells at the end of the line are just the part of it that
+    // nothing has been written to (DCH, for one, pads lines out to the full
+    // width). They should not spill over onto rows of their own.
+    let trailing_blank = if painted_to_edge { Cell::is_erased } else { Cell::looks_unused };
+    while cells.last().is_some_and(trailing_blank) {
+        cells.pop();
+    }
+
+    // A wide char that is wider than a whole row can't be shown at all. Blank
+    // it out rather than drop it, since the offsets into the logical line
+    // have to stay put.
+    for col in 0..cells.len() {
+        let cell_width = cells[col].width() as usize;
+        if cell_width > width && !cells[col].is_wide_padding() {
+            let attrs = cells[col].attrs().clone();
+            let end = std::cmp::min(col + cell_width, cells.len());
+            for cell in cells[col..end].iter_mut() {
+                *cell = Cell::empty_with_attrs(attrs.clone());
+            }
+        }
+    }
+
+    let mut rows = vec![];
+    let mut start = 0;
+    while start < cells.len() {
+        let mut end = std::cmp::min(start + width, cells.len());
+        // Never split a wide char from its padding. If it does not fit, it
+        // starts the next row and the columns it would have used stay blank,
+        // just like when a wide char gets written at the end of a line.
+        let mut owner = end;
+        while owner > start && owner < cells.len() && cells[owner].is_wide_padding() {
+            owner -= 1;
+        }
+        if owner > start {
+            end = owner;
+        }
+
+        rows.push((
+            start,
+            Line { cells: cells[start..end].to_vec(), is_wrapped: end < cells.len() },
+        ));
+        start = end;
+    }
+
+    // A blank line still takes up a row.
+    if rows.is_empty() {
+        rows.push((0, Line::new()));
+    }
+
+    rows
+}
+
+/// Pad `line` out to `width` cells with `blank`.
+fn pad_line(line: &mut Line, width: usize, blank: &Cell) {
+    while line.cells.len() < width {
+        line.cells.push(blank.clone());
     }
 }
