@@ -912,6 +912,42 @@ fn saved_cursor_follows_its_row_across_a_resize() {
     assert_eq!(term.contents(ContentRegion::Screen), expected);
 }
 
+// Restoring the cursor when nothing was saved homes it. The empty slot used
+// to be a saved cursor in the top left corner, which then followed its row
+// across a resize like any other saved cursor, here down onto "33".
+#[test]
+fn restoring_an_unsaved_cursor_homes_it_after_a_resize() {
+    use shpool_vterm::term::AsTermInput;
+
+    let mut input = vec![];
+    for row in ["11", "22", "33", "44"] {
+        term::Raw::from(row).term_input_into(&mut input);
+        term::Crlf::default().term_input_into(&mut input);
+    }
+    term::Raw::from("55").term_input_into(&mut input);
+
+    let mut term = shpool_vterm::Term::new(100, shpool_vterm::Size { width: 5, height: 3 });
+    term.process(input.as_slice());
+    term.resize(shpool_vterm::Size { width: 5, height: 5 });
+
+    let mut restore = vec![];
+    term::control_codes().restore_cursor.term_input_into(&mut restore);
+    term::Raw::from("X").term_input_into(&mut restore);
+    term.process(restore.as_slice());
+
+    let mut expected = vec![];
+    crate::support::frag::reset_codes.term_input_into(&mut expected);
+    term::Raw::from("X1").term_input_into(&mut expected);
+    for row in ["22", "33", "44", "55"] {
+        term::Crlf::default().term_input_into(&mut expected);
+        term::Raw::from(row).term_input_into(&mut expected);
+    }
+    term::ControlCodes::cursor_position(1, 2).term_input_into(&mut expected);
+    term::control_codes().clear_attrs.term_input_into(&mut expected);
+
+    assert_eq!(term.contents(ContentRegion::Screen), expected);
+}
+
 // SU (CSI S) moves the content toward the top of the screen and opens blank
 // rows at the bottom. It is what terminfo calls `indn`, and it is what a pager
 // emits to advance a page. The cursor does not move, so it ends up on a

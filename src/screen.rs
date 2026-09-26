@@ -50,8 +50,9 @@ pub struct Screen {
     /// the pending wrap. DEC calls this the "last column flag".
     pub pending_wrap: bool,
     // The slot where cursor position info is saved by the SCP/RCP
-    // and ESC 7 / ESC 8 commands.
-    pub saved_cursor: SavedCursor,
+    // and ESC 7 / ESC 8 commands. It stays empty until something gets
+    // saved.
+    pub saved_cursor: Option<SavedCursor>,
     logger: log::Context,
 }
 
@@ -67,7 +68,7 @@ impl Screen {
             size,
             cursor: Pos { row: 0, col: 0 },
             pending_wrap: false,
-            saved_cursor: SavedCursor::new(Pos { row: 0, col: 0 }),
+            saved_cursor: None,
             logger: log::Context::None,
         }
     }
@@ -79,7 +80,7 @@ impl Screen {
             size,
             cursor: Pos { row: 0, col: 0 },
             pending_wrap: false,
-            saved_cursor: SavedCursor::new(Pos { row: 0, col: 0 }),
+            saved_cursor: None,
             logger: log::Context::None,
         }
     }
@@ -278,7 +279,13 @@ impl Screen {
         // A cursor with a wrap pending is logically just past the char in
         // the last column, and that is the spot it should keep following.
         let cursor = past_pending_wrap(self.cursor, self.pending_wrap);
-        let saved_cursor = past_pending_wrap(self.saved_cursor.pos, self.saved_cursor.pending_wrap);
+        // An empty slot has nothing to follow, so the top left corner, which
+        // gets tracked below anyway, stands in for it.
+        let (saved_pos, saved_pending_wrap) = match &self.saved_cursor {
+            Some(saved) => (saved.pos, saved.pending_wrap),
+            None => (Pos { row: 0, col: 0 }, false),
+        };
+        let saved_cursor = past_pending_wrap(saved_pos, saved_pending_wrap);
         let ((cursor, pending_wrap), (saved_cursor, saved_pending_wrap)) = match &mut self.grid {
             Grid::Scrollback(scrollback) => {
                 // A row is derived from the buffer length and the height, both
@@ -287,11 +294,7 @@ impl Screen {
                 // a resize between DECSC and DECRC moves it just the same.
                 let mut anchors = [
                     scrollback.anchor_cursor(old_size, cursor, self.pending_wrap),
-                    scrollback.anchor_cursor(
-                        old_size,
-                        saved_cursor,
-                        self.saved_cursor.pending_wrap,
-                    ),
+                    scrollback.anchor_cursor(old_size, saved_cursor, saved_pending_wrap),
                     // Where the top of the screen ends up says how many rows
                     // the old screen contents take up after the resize.
                     scrollback.anchor_cursor(old_size, Pos { row: 0, col: 0 }, false),
@@ -310,7 +313,7 @@ impl Screen {
             }
             Grid::AltScreen(altscreen) => {
                 altscreen.resize(new_size);
-                ((cursor, self.pending_wrap), (saved_cursor, self.saved_cursor.pending_wrap))
+                ((cursor, self.pending_wrap), (saved_cursor, saved_pending_wrap))
             }
         };
         self.size = new_size;
@@ -321,8 +324,10 @@ impl Screen {
         self.store_scroll_region(ScrollRegion::TrackSize);
 
         (self.cursor, self.pending_wrap) = settle_cursor(cursor, pending_wrap, self.size);
-        (self.saved_cursor.pos, self.saved_cursor.pending_wrap) =
-            settle_cursor(saved_cursor, saved_pending_wrap, self.size);
+        if let Some(saved) = &mut self.saved_cursor {
+            (saved.pos, saved.pending_wrap) =
+                settle_cursor(saved_cursor, saved_pending_wrap, self.size);
+        }
     }
 
     /// Move the cursor up `n` rows. It stops at the top of the scroll region,
@@ -664,6 +669,10 @@ impl std::fmt::Display for Screen {
 
 /// A position that the terminal was writing at. Includes attributes that
 /// have been previously set via control codes.
+///
+/// Restoring the cursor when nothing has been saved restores `new` at the
+/// top left corner, which homes the cursor and puts the attrs, charsets and
+/// origin mode back to their defaults, like in xterm and kitty.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct SavedCursor {
     pub pos: Pos,
@@ -818,14 +827,15 @@ mod tests {
     fn altscreen_cursor_clamping() {
         let mut screen = Screen::alt(Size { width: 10, height: 10 });
         screen.cursor = Pos { row: 9, col: 9 };
-        screen.saved_cursor.pos = Pos { row: 8, col: 8 };
+        screen.saved_cursor = Some(SavedCursor::new(Pos { row: 8, col: 8 }));
 
         screen.resize(Size { width: 5, height: 5 });
 
         assert_eq!(screen.cursor.row, 4);
         assert_eq!(screen.cursor.col, 4);
-        assert_eq!(screen.saved_cursor.pos.row, 4);
-        assert_eq!(screen.saved_cursor.pos.col, 4);
+        let saved = screen.saved_cursor.expect("saved cursor");
+        assert_eq!(saved.pos.row, 4);
+        assert_eq!(saved.pos.col, 4);
     }
 
     fn get_screen_cell(screen: &Screen, row: usize, col: usize) -> Option<Cell> {
