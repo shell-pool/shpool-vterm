@@ -96,8 +96,8 @@ frag! {
             reset_codes,
             term::ControlCodes::cursor_position(1, 1),
             term::control_codes().clear_attrs,
+            term::ControlCodes::set_color_indices(vec![(1, smallvec![b'r', b'e', b'd'])]),
             term::ControlCodes::set_color_indices(vec![
-                (1, smallvec![b'r', b'e', b'd']),
                 (2, smallvec![b'g', b'r', b'e', b'e', b'n']),
             ])
 }
