@@ -127,3 +127,13 @@ fn unsaved_cursor() {
         b"\x1b8x",
     );
 }
+
+// Themes can change a lot of the palette, and all of it has to come back.
+#[test]
+fn lots_of_palette_colors() {
+    let mut setup = vec![];
+    for idx in 0..20 {
+        setup.extend_from_slice(format!("\x1b]4;{idx};rgb:{idx:02x}/00/00\x1b\\").as_bytes());
+    }
+    assert_restores(Size { width: 10, height: 3 }, &setup, b"");
+}

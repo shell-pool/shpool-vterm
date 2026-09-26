@@ -558,13 +558,11 @@ impl State {
             ControlCodes::set_working_dir(working_dir.clone()).term_input_into(buf);
         }
 
-        if !self.palette_overrides.is_empty() {
-            ControlCodes::set_color_indices(
-                self.palette_overrides
-                    .iter()
-                    .map(|(idx, color_spec)| (*idx, SmallVec::from(color_spec.as_slice()))),
-            )
-            .term_input_into(buf);
+        // One OSC per color, since terminals only take so many params in a
+        // single OSC. vte takes 16, which is only enough for 7 colors.
+        for (idx, color_spec) in self.palette_overrides.iter() {
+            let color = (*idx, SmallVec::from(color_spec.as_slice()));
+            ControlCodes::set_color_indices(std::iter::once(color)).term_input_into(buf);
         }
 
         if self.cursor_hidden {
