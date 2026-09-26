@@ -52,7 +52,7 @@ impl Pos {
             self.row = low_row;
         }
         if self.row >= high_row {
-            self.row = high_row - 1;
+            self.row = high_row.saturating_sub(1);
         }
 
         let (low_col, high_col) = region.col_bounds();
@@ -60,7 +60,7 @@ impl Pos {
             self.col = low_col;
         }
         if self.col >= high_col {
-            self.col = high_col - 1;
+            self.col = high_col.saturating_sub(1);
         }
     }
 }

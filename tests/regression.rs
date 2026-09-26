@@ -1104,3 +1104,52 @@ frag! {
             term::ControlCodes::cursor_position(2, 3),
             term::control_codes().clear_attrs
 }
+
+// A client that is not attached to a real terminal can report a size of zero.
+// Nothing fits on a screen like that, but it must not take the session down.
+#[test]
+fn zero_size_screen_survives_input() {
+    let sizes = [
+        shpool_vterm::Size { width: 0, height: 0 },
+        shpool_vterm::Size { width: 0, height: 3 },
+        shpool_vterm::Size { width: 5, height: 0 },
+    ];
+    for size in sizes {
+        let mut term = shpool_vterm::Term::new(100, size);
+        // Text, tab stops, cursor motion, saving and restoring the cursor
+        // and the alt screen all have to cope with there being no cells.
+        term.process(
+            b"hello\r\nworld\tX\x1bH\x1b[g\x1b[0W\x1b[2W\x1b[3;3H\x1b7\x1b8\
+              \x1b[?1049h\x1b[2Jalt\x1bM\x1b[?1049l",
+        );
+        for other in sizes {
+            term.resize(other);
+            term.process(b"more\r\n");
+            for region in [ContentRegion::All, ContentRegion::Screen, ContentRegion::BottomLines(3)]
+            {
+                term.contents(region);
+            }
+            let _ = term.to_string();
+        }
+    }
+}
+
+// Once it gets a real size, a session that started out with a zero size
+// behaves like any other.
+#[test]
+fn zero_size_screen_works_after_a_resize() {
+    use shpool_vterm::term::AsTermInput;
+
+    let mut term = shpool_vterm::Term::new(100, shpool_vterm::Size { width: 0, height: 0 });
+    term.process(b"lost");
+    term.resize(shpool_vterm::Size { width: 5, height: 3 });
+    term.process(b"ab");
+
+    let mut expected = vec![];
+    crate::support::frag::reset_codes.term_input_into(&mut expected);
+    term::Raw::from("ab").term_input_into(&mut expected);
+    term::ControlCodes::cursor_position(1, 3).term_input_into(&mut expected);
+    term::control_codes().clear_attrs.term_input_into(&mut expected);
+
+    assert_eq!(term.contents(ContentRegion::Screen), expected);
+}
