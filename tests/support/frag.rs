@@ -30,6 +30,7 @@ impl shpool_vterm::term::AsTermInput for reset_codes {
         controls.disable_report_focus.term_input_into(buf);
         controls.disable_paste_mode.term_input_into(buf);
         shpool_vterm::term::ControlCodes::cursor_position(1, 1).term_input_into(buf);
+        controls.save_cursor.term_input_into(buf);
         controls.clear_screen.term_input_into(buf);
     }
 }

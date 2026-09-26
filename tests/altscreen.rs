@@ -37,6 +37,9 @@ frag! {
     => ContentRegion::All =>
             reset_codes,
             term::Raw::from("A"),
+            // Entering the alt screen saved the cursor.
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().save_cursor,
             term::ControlCodes::cursor_position(1, 2),
             term::control_codes().clear_attrs
 }
@@ -90,6 +93,10 @@ frag! {
             // right next to where the A is on the main screen.
             term::Raw::from(" B"),
             term::Crlf::default(),
+            // Like in xterm, the second switch saved the cursor again, but
+            // on the alt screen this time.
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().save_cursor,
             // It filled the last column, which leaves a wrap pending.
             term::ControlCodes::cursor_position(1, 2),
             term::Raw::from("B"),
@@ -895,14 +902,14 @@ frag! {
        term::Raw::from("X")
     => ContentRegion::All =>
             reset_codes,
-            // The scrollback restore leaves the terminal with margins and
-            // origin mode set.
-            term::ControlCodes::set_scroll_region(2, 4),
+            // Entering the alt screen saved the cursor in origin mode, so
+            // the switch has to save it that way too.
             term::control_codes().enable_scroll_region_origin_mode,
-            term::ControlCodes::cursor_position(1, 1),
+            term::ControlCodes::cursor_position(2, 1),
             term::control_codes().enable_alt_screen,
-            // The alt screen has neither, so it must say so explicitly.
-            term::control_codes().unset_scroll_region,
+            // The margins belong to the alt screen, which has none, but
+            // origin mode has to be switched off again. That homes the
+            // cursor too.
             term::control_codes().disable_scroll_region_origin_mode,
             term::Raw::from("X"),
             term::Crlf::default(),
@@ -961,9 +968,9 @@ frag! {
             term::control_codes().clear_attrs
 }
 
-// Resetting the scroll region already homes the cursor.
+// The scroll region does not get in the way of painting the alt screen.
 frag! {
-    alt_screen_painted_from_the_top_after_region_reset { scrollback_lines: 100, width: 5, height: 3 }
+    alt_screen_painted_from_the_top_with_a_scroll_region { scrollback_lines: 100, width: 5, height: 3 }
     <= term::Raw::from("$ vi"),
        term::ControlCodes::set_scroll_region(1, 2),
        term::ControlCodes::cursor_position(2, 3),
@@ -973,10 +980,9 @@ frag! {
     => ContentRegion::All =>
             reset_codes,
             term::Raw::from("$ vi"),
-            term::ControlCodes::set_scroll_region(1, 2),
             term::ControlCodes::cursor_position(2, 3),
             term::control_codes().enable_alt_screen,
-            term::control_codes().unset_scroll_region,
+            term::ControlCodes::cursor_position(1, 1),
             term::Raw::from("text"),
             term::Crlf::default(),
             term::Crlf::default(),
@@ -995,10 +1001,8 @@ frag! {
        term::Raw::from("a\r\nb\r\nc")
     => ContentRegion::All =>
             reset_codes,
-            term::ControlCodes::set_scroll_region(1, 2),
-            term::ControlCodes::cursor_position(1, 1),
+            empty_scrollback,
             term::control_codes().enable_alt_screen,
-            term::control_codes().unset_scroll_region,
             term::Raw::from("b"),
             term::Crlf::default(),
             term::Raw::from("c"),
@@ -1023,6 +1027,10 @@ frag! {
     => ContentRegion::All =>
             reset_codes,
             term::Raw::from("A\x1b[31mq\x1b[39m"),
+            term::ControlCodes::cursor_position(1, 2),
+            term::ControlCodes::fgcolor_idx(1),
+            term::control_codes().save_cursor,
+            term::control_codes().fgcolor_default,
             term::ControlCodes::cursor_position(1, 3),
             term::control_codes().clear_attrs,
             term::ControlCodes::fgcolor_idx(1)
@@ -1044,6 +1052,8 @@ frag! {
             term::control_codes().enable_alt_screen,
             term::Crlf::default(),
             term::Raw::from("  X"),
+            term::ControlCodes::cursor_position(2, 3),
+            term::control_codes().save_cursor,
             term::ControlCodes::cursor_position(2, 4),
             term::control_codes().clear_attrs
 }
@@ -1061,9 +1071,10 @@ frag! {
     => ContentRegion::All =>
             reset_codes,
             term::Raw::from("$ "),
-            term::ControlCodes::cursor_position(2, 1),
-            term::control_codes().enable_alt_screen,
+            // Nothing is saved, so the switch saves the cursor at home, and
+            // the alt screen gets painted from there.
             term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().enable_alt_screen,
             term::Raw::from("  alt"),
             term::Crlf::default(),
             term::ControlCodes::cursor_position(2, 1),
@@ -1104,6 +1115,8 @@ frag! {
     => ContentRegion::All =>
             reset_codes,
             term::Raw::from("$ ls"),
+            term::ControlCodes::cursor_position(1, 3),
+            term::control_codes().save_cursor,
             term::ControlCodes::cursor_position(1, 5),
             term::control_codes().clear_attrs
 }
@@ -1151,6 +1164,10 @@ frag! {
             reset_codes,
             term::Crlf::default(),
             term::Raw::from("  \x1b[31mx\x1b[39m"),
+            term::ControlCodes::cursor_position(2, 3),
+            term::ControlCodes::fgcolor_idx(1),
+            term::control_codes().save_cursor,
+            term::control_codes().fgcolor_default,
             term::ControlCodes::cursor_position(2, 4),
             term::control_codes().clear_attrs,
             term::ControlCodes::fgcolor_idx(1)

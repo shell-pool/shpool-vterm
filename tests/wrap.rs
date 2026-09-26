@@ -150,6 +150,10 @@ frag! {
             term::Raw::from("abc"),
             term::Crlf::default(),
             term::Raw::from("d"),
+            // The saved cursor still has the wrap pending.
+            term::ControlCodes::cursor_position(1, 3),
+            term::Raw::from("c"),
+            term::control_codes().save_cursor,
             term::ControlCodes::cursor_position(2, 2),
             term::control_codes().clear_attrs
 }

@@ -243,8 +243,6 @@ impl Scrollback {
                 term::Crlf::default().term_input_into(buf);
             }
         }
-
-        self.scroll_region.term_input_into(buf);
     }
 
     /// Re-chop the buffer, which is laid out at `old_width`, into grid lines

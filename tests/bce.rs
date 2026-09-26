@@ -447,8 +447,14 @@ frag! {
        term::control_codes().enable_alt_screen
     => ContentRegion::All =>
             reset_codes,
-            empty_scrollback,
+            // The switch saves the cursor with the background color...
+            term::ControlCodes::cursor_position(1, 1),
+            term::ControlCodes::bgcolor_idx(4),
             term::control_codes().enable_alt_screen,
+            term::control_codes().bgcolor_default,
+            // ...and erases the alt screen with it, but only the blanks the
+            // app left behind are supposed to be blue.
+            term::control_codes().erase_screen,
             blue(5),
             term::Crlf::default(),
             blue(5),

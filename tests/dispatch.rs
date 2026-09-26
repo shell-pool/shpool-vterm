@@ -81,6 +81,8 @@ frag! {
             reset_codes,
             term::Crlf::default(),
             term::Raw::from(" X"),
+            term::ControlCodes::cursor_position(2, 2),
+            term::control_codes().save_cursor,
             term::ControlCodes::cursor_position(2, 3),
             term::control_codes().clear_attrs
 }

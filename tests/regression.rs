@@ -504,6 +504,7 @@ fn dump_prefix_resets_terminal_modes() {
         "\x1b[?1004l",                               // focus reporting off
         "\x1b[?2004l",                               // bracketed paste off
         "\x1b[H",                                    // home
+        "\x1b7",                                     // save the reset cursor
         "\x1b[J",                                    // erase
     ];
     let expected = format!("{}hi\x1b[1;3H\x1b[m", prefix.concat());
@@ -528,7 +529,7 @@ fn restore_resets_modes_left_over_in_the_client() {
     session.process(b"$ ls\r\nfoo  bar\r\n$ ");
 
     let mut client = shpool_vterm::Term::new(100, size);
-    client.process(b"\x1b[?1049h"); // alt screen
+    client.process(b"\x1b[3;3H\x1b[?1049h"); // saved cursor, alt screen
     client.process(b"\x1b[1;31m\x1b[2;4r\x1b[?6h"); // attrs, margins, DECOM
     client.process(b"\x1b[4h\x1b[?7l"); // insert mode, no auto-wrap
     client.process(b"\x1b[?25l\x1b[?1h\x1b="); // hidden cursor, app keys
@@ -906,6 +907,8 @@ fn saved_cursor_follows_its_row_across_a_resize() {
     term::Raw::from("44").term_input_into(&mut expected);
     term::Crlf::default().term_input_into(&mut expected);
     term::Raw::from("55X").term_input_into(&mut expected);
+    term::ControlCodes::cursor_position(5, 3).term_input_into(&mut expected);
+    term::control_codes().save_cursor.term_input_into(&mut expected);
     term::ControlCodes::cursor_position(5, 4).term_input_into(&mut expected);
     term::control_codes().clear_attrs.term_input_into(&mut expected);
 

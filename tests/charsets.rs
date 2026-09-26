@@ -162,6 +162,10 @@ frag! {
     => ContentRegion::All =>
             reset_codes,
             term::Raw::from("─"),
+            term::ControlCodes::cursor_position(1, 1),
+            term::ControlCodes::designate_charset(0, b'0'),
+            term::control_codes().save_cursor,
+            term::control_codes().designate_g0_us_ascii,
             term::ControlCodes::cursor_position(1, 2),
             term::control_codes().clear_attrs,
             term::ControlCodes::designate_charset(0, b'0')
@@ -179,6 +183,10 @@ frag! {
     => ContentRegion::All =>
             reset_codes,
             term::Raw::from("─q"),
+            term::ControlCodes::cursor_position(1, 1),
+            term::ControlCodes::designate_charset(2, b'0'),
+            term::control_codes().save_cursor,
+            term::ControlCodes::designate_charset(2, b'B'),
             term::ControlCodes::cursor_position(1, 3),
             term::control_codes().clear_attrs,
             term::ControlCodes::designate_charset(2, b'0')
@@ -196,6 +204,10 @@ frag! {
     => ContentRegion::All =>
             reset_codes,
             term::Raw::from("q"),
+            term::ControlCodes::cursor_position(1, 1),
+            term::ControlCodes::designate_charset(2, b'0'),
+            term::control_codes().save_cursor,
+            term::ControlCodes::designate_charset(2, b'B'),
             term::ControlCodes::cursor_position(1, 2),
             term::control_codes().clear_attrs,
             term::ControlCodes::designate_charset(2, b'0')

@@ -313,6 +313,10 @@ frag! {
             term::Raw::from("AC"),
             term::control_codes().reset_font_weight,
             term::Raw::from("B"),
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().bold,
+            term::control_codes().save_cursor,
+            term::control_codes().reset_font_weight,
             term::ControlCodes::cursor_position(1, 3),
             term::control_codes().clear_attrs,
             term::control_codes().bold
@@ -890,6 +894,9 @@ frag! {
             term::ControlCodes::start_link(smallvec![], smallvec![b'h', b't', b't', b'p']),
             term::Raw::from("AC"),
             term::control_codes().end_link,
+            // Like for the cursor attrs, the link is left out.
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().save_cursor,
             term::ControlCodes::cursor_position(1, 3),
             term::control_codes().clear_attrs
 }
@@ -981,6 +988,10 @@ frag! {
             term::Raw::from("AC"),
             term::control_codes().underline_color_default,
             term::Raw::from("B"),
+            term::ControlCodes::cursor_position(1, 2),
+            term::ControlCodes::underline_color_rgb(1, 2, 3),
+            term::control_codes().save_cursor,
+            term::control_codes().underline_color_default,
             term::ControlCodes::cursor_position(1, 3),
             term::control_codes().clear_attrs,
             term::ControlCodes::underline_color_rgb(1, 2, 3)

@@ -197,6 +197,12 @@ impl Term {
         controls.disable_paste_mode.term_input_into(&mut buf);
 
         term::ControlCodes::cursor_position(1, 1).term_input_into(&mut buf);
+        // With the attrs, charsets and origin mode all back to their
+        // defaults, saving the cursor here leaves one that restores the same
+        // way as nothing saved at all, which the dump replaces if the app
+        // saved one. Otherwise an app that restores the cursor without
+        // saving it first would get whatever the last session saved.
+        controls.save_cursor.term_input_into(&mut buf);
         controls.clear_screen.term_input_into(&mut buf);
         self.state.dump_contents_into(&mut buf, dump_region);
 
@@ -471,7 +477,7 @@ impl State {
             ScreenMode::Alt => {
                 // Restore the regular scrollback first so that after the user
                 // exits their curses app, they can still see shell history.
-                self.scrollback.dump_contents_into(buf, dump_region.clone());
+                self.scrollback.dump_contents_before_switch_into(buf, dump_region.clone());
 
                 // Re-enable alt screen, then dump the contents. This is
                 // not actually super important in practice because basically
@@ -479,21 +485,13 @@ impl State {
                 // consider exposing a knob to disable alt-screen dumping
                 // since it might make things less flickery. Not worth doing
                 // for now though.
+                //
+                // Like DECSC, this saves the cursor along with its attrs,
+                // charsets and origin mode, which leaving the alt screen puts
+                // back. The scrollback restore left all of those the way the
+                // app had them saved, so that is what gets saved here.
                 term::control_codes().enable_alt_screen.term_input_into(buf);
-
-                // Switching screens does not clear the scroll region or
-                // origin mode the scrollback restore just set, and neither
-                // is per-screen in a real terminal, so we have to clear them
-                // ourselves. This has to happen before the contents get
-                // painted, since it is the paint that a stranded scroll
-                // region corrupts.
-                let homed = self.scrollback.dump_global_state_reset_into(buf);
-
-                // Switching screens doesn't move the cursor either, but the
-                // alt screen gets painted from the top left corner down.
-                if !homed && !self.scrollback.dump_leaves_cursor_home() {
-                    ControlCodes::cursor_position(1, 1).term_input_into(buf);
-                }
+                self.scrollback.dump_switch_reset_into(buf);
 
                 self.altscreen.dump_contents_into(buf, dump_region)
             }
@@ -686,10 +684,8 @@ impl State {
     /// DECRC. Put back whatever `save_cursor` saved for the active screen.
     fn restore_cursor(&mut self) {
         let screen = self.screen_mut();
-        let SavedCursor { pos, attrs, pending_wrap, charsets, origin_mode } = screen
-            .saved_cursor
-            .clone()
-            .unwrap_or_else(|| SavedCursor::new(term::Pos { row: 0, col: 0 }));
+        let SavedCursor { pos, attrs, pending_wrap, charsets, origin_mode } =
+            screen.saved_cursor_or_home();
         // Unlike DECOM, this does not home the cursor.
         screen.set_origin_mode(origin_mode);
         screen.cursor = pos;
