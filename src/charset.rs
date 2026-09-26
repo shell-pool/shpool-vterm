@@ -187,6 +187,24 @@ impl Charsets {
             _ => {}
         }
     }
+
+    /// Emit the control codes that take a terminal in this charset state
+    /// back to the reset state that `dump_into` starts from.
+    ///
+    /// A single shift cannot be undone, but this is only for states that
+    /// `saved` returned, which never have one pending.
+    pub fn dump_reset_into(&self, buf: &mut Vec<u8>) {
+        for (slot, charset) in self.slots.iter().enumerate() {
+            if *charset != Charset::Ascii {
+                ControlCodes::designate_charset(slot, Charset::Ascii.designator())
+                    .term_input_into(buf);
+            }
+        }
+
+        if self.gl != 0 {
+            buf.push(term::SHIFT_IN);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -292,5 +310,19 @@ mod tests {
         charsets.single_shift(2);
         charsets.dump_into(&mut buf);
         assert_eq!(buf, b"\x1b)0\x1b*A\x1bo\x1bN");
+    }
+
+    #[test]
+    fn dump_reset() {
+        let mut buf = vec![];
+        Charsets::default().dump_reset_into(&mut buf);
+        assert_eq!(buf, b"");
+
+        let mut charsets = Charsets::default();
+        charsets.designate(1, Charset::DecSpecialGraphics);
+        charsets.designate(3, Charset::Uk);
+        charsets.lock_shift(1);
+        charsets.dump_reset_into(&mut buf);
+        assert_eq!(buf, b"\x1b)B\x1b+B\x0f");
     }
 }

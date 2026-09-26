@@ -197,6 +197,12 @@ impl Term {
         controls.disable_paste_mode.term_input_into(&mut buf);
 
         term::ControlCodes::cursor_position(1, 1).term_input_into(&mut buf);
+        // With the attrs, charsets and origin mode all back to their
+        // defaults, saving the cursor here leaves one that restores the same
+        // way as nothing saved at all, which the dump replaces if the app
+        // saved one. Otherwise an app that restores the cursor without
+        // saving it first would get whatever the last session saved.
+        controls.save_cursor.term_input_into(&mut buf);
         controls.clear_screen.term_input_into(&mut buf);
         self.state.dump_contents_into(&mut buf, dump_region);
 

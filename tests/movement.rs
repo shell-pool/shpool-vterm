@@ -241,6 +241,8 @@ frag! {
             term::Raw::from("AC"),
             term::Crlf::default(),
             term::Raw::from("B"),
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().save_cursor,
             term::ControlCodes::cursor_position(1, 3),
             term::control_codes().clear_attrs
 }
@@ -261,6 +263,12 @@ frag! {
             term::control_codes().bold,
             term::Raw::from("─"),
             term::control_codes().reset_font_weight,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().bold,
+            term::ControlCodes::designate_charset(0, b'0'),
+            term::control_codes().save_cursor,
+            term::control_codes().reset_font_weight,
+            term::control_codes().designate_g0_us_ascii,
             term::ControlCodes::cursor_position(1, 2),
             term::control_codes().clear_attrs,
             term::control_codes().bold,
@@ -764,6 +772,8 @@ frag! {
     => ContentRegion::All =>
             reset_codes,
             term::Raw::from("A"),
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().save_cursor,
             term::ControlCodes::cursor_position(1, 2),
             term::control_codes().clear_attrs
 }
@@ -1287,6 +1297,10 @@ frag! {
             reset_codes,
             term::Crlf::default(),
             term::Raw::from("X"),
+            term::control_codes().enable_scroll_region_origin_mode,
+            term::ControlCodes::cursor_position(2, 1),
+            term::control_codes().save_cursor,
+            term::control_codes().disable_scroll_region_origin_mode,
             term::ControlCodes::set_scroll_region(2, 4),
             term::control_codes().enable_scroll_region_origin_mode,
             term::ControlCodes::cursor_position(1, 2),
@@ -1310,6 +1324,8 @@ frag! {
             term::Crlf::default(),
             term::Crlf::default(),
             term::Raw::from(" X"),
+            term::ControlCodes::cursor_position(5, 2),
+            term::control_codes().save_cursor,
             term::ControlCodes::set_scroll_region(2, 3),
             term::ControlCodes::cursor_position(5, 3),
             term::control_codes().clear_attrs
@@ -1331,6 +1347,12 @@ frag! {
             term::Crlf::default(),
             term::Crlf::default(),
             term::Raw::from("X"),
+            // The saved cursor is outside of the scroll region now, so it
+            // has to be restored before the region is.
+            term::control_codes().enable_scroll_region_origin_mode,
+            term::ControlCodes::cursor_position(5, 1),
+            term::control_codes().save_cursor,
+            term::control_codes().disable_scroll_region_origin_mode,
             term::ControlCodes::set_scroll_region(2, 3),
             term::control_codes().enable_scroll_region_origin_mode,
             term::ControlCodes::cursor_position(2, 2),

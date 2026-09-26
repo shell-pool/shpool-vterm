@@ -160,67 +160,108 @@ impl Screen {
         }
     }
 
+    /// Emit the codes that paint the screens and put the cursor back.
+    ///
+    /// The saved cursors get put back too, since an app that saved the
+    /// cursor before a reattach can restore it after.
     pub fn dump_contents_into(&self, buf: &mut Vec<u8>, dump_region: crate::ContentRegion) {
-        let scrollback = Grid::Scrollback(&self.grids.scrollback);
+        // Restore the main screen first so that after the user exits their
+        // curses app, they can still see shell history.
+        self.grids.scrollback.dump_contents_into(buf, self.size, dump_region);
         if self.grids.alt_active {
-            // Restore the main screen first so that after the user exits
-            // their curses app, they can still see shell history.
-            self.grids.scrollback.dump_contents_into(buf, self.size, dump_region);
-
-            // Switching to the alt screen saves the cursor like DECSC does,
-            // and the app switches back with a DECRC, so the cursor has to be
-            // where the main screen has it saved for the switch to save.
-            let saved = SavedCursor::or_home(self.grids.scrollback_saved_cursor.as_ref());
-            self.dump_cursor_into(buf, scrollback, saved.pos, saved.pending_wrap, saved.pos.row);
-
-            // Re-enable alt screen, then dump the contents. This is
-            // not actually super important in practice because basically
-            // every curses app respects SIGWINCH. We may even want to
-            // consider exposing a knob to disable alt-screen dumping
-            // since it might make things less flickery. Not worth doing
-            // for now though.
-            term::control_codes().enable_alt_screen.term_input_into(buf);
-
-            // Switching screens doesn't move the cursor, but the alt screen
-            // gets painted from the top left corner down.
-            if saved.pos != (Pos { row: 0, col: 0 }) || saved.pending_wrap {
-                term::ControlCodes::cursor_position(1, 1).term_input_into(buf);
-            }
+            self.dump_switch_into(buf);
             self.grids.altscreen.dump_contents_into(buf, self.size.width);
-        } else {
-            self.grids.scrollback.dump_contents_into(buf, self.size, dump_region);
         }
 
-        self.scroll_region.term_input_into(buf);
-
-        // Origin mode has to be restored before the cursor, since enabling
-        // it homes the cursor.
-        if matches!(self.origin_mode, OriginMode::ScrollRegion) {
-            term::control_codes().enable_scroll_region_origin_mode.term_input_into(buf);
-        }
-
-        // Rows are relative to the top of the scroll region once origin
-        // mode is on, mirroring `set_cursor`.
-        let row = match (self.origin_mode, &self.scroll_region) {
-            (OriginMode::ScrollRegion, ScrollRegion::Window { top, .. }) => {
-                self.cursor.row.saturating_sub(*top)
+        // `Term::contents` leaves the terminal with the cursor saved at home
+        // and everything else at its default, which restores just like an
+        // empty slot, so there is only something to do if the app saved a
+        // different one.
+        match self.saved_cursor() {
+            Some(saved) if *saved != SavedCursor::new(Pos { row: 0, col: 0 }) => {
+                self.dump_saved_cursor_into(buf, self.grids.active(), saved);
+                term::control_codes().save_cursor.term_input_into(buf);
+                saved.dump_reset_into(buf);
             }
-            _ => self.cursor.row,
-        };
+            _ => {}
+        }
 
-        self.dump_cursor_into(buf, self.grids.active(), self.cursor, self.pending_wrap, row);
+        // The scroll region comes after the saved cursor, which might be
+        // outside of it.
+        self.scroll_region.term_input_into(buf);
+        let (top, _) = self.scroll_region.as_region(&self.size).row_bounds();
+        let grid = self.grids.active();
+        self.dump_cursor_into(buf, grid, self.origin_mode, top, self.cursor, self.pending_wrap);
     }
 
-    /// Put the cursor at `pos` on `grid`, waiting to wrap if `pending_wrap`
-    /// is set. `row` is the row the terminal addresses `pos` as.
+    /// Emit the codes that switch from the main screen to the alt screen,
+    /// leaving the cursor in the top left corner to paint it from.
+    fn dump_switch_into(&self, buf: &mut Vec<u8>) {
+        // Like DECSC, the switch saves the cursor along with its attrs,
+        // charsets and origin mode, which leaving the alt screen puts back,
+        // so all of that has to be the way the main screen has it saved.
+        let saved = SavedCursor::or_home(self.grids.scrollback_saved_cursor.as_ref());
+        self.dump_saved_cursor_into(buf, Grid::Scrollback(&self.grids.scrollback), &saved);
+
+        // Re-enable alt screen, then dump the contents. This is
+        // not actually super important in practice because basically
+        // every curses app respects SIGWINCH. We may even want to
+        // consider exposing a knob to disable alt-screen dumping
+        // since it might make things less flickery. Not worth doing
+        // for now though.
+        term::control_codes().enable_alt_screen.term_input_into(buf);
+
+        let homed = saved.dump_reset_into(buf);
+        // The switch erased the alt screen with the saved background color,
+        // and painting the alt screen only covers the cells it has stored.
+        if !matches!(saved.dump_attrs().bgcolor, term::Color::Default) {
+            term::control_codes().erase_screen.term_input_into(buf);
+        }
+        // Switching screens doesn't move the cursor, but the alt screen gets
+        // painted from the top left corner down.
+        if !homed && (saved.pos != Pos { row: 0, col: 0 } || saved.pending_wrap) {
+            term::ControlCodes::cursor_position(1, 1).term_input_into(buf);
+        }
+    }
+
+    /// Put the terminal in the state that `saved` describes, so that saving
+    /// the cursor there saves the same thing the app saved. `grid` is the
+    /// grid of the screen that `saved` belongs to.
+    ///
+    /// The terminal must not have a scroll region in place, since a cursor
+    /// saved in origin mode could be outside of it.
+    fn dump_saved_cursor_into(&self, buf: &mut Vec<u8>, grid: Grid<'_>, saved: &SavedCursor) {
+        self.dump_cursor_into(buf, grid, saved.origin_mode, 0, saved.pos, saved.pending_wrap);
+        for code in term::Attrs::default().transition_to(&saved.dump_attrs()) {
+            code.term_input_into(buf);
+        }
+        // Restoring a pending wrap prints a char that has already been
+        // through the charsets, so they have to come last.
+        saved.charsets.dump_into(buf);
+    }
+
+    /// Put the cursor at `pos` on `grid` in the given origin mode, with a
+    /// wrap pending if `pending_wrap` is set. `top` is the top row of the
+    /// scroll region that the terminal has in place.
     fn dump_cursor_into(
         &self,
         buf: &mut Vec<u8>,
         grid: Grid<'_>,
+        origin_mode: OriginMode,
+        top: usize,
         pos: Pos,
         pending_wrap: bool,
-        row: usize,
     ) {
+        // Origin mode has to be restored before the cursor, since enabling
+        // it homes the cursor.
+        let mut row = pos.row;
+        if matches!(origin_mode, OriginMode::ScrollRegion) {
+            term::control_codes().enable_scroll_region_origin_mode.term_input_into(buf);
+            // Rows are relative to the top of the scroll region once origin
+            // mode is on, mirroring `set_cursor`.
+            row = row.saturating_sub(top);
+        }
+
         if pending_wrap {
             self.dump_pending_wrap_into(buf, grid, pos.row, row);
         } else {
@@ -726,6 +767,27 @@ impl SavedCursor {
     /// What restoring the cursor from `slot` restores.
     pub fn or_home(slot: Option<&SavedCursor>) -> SavedCursor {
         slot.cloned().unwrap_or_else(|| SavedCursor::new(Pos { row: 0, col: 0 }))
+    }
+
+    /// The attrs to restore the saved cursor with. Like with the live
+    /// cursor attrs, a link gets left out, since the terminal we restore
+    /// into has no idea that it is in the middle of one.
+    fn dump_attrs(&self) -> term::Attrs {
+        term::Attrs { link_target: None, ..self.attrs.clone() }
+    }
+
+    /// Undo the attrs, charsets and origin mode that restoring this saved
+    /// cursor into a terminal set. Returns whether this homed the cursor.
+    fn dump_reset_into(&self, buf: &mut Vec<u8>) -> bool {
+        for code in self.dump_attrs().transition_to(&term::Attrs::default()) {
+            code.term_input_into(buf);
+        }
+        self.charsets.dump_reset_into(buf);
+        if matches!(self.origin_mode, OriginMode::ScrollRegion) {
+            term::control_codes().disable_scroll_region_origin_mode.term_input_into(buf);
+            return true;
+        }
+        false
     }
 }
 
