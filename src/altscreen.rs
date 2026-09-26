@@ -19,7 +19,7 @@ use std::collections::VecDeque;
 use crate::{
     line::{self, Line},
     log,
-    term::{self, AsTermInput, Pos, ScrollRegion},
+    term::{self, Pos, ScrollRegion},
 };
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -237,15 +237,9 @@ impl std::fmt::Display for AltScreen {
 }
 
 impl AltScreen {
-    /// Emit the codes that paint the alt screen, from the top left corner,
-    /// the way a screen `width` columns wide shows it.
+    /// Emit the codes that paint the alt screen, from the top left corner.
     pub fn dump_contents_into(&self, buf: &mut Vec<u8>, width: usize) {
-        for (i, line) in self.buf.iter().enumerate() {
-            line.shown_at(width).term_input_into(buf);
-            if i != self.buf.len() - 1 {
-                term::Crlf::default().term_input_into(buf);
-            }
-        }
+        line::dump_lines_into(buf, width, self.buf.iter());
     }
 }
 

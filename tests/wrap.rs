@@ -89,7 +89,6 @@ frag! {
     => ContentRegion::All =>
             reset_codes,
             term::Raw::from("abc"),
-            term::Crlf::default(),
             term::control_codes().bold,
             term::Raw::from("d"),
             term::control_codes().reset_font_weight,
@@ -113,9 +112,7 @@ frag! {
             reset_codes,
             term::Raw::from("1"),
             term::Crlf::default(),
-            term::Raw::from("abc"),
-            term::Crlf::default(),
-            term::Raw::from("d"),
+            term::Raw::from("abcd"),
             term::Crlf::default(),
             term::Raw::from("4"),
             term::ControlCodes::set_scroll_region(2, 3),
@@ -149,9 +146,7 @@ frag! {
        term::Raw::from("d")
     => ContentRegion::All =>
             reset_codes,
-            term::Raw::from("abc"),
-            term::Crlf::default(),
-            term::Raw::from("d"),
+            term::Raw::from("abcd"),
             // The saved cursor still has the wrap pending.
             term::ControlCodes::cursor_position(1, 3),
             term::Raw::from("c"),
@@ -323,6 +318,39 @@ frag! {
             term::control_codes().disable_autowrap
 }
 
+// A line that wrapped gets painted up to the last column and left to wrap
+// onto the next one again, so the terminal we restore into knows that they
+// are one line.
+frag! {
+    wrapped_lines_stay_joined { scrollback_lines: 100, width: 3, height: 3 }
+    <= term::Raw::from("abcdefg"), term::Crlf::default(),
+       term::Raw::from("hij")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("abcdefg"),
+            term::Crlf::default(),
+            term::Raw::from("hij"),
+            term::ControlCodes::cursor_position(3, 3),
+            term::Raw::from("j"),
+            term::control_codes().clear_attrs
+}
+
+// Painting a line that wrapped only wraps onto the next one if it reaches
+// the last column, which it does not once the end of it has been erased.
+frag! {
+    wrapped_line_that_got_its_end_erased { scrollback_lines: 100, width: 3, height: 3 }
+    <= term::Raw::from("abcd"),
+       term::ControlCodes::cursor_position(1, 3),
+       term::ControlCodes::erase_character(1)
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("ab"),
+            term::Crlf::default(),
+            term::Raw::from("d"),
+            term::ControlCodes::cursor_position(1, 3),
+            term::control_codes().clear_attrs
+}
+
 frag! {
     autowrap_turned_back_on { scrollback_lines: 100, width: 3, height: 3 }
     <= term::control_codes().disable_autowrap,
@@ -330,9 +358,7 @@ frag! {
        term::Raw::from("abcd")
     => ContentRegion::All =>
             reset_codes,
-            term::Raw::from("abc"),
-            term::Crlf::default(),
-            term::Raw::from("d"),
+            term::Raw::from("abcd"),
             term::ControlCodes::cursor_position(2, 2),
             term::control_codes().clear_attrs
 }
@@ -344,9 +370,7 @@ frag! {
        term::Raw::from("abcd")
     => ContentRegion::All =>
             reset_codes,
-            term::Raw::from("abc"),
-            term::Crlf::default(),
-            term::Raw::from("d"),
+            term::Raw::from("abcd"),
             term::ControlCodes::cursor_position(2, 2),
             term::control_codes().clear_attrs
 }

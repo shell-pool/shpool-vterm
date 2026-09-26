@@ -351,7 +351,10 @@ frag! {
             term::ControlCodes::bgcolor_idx(4),
             term::Raw::from("abcde"),
             term::control_codes().bgcolor_default,
-            term::Crlf::default(),
+            // The f that wraps onto the next row gets printed without its
+            // background color first, so that the scroll it might cause
+            // only paints the blanks that the row really has.
+            term::Raw::from("f\r"),
             term::ControlCodes::bgcolor_idx(4),
             term::Raw::from("f    "),
             term::control_codes().bgcolor_default,

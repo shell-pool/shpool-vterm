@@ -257,12 +257,8 @@ impl Scrollback {
             term::ControlCodes::cursor_position((first_row + 1) as u16, 1).term_input_into(buf);
         }
 
-        for (i, line) in self.buf.iter().skip(blank_rows).take(nlines).enumerate().rev() {
-            line.shown_at(size.width).term_input_into(buf);
-            if i != 0 {
-                term::Crlf::default().term_input_into(buf);
-            }
-        }
+        let lines = self.buf.iter().skip(blank_rows).take(nlines).rev();
+        line::dump_lines_into(buf, size.width, lines);
     }
 
     /// Re-chop the buffer into grid lines of `new_width`, moving each of
