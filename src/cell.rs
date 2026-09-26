@@ -141,6 +141,26 @@ impl Cell {
     pub fn attrs(&self) -> &term::Attrs {
         &self.attrs
     }
+
+    /// True for a cell that looks just like one nothing has been written to:
+    /// a blank without any attrs that would show up on a blank.
+    pub fn looks_unused(&self) -> bool {
+        self.is_erased() && matches!(self.attrs.bgcolor, term::Color::Default)
+    }
+
+    /// True for a cell that looks like erasing left it behind: a blank
+    /// without any attrs that would show up on a blank, other than a
+    /// background color.
+    pub fn is_erased(&self) -> bool {
+        let attrs = &self.attrs;
+        self.is_empty()
+            && !self.is_wide_padding()
+            && !attrs.inverse
+            && attrs.underline.is_none()
+            && !attrs.strikethrough
+            && !attrs.overline
+            && attrs.framed.is_none()
+    }
 }
 
 impl AsTermInput for Cell {
