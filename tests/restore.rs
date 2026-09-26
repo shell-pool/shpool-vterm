@@ -165,3 +165,47 @@ fn lots_of_palette_colors() {
     }
     assert_restores(Size { width: 10, height: 3 }, &setup, b"");
 }
+
+// tmux scrolls the left one of two panes that sit side by side by putting
+// the left/right margins around it, and later scrolls both of them at once.
+#[test]
+fn left_right_margins() {
+    let mut setup = b"\x1b[?1049h".to_vec();
+    setup.extend_from_slice(b"aaaabbbb\r\naaaabbbb\r\naaaabbbb\r\naaaabbbb");
+    setup.extend_from_slice(b"\x1b[2;4r\x1b[?69h\x1b[1;4s\x1b[4;1H");
+    assert_restores(Size { width: 8, height: 4 }, &setup, b"\nx\x1b[2;1H\x1b[My\x1b[s\x1b[4;1H\n");
+}
+
+// Text that reaches the right margin wraps once the next char comes along.
+#[test]
+fn pending_wrap_at_the_right_margin() {
+    assert_restores(Size { width: 6, height: 3 }, b"\x1b[?69h\x1b[2;4s\x1b[1;2Habc", b"d");
+}
+
+// In origin mode, the cursor is relative to both the scroll region and the
+// left/right margins.
+#[test]
+fn origin_mode_with_left_right_margins() {
+    assert_restores(
+        Size { width: 8, height: 4 },
+        b"\x1b[2;3r\x1b[?69h\x1b[3;6s\x1b[?6h\x1b[2;2H",
+        b"x\x1b[1;1Hy",
+    );
+}
+
+// Both screens share the left/right margins.
+#[test]
+fn left_right_margins_set_on_the_alt_screen() {
+    assert_restores(
+        Size { width: 6, height: 3 },
+        b"\x1b[?1049h\x1b[?69h\x1b[2;4s",
+        b"\x1b[?1049l\x1b[1;2Habcd",
+    );
+}
+
+// Margins that the terminal had before the restore would keep the restore
+// from painting all of the screen.
+#[test]
+fn leftover_left_right_margins() {
+    assert_restores_into(b"\x1b[?69h\x1b[2;4s", Size { width: 6, height: 3 }, b"abcdefgh", b"ij");
+}

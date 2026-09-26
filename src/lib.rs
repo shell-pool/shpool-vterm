@@ -167,9 +167,12 @@ impl Term {
         controls.clear_attrs.term_input_into(&mut buf);
 
         // A leftover scroll region or origin mode would scroll the
-        // contents we are about to paint. Clear them before homing the
-        // cursor, since origin mode moves where home is.
+        // contents we are about to paint, and leftover margins would squeeze
+        // them in between. Turning left/right margin mode off drops the
+        // margins. Clear all of these before homing the cursor, since origin
+        // mode moves where home is.
         controls.unset_scroll_region.term_input_into(&mut buf);
+        controls.disable_left_right_margin_mode.term_input_into(&mut buf);
         controls.disable_scroll_region_origin_mode.term_input_into(&mut buf);
 
         // Insert mode would shove the contents we paint to the right,
@@ -746,6 +749,7 @@ impl State {
         // Unlike DECSTBM and DECOM, this does not home the cursor.
         let screen = self.screen_mut();
         screen.set_scroll_region(term::ScrollRegion::TrackSize);
+        screen.set_left_right_margin_mode(false);
         screen.set_origin_mode(OriginMode::Term);
         screen.saved_cursor = None;
     }
@@ -791,10 +795,11 @@ impl State {
             }
         }
 
-        // A tab stops at the last column. If the cursor is already there it
+        // A tab stops at the last column, or in front of the right margin
+        // if the cursor is not past it yet. If the cursor is already there it
         // does not move at all, and a pending wrap stays pending.
         let screen = self.screen_mut();
-        let col = std::cmp::min(col, screen.size.width.saturating_sub(1));
+        let col = std::cmp::min(col, screen.line_end().saturating_sub(1));
         if col != screen.cursor.col {
             screen.cursor.col = col;
             screen.clamp();
@@ -893,17 +898,11 @@ impl vte::Perform for State {
                 let fill = Cell::blank(&self.cursor_attrs);
                 self.screen_mut().linefeed(&fill);
             }
-            b'\r' => {
-                let screen = self.screen_mut();
-                screen.cursor.col = 0;
-                screen.pending_wrap = false;
-            }
+            b'\r' => self.screen_mut().carriage_return(),
             b'\t' => self.tab_forward(1),
             b'\x08' => {
                 // backspace
-                let screen = self.screen_mut();
-                screen.cursor.col = screen.cursor.col.saturating_sub(1);
-                screen.pending_wrap = false;
+                self.screen_mut().cursor_back(1);
             }
             // bell, ignore
             b'\x07' => {}
@@ -1111,39 +1110,33 @@ impl vte::Perform for State {
             // HPR (Horizontal Position Relative, CSI n a)
             'C' | 'a' if plain => {
                 let n = param_or(&mut params_iter, 1) as usize;
-                let screen = self.screen_mut();
-                screen.cursor.col += n;
-                screen.clamp();
+                self.screen_mut().cursor_forward(n);
             }
             // CUF (Cursor Backwards)
             'D' if plain => {
                 let n = param_or(&mut params_iter, 1) as usize;
-                let screen = self.screen_mut();
-                screen.cursor.col = screen.cursor.col.saturating_sub(n);
-                screen.clamp();
+                self.screen_mut().cursor_back(n);
             }
             // CNL (Cursor Next Line)
             'E' if plain => {
                 let n = param_or(&mut params_iter, 1) as usize;
                 let screen = self.screen_mut();
                 screen.cursor_down(n);
-                screen.cursor.col = 0;
+                screen.carriage_return();
             }
             // CPL (Cursor Prev Line)
             'F' if plain => {
                 let n = param_or(&mut params_iter, 1) as usize;
                 let screen = self.screen_mut();
                 screen.cursor_up(n);
-                screen.cursor.col = 0;
+                screen.carriage_return();
             }
             // HPA (Horizontal Position Absolute, CSI n `)
             // CHA (Cursor Horizontal Absolute, CSI n G)
             '`' | 'G' if plain => {
                 let n = param_or(&mut params_iter, 1) as usize;
-                let n = n.saturating_sub(1); // translate to 0 indexing
-
                 let screen = self.screen_mut();
-                screen.cursor.col = n;
+                screen.set_cursor_col(n);
                 screen.clamp();
             }
             // HVP (Horizontal and Vertical Position)
@@ -1274,28 +1267,14 @@ impl vte::Perform for State {
             // ICH (Insert Character)
             '@' if plain => {
                 let n = param_or(&mut params_iter, 1) as usize;
-
                 let fill = Cell::blank(&self.cursor_attrs);
-                let screen = self.screen_mut();
-                screen.pending_wrap = false;
-                let width = screen.size.width;
-                let col = screen.cursor.col;
-                if let Some(l) = screen.line_to_erase(&fill) {
-                    l.insert_character(width, col, n, &fill);
-                }
+                self.screen_mut().insert_chars(n, &fill);
             }
             // DCH (Delete Character)
             'P' if plain => {
                 let n = param_or(&mut params_iter, 1) as usize;
-
                 let fill = Cell::blank(&self.cursor_attrs);
-                let screen = self.screen_mut();
-                screen.pending_wrap = false;
-                let width = screen.size.width;
-                let col = screen.cursor.col;
-                if let Some(l) = screen.line_to_erase(&fill) {
-                    l.delete_character(width, col, &fill, n);
-                }
+                self.screen_mut().delete_chars(n, &fill);
             }
             // ECH (Erase Character)
             'X' if plain => {
@@ -1323,12 +1302,25 @@ impl vte::Perform for State {
             // VPA (Vertical Line Position Absolute)
             'd' if plain => {
                 let row = param_or(&mut params_iter, 1) as usize;
-                let col = self.screen().cursor.col + 1;
                 let screen = self.screen_mut();
-                screen.set_cursor(term::Pos { row, col });
+                screen.set_cursor_row(row);
                 screen.clamp();
             }
 
+            // DECSLRM (Set Left and Right Margins). While left/right margin
+            // mode is on, this takes `CSI s` over from SCOSC. tmux sends it
+            // without any params to drop the margins it set.
+            's' if plain && self.screen().left_right_margin_mode() => {
+                let width = self.screen().size.width;
+                // Like in xterm, a right margin that is missing or off the
+                // screen means the last column.
+                let left = param_or(&mut params_iter, 1) as usize;
+                let right = match maybe_param(&mut params_iter) {
+                    Some(r) if (r as usize) <= width => r as usize,
+                    _ => width,
+                };
+                self.screen_mut().set_left_right_margins(left.saturating_sub(1), right);
+            }
             // SCOSC (Save Cursor, CSI s). Like in xterm, this saves the same
             // state as DECSC, not just the position.
             's' if plain => self.save_cursor(),
@@ -1416,6 +1408,9 @@ impl vte::Perform for State {
                         [7] => self.autowrap = true,
                         [12] => self.cursor_blinking = Some(true),
                         [25] => self.cursor_hidden = false,
+                        // DECLRMM (Left Right Margin Mode), which lets
+                        // DECSLRM set margins.
+                        [69] => self.screen_mut().set_left_right_margin_mode(true),
                         [1004] => self.report_focus = true,
                         // Switch to the alt screen as it was left. These are
                         // older than 1049, and some terminfo entries still
@@ -1484,6 +1479,7 @@ impl vte::Perform for State {
                         [7] => self.autowrap = false,
                         [12] => self.cursor_blinking = Some(false),
                         [25] => self.cursor_hidden = true,
+                        [69] => self.screen_mut().set_left_right_margin_mode(false),
                         [1004] => self.report_focus = false,
                         [47] => self.exit_alt_screen(false),
                         // Erase the alt screen on the way out.
@@ -1725,12 +1721,14 @@ impl vte::Perform for State {
                 let fill = Cell::blank(&self.cursor_attrs);
                 self.screen_mut().linefeed(&fill);
             }
-            // NEL (Next Line) is CR LF in one.
+            // NEL (Next Line) is CR LF in one. Like in xterm, the LF goes
+            // first, so it is the column the cursor starts out in that
+            // decides whether it scrolls between the margins.
             ([], b'E') => {
                 let fill = Cell::blank(&self.cursor_attrs);
                 let screen = self.screen_mut();
-                screen.cursor.col = 0;
                 screen.linefeed(&fill);
+                screen.carriage_return();
             }
             // HTS (Horizontal Tabluation Set, ESC H)
             ([], b'H') => {
@@ -1746,7 +1744,10 @@ impl vte::Perform for State {
                     screen.scroll_region(false).as_region(&screen.size).row_bounds();
 
                 if screen.cursor.row == scroll_top {
-                    screen.scroll_down(1, &fill);
+                    // Outside of the margins, the cursor just stays put.
+                    if screen.cursor_between_margins() {
+                        screen.scroll_down(1, &fill);
+                    }
                 } else if screen.cursor.row > 0 {
                     screen.cursor.row -= 1;
                 }

@@ -22,7 +22,7 @@ use crate::{
     line::Line,
     log,
     scrollback::Scrollback,
-    term::{self, AsTermInput, OriginMode, Pos, Region, ScrollRegion},
+    term::{self, AsTermInput, LeftRightMargins, OriginMode, Pos, Region, ScrollRegion},
 };
 
 use anyhow::{anyhow, Context};
@@ -53,6 +53,10 @@ pub struct Screen {
     // and ESC 7 / ESC 8 commands. It stays empty until something gets
     // saved.
     pub saved_cursor: Option<SavedCursor>,
+    // Left/right margin mode (DECLRMM) and the margins (DECSLRM) it lets an
+    // app put in place. Like the scroll region, a real terminal shares these
+    // between its screens (see `take_shared_state`).
+    left_right_margins: LeftRightMargins,
     logger: log::Context,
 }
 
@@ -69,6 +73,7 @@ impl Screen {
             cursor: Pos { row: 0, col: 0 },
             pending_wrap: false,
             saved_cursor: None,
+            left_right_margins: LeftRightMargins::Off,
             logger: log::Context::None,
         }
     }
@@ -81,6 +86,7 @@ impl Screen {
             cursor: Pos { row: 0, col: 0 },
             pending_wrap: false,
             saved_cursor: None,
+            left_right_margins: LeftRightMargins::Off,
             logger: log::Context::None,
         }
     }
@@ -131,38 +137,108 @@ impl Screen {
         }
     }
 
+    /// DECLRMM. Turning left/right margin mode off drops the margins too,
+    /// like in xterm.
+    pub fn set_left_right_margin_mode(&mut self, on: bool) {
+        self.left_right_margins = match (on, self.left_right_margins) {
+            (false, _) => LeftRightMargins::Off,
+            (true, LeftRightMargins::Off) => LeftRightMargins::Full,
+            (true, margins) => margins,
+        };
+    }
+
+    /// Whether left/right margin mode is on, which turns `CSI s` into
+    /// DECSLRM.
+    pub fn left_right_margin_mode(&self) -> bool {
+        !matches!(self.left_right_margins, LeftRightMargins::Off)
+    }
+
+    /// DECSLRM. Put the margins around the columns from `left` up to, but
+    /// not including, `right`. Like DECSTBM, this homes the cursor.
+    ///
+    /// This only works while left/right margin mode is on, and like in
+    /// xterm, margins that are less than two columns apart get ignored.
+    pub fn set_left_right_margins(&mut self, left: usize, right: usize) {
+        if !self.left_right_margin_mode() || right > self.size.width || left + 2 > right {
+            return;
+        }
+        self.left_right_margins = if left == 0 && right == self.size.width {
+            LeftRightMargins::Full
+        } else {
+            LeftRightMargins::Window { left, right }
+        };
+        self.set_cursor(Pos { row: 1, col: 1 });
+        self.clamp();
+    }
+
+    /// The margins, as the first column between them and the column just
+    /// past the last one, if there are any in place.
+    pub fn margins(&self) -> Option<(usize, usize)> {
+        match self.left_right_margins {
+            LeftRightMargins::Window { left, right } => Some((left, right)),
+            _ => None,
+        }
+    }
+
+    /// Whether the cursor is between the margins, which it always is when
+    /// there are none.
+    pub fn cursor_between_margins(&self) -> bool {
+        self.margins()
+            .map_or(true, |(left, right)| left <= self.cursor.col && self.cursor.col < right)
+    }
+
+    /// The column just past the last one that printing at the cursor can
+    /// reach before it has to wrap. That is the right margin, unless the
+    /// cursor is already past it, in which case it is the edge of the screen.
+    pub fn line_end(&self) -> usize {
+        match self.margins() {
+            Some((_, right)) if self.cursor.col < right => right,
+            _ => self.size.width,
+        }
+    }
+
     /// Carry over the state that a real terminal shares between its screens
     /// from `other`, the screen that is being switched away from.
     ///
-    /// We keep a cursor, scroll region and origin mode for each screen, but
-    /// a real terminal only has one of each, and switching screens leaves
-    /// them as they were.
+    /// We keep a cursor, scroll region, margins and origin mode for each
+    /// screen, but a real terminal only has one of each, and switching
+    /// screens leaves them as they were.
     pub fn take_shared_state(&mut self, other: &Screen) {
         self.cursor = other.cursor;
         self.pending_wrap = other.pending_wrap;
         self.store_scroll_region(other.grid.scroll_region().clone());
+        self.left_right_margins = other.left_right_margins;
         self.set_origin_mode(other.grid.origin_mode());
     }
 
     /// Given a 1-indexed position as the user would directly provide in
     /// a CUP command, update the cursor position, taking the current origin
-    /// mode and scroll region into account.
+    /// mode, scroll region and margins into account.
     pub fn set_cursor(&mut self, pos: Pos) {
+        self.set_cursor_row(pos.row);
+        self.set_cursor_col(pos.col);
+    }
+
+    /// `set_cursor` for just the row, which is what VPA sets.
+    pub fn set_cursor_row(&mut self, row: usize) {
+        self.cursor.row = row.saturating_sub(1) + self.origin().row;
+    }
+
+    /// `set_cursor` for just the column, which is what CHA and HPA set.
+    pub fn set_cursor_col(&mut self, col: usize) {
+        self.cursor.col = col.saturating_sub(1) + self.origin().col;
+    }
+
+    /// The top left corner of the part of the screen that cursor
+    /// positioning is relative to. In origin mode that is the corner of the
+    /// scroll region and the margins, and otherwise the corner of the screen.
+    fn origin(&self) -> Pos {
         match self.grid.origin_mode() {
-            OriginMode::Term => {
-                self.cursor.row = pos.row.saturating_sub(1);
-                self.cursor.col = pos.col.saturating_sub(1);
+            OriginMode::Term => Pos { row: 0, col: 0 },
+            OriginMode::ScrollRegion => {
+                let (top, _) = self.grid.scroll_region().as_region(&self.size).row_bounds();
+                Pos { row: top, col: self.margins().map_or(0, |(left, _)| left) }
             }
-            OriginMode::ScrollRegion => match self.grid.scroll_region() {
-                ScrollRegion::TrackSize => {
-                    self.cursor.row = pos.row.saturating_sub(1);
-                    self.cursor.col = pos.col.saturating_sub(1);
-                }
-                ScrollRegion::Window { top, .. } => {
-                    self.cursor.row = pos.row.saturating_sub(1) + top;
-                    self.cursor.col = pos.col.saturating_sub(1);
-                }
-            },
         }
     }
 
@@ -186,12 +262,20 @@ impl Screen {
             _ => {}
         }
 
-        // The scroll region comes after the saved cursor, which might be
-        // outside of it.
+        // The scroll region and the margins come after the saved cursor,
+        // which might be outside of them.
         let scroll_region = self.grid.scroll_region();
         scroll_region.term_input_into(buf);
+        self.left_right_margins.term_input_into(buf);
         let (top, _) = scroll_region.as_region(&self.size).row_bounds();
-        self.dump_cursor_into(buf, self.grid.origin_mode(), top, self.cursor, self.pending_wrap);
+        self.dump_cursor_into(
+            buf,
+            self.grid.origin_mode(),
+            top,
+            self.margins(),
+            self.cursor,
+            self.pending_wrap,
+        );
     }
 
     /// Emit the codes that paint this screen and leave the cursor the way
@@ -237,57 +321,71 @@ impl Screen {
     }
 
     /// Put the cursor at `pos` in the given origin mode, with a wrap pending
-    /// if `pending_wrap` is set. `top` is the top row of the scroll region
-    /// that the terminal has in place.
+    /// if `pending_wrap` is set. `top` is the top row of the scroll region,
+    /// and `margins` are the margins, that the terminal has in place.
     fn dump_cursor_into(
         &self,
         buf: &mut Vec<u8>,
         origin_mode: OriginMode,
         top: usize,
+        margins: Option<(usize, usize)>,
         pos: Pos,
         pending_wrap: bool,
     ) {
+        let (left, right) = margins.unwrap_or((0, self.size.width));
         // Origin mode has to be restored before the cursor, since enabling
         // it homes the cursor.
-        let mut row = pos.row;
+        let mut addressed = pos;
         if matches!(origin_mode, OriginMode::ScrollRegion) {
             term::control_codes().enable_scroll_region_origin_mode.term_input_into(buf);
-            // Rows are relative to the top of the scroll region once origin
-            // mode is on, mirroring `set_cursor`.
-            row = row.saturating_sub(top);
+            // Positions are relative to the top left corner of the scroll
+            // region and the margins once origin mode is on, mirroring
+            // `set_cursor`.
+            addressed.row = pos.row.saturating_sub(top);
+            addressed.col = pos.col.saturating_sub(left);
         }
 
-        if pending_wrap {
-            self.dump_pending_wrap_into(buf, pos.row, row);
+        // Printing only gets the terminal to wait for a wrap at the end of
+        // the line, which is the right margin, unless the cursor is past it
+        // (see `line_end`). A wrap can be pending anywhere else once the
+        // margins are gone, but there is no way to get a terminal there.
+        let (start, end) = if pos.col < right { (0, right) } else { (right, self.size.width) };
+        if pending_wrap && pos.col + 1 == end {
+            self.dump_pending_wrap_into(buf, pos, addressed, start);
         } else {
-            term::ControlCodes::cursor_position((row + 1) as u16, (pos.col + 1) as u16)
-                .term_input_into(buf);
+            term::ControlCodes::cursor_position(
+                (addressed.row + 1) as u16,
+                (addressed.col + 1) as u16,
+            )
+            .term_input_into(buf);
         }
     }
 
-    /// Leave the cursor on the last column with a wrap pending.
+    /// Leave the cursor at `pos`, which is at the end of the line, with a
+    /// wrap pending.
     ///
     /// There is no control code that sets the pending wrap flag, so we get
     /// the terminal into that state the same way the application did, by
     /// printing the char that sits at the end of the line. It is already on
     /// the screen, so printing it again over itself changes nothing else.
-    /// `row` is the screen row the cursor is on, and `addressed_row` is how
-    /// cursor positioning addresses that row.
-    fn dump_pending_wrap_into(&self, buf: &mut Vec<u8>, row: usize, addressed_row: usize) {
+    /// `addressed` is how cursor positioning addresses `pos`, and `start` is
+    /// the first column of the stretch of the line that `pos` ends.
+    fn dump_pending_wrap_into(&self, buf: &mut Vec<u8>, pos: Pos, addressed: Pos, start: usize) {
         let width = self.size.width;
-        let line = self.grid.get_line(self.size, row);
+        let line = self.grid.get_line(self.size, pos.row);
         let cell_at = |col: usize| line.and_then(|l| l.get_cell(width, col));
+        let end = pos.col + 1;
 
         // The last column might be the padding half of a wide char, in which
         // case the char to print starts one column further left.
-        let mut col = width.saturating_sub(1);
+        let mut col = pos.col;
         while col > 0 && cell_at(col).is_some_and(|c| c.is_wide_padding()) {
             col -= 1;
         }
         let cell = match cell_at(col) {
             Some(cell)
                 if !cell.is_wide_padding()
-                    && col + std::cmp::max(cell.width() as usize, 1) == width =>
+                    && col + std::cmp::max(cell.width() as usize, 1) == end =>
             {
                 cell.clone()
             }
@@ -295,14 +393,27 @@ impl Screen {
             // happens when a wide char has been partly overwritten. A blank
             // looks the same.
             _ => {
-                col = width.saturating_sub(1);
+                col = pos.col;
                 Cell::empty()
             }
         };
+        // Printing a wide char that straddles the right margin would wrap it
+        // onto the next line, and printing a blank over its right half would
+        // wipe it out, so there is no restoring the wrap.
+        if col < start {
+            term::ControlCodes::cursor_position(
+                (addressed.row + 1) as u16,
+                (addressed.col + 1) as u16,
+            )
+            .term_input_into(buf);
+            return;
+        }
         // Neither do the attrs of a blank that don't show up on a blank.
         let cell = if cell.looks_unused() { Cell::empty() } else { cell };
 
-        term::ControlCodes::cursor_position((addressed_row + 1) as u16, (col + 1) as u16)
+        // The char starts `pos.col - col` columns left of the cursor.
+        let addressed_col = addressed.col.saturating_sub(pos.col - col);
+        term::ControlCodes::cursor_position((addressed.row + 1) as u16, (addressed_col + 1) as u16)
             .term_input_into(buf);
         let blank_attrs = term::Attrs::default();
         for code in blank_attrs.transition_to(cell.attrs()) {
@@ -317,10 +428,10 @@ impl Screen {
     /// Put the terminal in the state that `saved` describes, so that saving
     /// the cursor there saves the same thing the app saved.
     ///
-    /// The terminal must not have a scroll region in place, since a cursor
-    /// saved in origin mode could be outside of it.
+    /// The terminal must not have a scroll region or margins in place, since
+    /// a cursor saved in origin mode could be outside of them.
     fn dump_saved_cursor_into(&self, buf: &mut Vec<u8>, saved: &SavedCursor) {
-        self.dump_cursor_into(buf, saved.origin_mode, 0, saved.pos, saved.pending_wrap);
+        self.dump_cursor_into(buf, saved.origin_mode, 0, None, saved.pos, saved.pending_wrap);
         for code in term::Attrs::default().transition_to(&saved.dump_attrs()) {
             code.term_input_into(buf);
         }
@@ -383,6 +494,11 @@ impl Screen {
         // it covered have moved or might not even be there anymore, and apps
         // set up a new one when they redraw for the new size.
         self.store_scroll_region(ScrollRegion::TrackSize);
+        // The same goes for the margins, but like in xterm, left/right margin
+        // mode stays on.
+        if self.left_right_margin_mode() {
+            self.left_right_margins = LeftRightMargins::Full;
+        }
 
         (self.cursor, self.pending_wrap) = settle_cursor(cursor, pending_wrap, self.size);
         if let Some(saved) = &mut self.saved_cursor {
@@ -409,6 +525,37 @@ impl Screen {
         self.clamp();
     }
 
+    /// Move the cursor right `n` columns. It stops at the right margin,
+    /// unless it started out past it. This implements CUF.
+    pub fn cursor_forward(&mut self, n: usize) {
+        let end = self.line_end();
+        self.cursor.col = std::cmp::min(self.cursor.col.saturating_add(n), end.saturating_sub(1));
+        self.clamp();
+    }
+
+    /// Move the cursor left `n` columns. It stops at the left margin,
+    /// unless it started out left of it. This implements CUB and BS.
+    pub fn cursor_back(&mut self, n: usize) {
+        let min = match self.margins() {
+            Some((left, _)) if self.cursor.col >= left => left,
+            _ => 0,
+        };
+        self.cursor.col = std::cmp::max(self.cursor.col.saturating_sub(n), min);
+        self.clamp();
+    }
+
+    /// Move the cursor to the left margin, or to the start of the line if it
+    /// is left of the margin, which origin mode does not let it be. This
+    /// implements CR.
+    pub fn carriage_return(&mut self) {
+        self.pending_wrap = false;
+        let origin_mode = matches!(self.grid.origin_mode(), OriginMode::ScrollRegion);
+        self.cursor.col = match self.margins() {
+            Some((left, _)) if self.cursor.col >= left || origin_mode => left,
+            _ => 0,
+        };
+    }
+
     /// Bring the cursor back within the region it may occupy after it has
     /// been explicitly moved.
     ///
@@ -423,6 +570,12 @@ impl Screen {
             Grid::AltScreen(altscreen) => {
                 altscreen.clamp_to_scroll_region(&mut self.cursor, &self.size)
             }
+        }
+        // In origin mode, the cursor cannot leave the margins either.
+        if let (OriginMode::ScrollRegion, Some((left, right))) =
+            (self.grid.origin_mode(), self.margins())
+        {
+            self.cursor.col = self.cursor.col.clamp(left, right - 1);
         }
     }
 
@@ -468,28 +621,37 @@ impl Screen {
         // A wide char never gets split across lines. If it does not fit, it
         // goes on the next line and the columns it did not use stay blank.
         // Without autowrap it gets squeezed in at the end of this one.
-        if self.cursor.col + cell_width > width {
+        //
+        // With margins in place, the line ends at the right margin, unless
+        // the cursor is already past it.
+        let mut end = self.line_end();
+        if self.cursor.col + cell_width > end {
             if autowrap {
                 self.wrap(&fill);
+                end = self.line_end();
             } else {
-                self.cursor.col = width - cell_width;
+                self.cursor.col = end.saturating_sub(cell_width);
             }
         }
 
         let col = self.cursor.col;
+        // Insert mode only shifts the cells up to the right margin, and it
+        // does nothing at all outside of the margins.
+        let insert_mode = insert_mode && self.cursor_between_margins();
+        let right = self.margins().map_or(width, |(_, right)| right);
         let Some(line) = self.grid.materialize_line(self.size, self.cursor.row) else {
             return Err(anyhow!("no line for cursor row {}", self.cursor.row));
         };
         if insert_mode {
             // The blanks this opens up get written over right away.
-            line.insert_character(width, col, cell_width, &Cell::empty());
+            line.insert_character_in(width, col, right, cell_width, &Cell::empty());
         }
         line.write_cell(width, col, cell).context("writing cell")?;
 
-        if col + cell_width < width {
+        if col + cell_width < end {
             self.cursor.col = col + cell_width;
         } else {
-            self.cursor.col = width - 1;
+            self.cursor.col = end - 1;
             self.pending_wrap = autowrap;
         }
 
@@ -501,15 +663,20 @@ impl Screen {
         // The line only continues onto the next one if the cursor is really
         // going to get there. Below the scroll region on the last row it has
         // nowhere to go, so the next char just overwrites this line.
+        //
+        // Between margins, only part of the line continues onto the next
+        // one, which is not something a line can keep track of.
         let (_, bottom) = self.grid.scroll_region().as_region(&self.size).row_bounds();
-        if self.cursor.row + 1 == bottom || self.cursor.row + 1 < self.size.height {
+        let continues = self.cursor.row + 1 == bottom || self.cursor.row + 1 < self.size.height;
+        if continues && self.margins().is_none() {
             if let Some(line) = self.grid.materialize_line(self.size, self.cursor.row) {
                 line.is_wrapped = true;
             }
         }
 
         self.linefeed(fill);
-        self.cursor.col = 0;
+        // The next line starts at the left margin, if there is one.
+        self.cursor.col = self.margins().map_or(0, |(left, _)| left);
     }
 
     /// Move the cursor down a row, scrolling the content of the scroll region
@@ -517,7 +684,9 @@ impl Screen {
     /// is also how the cursor gets to the next line when wrapping.
     ///
     /// The cursor can sit outside of the scroll region, in which case it
-    /// just moves down until it reaches the bottom of the screen.
+    /// just moves down until it reaches the bottom of the screen. Outside of
+    /// the margins, it stays on the bottom row of the scroll region rather
+    /// than scrolling it.
     ///
     /// `fill` is the blank that scrolling opens up the new row with, which
     /// is painted with the current background color (see `Cell::blank`).
@@ -525,7 +694,9 @@ impl Screen {
         self.pending_wrap = false;
         let (_, bottom) = self.grid.scroll_region().as_region(&self.size).row_bounds();
         if self.cursor.row + 1 == bottom {
-            self.scroll_up(1, fill);
+            if self.cursor_between_margins() {
+                self.scroll_up(1, fill);
+            }
         } else if self.cursor.row + 1 < self.size.height {
             self.cursor.row += 1;
         }
@@ -576,10 +747,7 @@ impl Screen {
     /// Gets the current line. If the cursor is not currently over an actual
     /// line, this returns nothing.
     pub fn get_line_mut(&mut self) -> Option<&mut Line> {
-        match &mut self.grid {
-            Grid::Scrollback(s) => s.get_line_mut(self.size, self.cursor.row),
-            Grid::AltScreen(alt) => alt.get_line_mut(self.cursor.row),
-        }
+        self.grid.get_line_mut(self.size, self.cursor.row)
     }
 
     /// Gets the current line for an edit that leaves `fill` behind.
@@ -598,7 +766,14 @@ impl Screen {
 
     /// SU (CSI S). Move the content of the scroll region up by `n` rows,
     /// opening rows of `fill` at the bottom. The cursor does not move.
+    ///
+    /// With margins in place, only what is between them moves.
     pub fn scroll_up(&mut self, n: usize, fill: &Cell) {
+        if self.margins().is_some() {
+            let (top, bottom) = self.grid.scroll_region().as_region(&self.size).row_bounds();
+            self.scroll_between_margins(top, bottom, n, true, fill);
+            return;
+        }
         let width = self.size.width;
         match &mut self.grid {
             Grid::Scrollback(s) => s.scroll_up(&self.size, n, fill),
@@ -608,7 +783,14 @@ impl Screen {
 
     /// SD (CSI T). Move the content of the scroll region down by `n` rows,
     /// opening rows of `fill` at the top. The cursor does not move.
+    ///
+    /// With margins in place, only what is between them moves.
     pub fn scroll_down(&mut self, n: usize, fill: &Cell) {
+        if self.margins().is_some() {
+            let (top, bottom) = self.grid.scroll_region().as_region(&self.size).row_bounds();
+            self.scroll_between_margins(top, bottom, n, false, fill);
+            return;
+        }
         let width = self.size.width;
         match &mut self.grid {
             Grid::Scrollback(s) => s.scroll_down(&self.size, n, fill),
@@ -639,11 +821,20 @@ impl Screen {
     /// lines that get pushed out of the current scroll region. The cursor
     /// goes back to the start of the line. Outside of the scroll region,
     /// nothing happens at all.
+    ///
+    /// With margins in place, only what is between them moves and the
+    /// cursor goes to the left margin. Outside of them, nothing happens.
     pub fn insert_lines(&mut self, n: usize, fill: &Cell) {
-        if !self.cursor_in_scroll_region() {
+        if !self.cursor_in_scroll_region() || !self.cursor_between_margins() {
             return;
         }
         self.pending_wrap = false;
+        if let Some((left, _)) = self.margins() {
+            self.cursor.col = left;
+            let (_, bottom) = self.grid.scroll_region().as_region(&self.size).row_bounds();
+            self.scroll_between_margins(self.cursor.row, bottom, n, false, fill);
+            return;
+        }
         self.cursor.col = 0;
         let width = self.size.width;
         match &mut self.grid {
@@ -659,16 +850,107 @@ impl Screen {
     /// inserted at the bottom of the scroll region. Like with IL, the cursor
     /// goes back to the start of the line, and nothing happens outside of the
     /// scroll region.
+    ///
+    /// With margins in place, it is like IL between them too.
     pub fn delete_lines(&mut self, n: usize, fill: &Cell) {
-        if !self.cursor_in_scroll_region() {
+        if !self.cursor_in_scroll_region() || !self.cursor_between_margins() {
             return;
         }
         self.pending_wrap = false;
+        if let Some((left, _)) = self.margins() {
+            self.cursor.col = left;
+            let (_, bottom) = self.grid.scroll_region().as_region(&self.size).row_bounds();
+            self.scroll_between_margins(self.cursor.row, bottom, n, true, fill);
+            return;
+        }
         self.cursor.col = 0;
         let width = self.size.width;
         match &mut self.grid {
             Grid::Scrollback(s) => s.delete_lines(&self.cursor, &self.size, n, fill),
             Grid::AltScreen(alt) => alt.delete_lines(width, &self.cursor, n, fill),
+        }
+    }
+
+    /// ICH (CSI @). Insert `n` blanks of `fill` at the cursor, shifting what
+    /// is right of it along towards the right margin, past which it is
+    /// lost. Outside of the margins, nothing happens.
+    pub fn insert_chars(&mut self, n: usize, fill: &Cell) {
+        if !self.cursor_between_margins() {
+            return;
+        }
+        self.pending_wrap = false;
+        let (width, col) = (self.size.width, self.cursor.col);
+        let right = self.margins().map_or(width, |(_, right)| right);
+        if let Some(line) = self.line_to_erase(fill) {
+            line.insert_character_in(width, col, right, n, fill);
+        }
+    }
+
+    /// DCH (CSI P). Delete `n` cells at the cursor, pulling in what is right
+    /// of it up to the right margin, in front of which blanks of `fill` open
+    /// up. Outside of the margins, nothing happens.
+    pub fn delete_chars(&mut self, n: usize, fill: &Cell) {
+        if !self.cursor_between_margins() {
+            return;
+        }
+        self.pending_wrap = false;
+        let (width, col) = (self.size.width, self.cursor.col);
+        let right = self.margins().map_or(width, |(_, right)| right);
+        if let Some(line) = self.line_to_erase(fill) {
+            line.delete_character_in(width, col, right, fill, n);
+        }
+    }
+
+    /// Move what is between the margins on rows `top..bottom` up by `n` rows,
+    /// or down if `up` is not set, opening rows of `fill` at the other end.
+    ///
+    /// What is outside of the margins stays where it is, and nothing goes
+    /// into the scrollback. Wide chars that straddle a margin get blanked
+    /// out, since only one half of them would move.
+    fn scroll_between_margins(
+        &mut self,
+        top: usize,
+        bottom: usize,
+        n: usize,
+        up: bool,
+        fill: &Cell,
+    ) {
+        let Some((left, right)) = self.margins() else {
+            return;
+        };
+        let size = self.size;
+        let bottom = std::cmp::min(bottom, size.height);
+        if top >= bottom || right > size.width {
+            return;
+        }
+        let n = std::cmp::min(n, bottom - top);
+
+        let blank = vec![Cell::empty(); right - left];
+        let mut segments: Vec<Vec<Cell>> = (top..bottom)
+            .map(|row| match self.grid.get_line_mut(size, row) {
+                Some(line) => line.swap_cells(left, blank.clone()),
+                None => blank.clone(),
+            })
+            .collect();
+        let opened = std::iter::repeat(vec![fill.clone(); right - left]).take(n);
+        if up {
+            segments.drain(..n);
+            segments.extend(opened);
+        } else {
+            segments.truncate(segments.len() - n);
+            segments.splice(0..0, opened);
+        }
+
+        for (row, segment) in (top..bottom).zip(segments) {
+            // A row that nothing is stored for is blank already.
+            let line = if segment.iter().all(|cell| cell.looks_unused()) {
+                self.grid.get_line_mut(size, row)
+            } else {
+                self.grid.materialize_line(size, row)
+            };
+            if let Some(line) = line {
+                line.swap_cells(left, segment);
+            }
         }
     }
 }
@@ -825,6 +1107,15 @@ impl Grid {
         match self {
             Grid::Scrollback(s) => s.get_line(size, row),
             Grid::AltScreen(alt) => alt.buf.get(row),
+        }
+    }
+
+    /// The line at the given screen row, if there is one stored, for an
+    /// edit that has nothing to do on a blank row.
+    fn get_line_mut(&mut self, size: crate::Size, row: usize) -> Option<&mut Line> {
+        match self {
+            Grid::Scrollback(s) => s.get_line_mut(size, row),
+            Grid::AltScreen(alt) => alt.get_line_mut(row),
         }
     }
 

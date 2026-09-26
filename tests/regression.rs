@@ -514,6 +514,7 @@ fn dump_prefix_resets_terminal_modes() {
         "\x1b[?1049l",                               // leave the alt screen
         "\x1b[m",                                    // reset attrs
         "\x1b[r",                                    // clear the scroll region
+        "\x1b[?69l",                                 // left/right margins off
         "\x1b[?6l",                                  // origin mode off
         "\x1b[4l",                                   // insert mode off
         "\x1b[?7h",                                  // auto-wrap on

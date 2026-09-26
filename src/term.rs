@@ -141,6 +141,48 @@ impl AsTermInput for ScrollRegion {
 }
 
 test_pub! {
+    /// Left/right margin mode (DECLRMM) and the margins it lets DECSLRM
+    /// set, which keep printing, scrolling and inserting or deleting chars
+    /// and lines between them, the way the scroll region does for rows.
+    #[derive(Debug, Eq, PartialEq, Clone, Copy, Default)]
+    enum LeftRightMargins {
+        /// The mode is off, which keeps the margins at the edges of the
+        /// screen.
+        #[default]
+        Off,
+        /// The mode is on, with the margins at the edges of the screen.
+        Full,
+        /// The mode is on and the margins are set.
+        Window {
+            // The first column between the margins (inclusive, zero
+            // indexed).
+            left: usize,
+            // The end of the columns between the margins (exclusive, zero
+            // indexed), like the bottom of a scroll region window.
+            right: usize,
+        },
+    }
+}
+
+impl AsTermInput for LeftRightMargins {
+    fn term_input_into(&self, buf: &mut Vec<u8>) {
+        match self {
+            LeftRightMargins::Off => {}
+            LeftRightMargins::Full => {
+                control_codes().enable_left_right_margin_mode.term_input_into(buf)
+            }
+            LeftRightMargins::Window { left, right } => {
+                // Without the mode, the terminal would take DECSLRM for
+                // SCOSC and save the cursor instead.
+                control_codes().enable_left_right_margin_mode.term_input_into(buf);
+                ControlCodes::set_left_right_margins((left + 1) as u16, *right as u16)
+                    .term_input_into(buf);
+            }
+        }
+    }
+}
+
+test_pub! {
     /// OriginMode indicates the origin position for the terminal's
     /// coordinate system. OriginMode::Term is the "normal" behavior
     /// for the terminal. (1, 1) refers to the upper leftmost cell in
@@ -148,6 +190,7 @@ test_pub! {
     /// (1, 1) referrs to the upper leftmost cell in the currently
     /// configured scoll region, if there is one, and the upper leftmost
     /// cell in the terminal overall if there is no current scroll region.
+    /// Likewise, columns count from the left margin, if there is one.
     ///
     /// This construct is often referred to as the "DECOM bit."
     #[derive(Debug, Eq, PartialEq, Clone, Default, Copy)]
@@ -156,7 +199,8 @@ test_pub! {
         #[default]
         Term,
         /// (physical_row, physical_col) =
-        ///     (logical_row + (top_margin - 1), logical_col)
+        ///     (logical_row + (top_margin - 1),
+        ///      logical_col + (left_margin - 1))
         ScrollRegion,
     }
 }
@@ -613,6 +657,8 @@ test_pub! {
         pub unset_scroll_region: ControlCode,
         pub enable_scroll_region_origin_mode: ControlCode,
         pub disable_scroll_region_origin_mode: ControlCode,
+        pub enable_left_right_margin_mode: ControlCode,
+        pub disable_left_right_margin_mode: ControlCode,
         pub end_link: ControlCode,
         pub show_cursor: ControlCode,
         pub hide_cursor: ControlCode,
@@ -1147,6 +1193,16 @@ test_pub! {
                 intermediates: smallvec![b'?'],
                 action: 'l',
             },
+            enable_left_right_margin_mode: ControlCode::CSI {
+                params: smallvec![smallvec![69]],
+                intermediates: smallvec![b'?'],
+                action: 'h',
+            },
+            disable_left_right_margin_mode: ControlCode::CSI {
+                params: smallvec![smallvec![69]],
+                intermediates: smallvec![b'?'],
+                action: 'l',
+            },
             end_link: ControlCode::OSC { params: smallvec![smallvec![b'8'], smallvec![], smallvec![]], term: OSCTerm::default() },
             show_cursor: ControlCode::CSI {
                 params: smallvec![smallvec![25]],
@@ -1597,6 +1653,15 @@ impl ControlCodes {
             params: smallvec![smallvec![top], smallvec![bottom]],
             intermediates: smallvec![],
             action: 'r',
+        }
+    }
+
+    /// DECSLRM, which only works while left/right margin mode is on.
+    pub fn set_left_right_margins(left: u16, right: u16) -> ControlCode {
+        ControlCode::CSI {
+            params: smallvec![smallvec![left], smallvec![right]],
+            intermediates: smallvec![],
+            action: 's',
         }
     }
 
