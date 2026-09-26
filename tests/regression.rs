@@ -516,6 +516,7 @@ fn dump_prefix_resets_terminal_modes() {
         controls.disable_alt_screen,
         controls.clear_attrs,
         controls.unset_scroll_region,
+        controls.disable_left_right_margin_mode,
         controls.disable_scroll_region_origin_mode,
         controls.disable_insert_mode,
         controls.enable_autowrap,

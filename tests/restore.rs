@@ -246,3 +246,98 @@ fn lots_of_palette_colors() {
     }
     assert_restores(Size { width: 10, height: 3 }, &setup, b"");
 }
+
+// tmux scrolls the left one of two panes that sit side by side by putting
+// the left/right margins around it, and later scrolls both of them at once.
+#[test]
+fn left_right_margins() {
+    assert_restores(
+        Size { width: 8, height: 4 },
+        &input![
+            term::control_codes().enable_alt_screen,
+            term::Raw::from("aaaabbbb\r\naaaabbbb\r\naaaabbbb\r\naaaabbbb"),
+            term::ControlCodes::set_scroll_region(2, 4),
+            term::control_codes().enable_left_right_margin_mode,
+            term::ControlCodes::set_left_right_margins(1, 4),
+            term::ControlCodes::cursor_position(4, 1),
+        ],
+        &input![
+            term::Raw::from("\nx"),
+            term::ControlCodes::cursor_position(2, 1),
+            term::ControlCodes::delete_lines(1),
+            term::Raw::from("y"),
+            term::control_codes().unset_left_right_margins,
+            term::ControlCodes::cursor_position(4, 1),
+            term::Raw::from("\n"),
+        ],
+    );
+}
+
+// Text that reaches the right margin wraps once the next char comes along.
+#[test]
+fn pending_wrap_at_the_right_margin() {
+    assert_restores(
+        Size { width: 6, height: 3 },
+        &input![
+            term::control_codes().enable_left_right_margin_mode,
+            term::ControlCodes::set_left_right_margins(2, 4),
+            term::ControlCodes::cursor_position(1, 2),
+            term::Raw::from("abc"),
+        ],
+        b"d",
+    );
+}
+
+// In origin mode, the cursor is relative to both the scroll region and the
+// left/right margins.
+#[test]
+fn origin_mode_with_left_right_margins() {
+    assert_restores(
+        Size { width: 8, height: 4 },
+        &input![
+            term::ControlCodes::set_scroll_region(2, 3),
+            term::control_codes().enable_left_right_margin_mode,
+            term::ControlCodes::set_left_right_margins(3, 6),
+            term::control_codes().enable_scroll_region_origin_mode,
+            term::ControlCodes::cursor_position(2, 2),
+        ],
+        &input![
+            term::Raw::from("x"),
+            term::ControlCodes::cursor_position(1, 1),
+            term::Raw::from("y"),
+        ],
+    );
+}
+
+// Both screens share the left/right margins.
+#[test]
+fn left_right_margins_set_on_the_alt_screen() {
+    assert_restores(
+        Size { width: 6, height: 3 },
+        &input![
+            term::control_codes().enable_alt_screen,
+            term::control_codes().enable_left_right_margin_mode,
+            term::ControlCodes::set_left_right_margins(2, 4),
+        ],
+        &input![
+            term::control_codes().disable_alt_screen,
+            term::ControlCodes::cursor_position(1, 2),
+            term::Raw::from("abcd"),
+        ],
+    );
+}
+
+// Margins that the terminal had before the restore would keep the restore
+// from painting all of the screen.
+#[test]
+fn leftover_left_right_margins() {
+    assert_restores_into(
+        &input![
+            term::control_codes().enable_left_right_margin_mode,
+            term::ControlCodes::set_left_right_margins(2, 4),
+        ],
+        Size { width: 6, height: 3 },
+        b"abcdefgh",
+        b"ij",
+    );
+}

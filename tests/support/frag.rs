@@ -14,6 +14,7 @@ impl shpool_vterm::term::AsTermInput for reset_codes {
         controls.disable_alt_screen.term_input_into(buf);
         controls.clear_attrs.term_input_into(buf);
         controls.unset_scroll_region.term_input_into(buf);
+        controls.disable_left_right_margin_mode.term_input_into(buf);
         controls.disable_scroll_region_origin_mode.term_input_into(buf);
         controls.disable_insert_mode.term_input_into(buf);
         controls.enable_autowrap.term_input_into(buf);
