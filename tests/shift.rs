@@ -61,9 +61,6 @@ frag! {
     => ContentRegion::All =>
             reset_codes,
             term::Raw::from("11"),
-            term::Crlf::default(),
-            term::Crlf::default(),
-            term::Crlf::default(),
             term::ControlCodes::cursor_position(2, 1),
             term::control_codes().clear_attrs
 }
@@ -174,7 +171,6 @@ frag! {
             term::Raw::from("33"),
             term::Crlf::default(),
             term::Raw::from("44"),
-            term::Crlf::default(),
             term::ControlCodes::cursor_position(2, 1),
             term::control_codes().clear_attrs
 }
@@ -216,9 +212,6 @@ frag! {
     => ContentRegion::All =>
             reset_codes,
             term::Raw::from("11"),
-            term::Crlf::default(),
-            term::Crlf::default(),
-            term::Crlf::default(),
             term::ControlCodes::cursor_position(2, 1),
             term::control_codes().clear_attrs
 }
@@ -307,7 +300,7 @@ frag! {
        term::ControlCodes::delete_character(1)
     => ContentRegion::All =>
             reset_codes,
-            term::Raw::from("13   "),
+            term::Raw::from("13"),
             term::ControlCodes::cursor_position(1, 2),
             term::control_codes().clear_attrs
 }
@@ -319,7 +312,7 @@ frag! {
        term::ControlCodes::delete_character(2)
     => ContentRegion::All =>
             reset_codes,
-            term::Raw::from("3    "),
+            term::Raw::from("3"),
             term::ControlCodes::cursor_position(1, 1),
             term::control_codes().clear_attrs
 }
@@ -331,7 +324,7 @@ frag! {
        term::ControlCodes::delete_character(1)
     => ContentRegion::All =>
             reset_codes,
-            term::Raw::from("12   "),
+            term::Raw::from("12"),
             term::ControlCodes::cursor_position(1, 3),
             term::control_codes().clear_attrs
 }
@@ -362,7 +355,7 @@ frag! {
        term::ControlCodes::delete_character(1)
     => ContentRegion::All =>
             reset_codes,
-            term::Raw::from("13   "),
+            term::Raw::from("13"),
             term::ControlCodes::cursor_position(1, 2),
             term::control_codes().clear_attrs,
             term::ControlCodes::fgcolor_idx(1)
@@ -432,7 +425,7 @@ frag! {
             reset_codes,
             // Filling the line leaves the cursor on the last column, so that
             // is the char that gets erased.
-            term::Raw::from("1234 "),
+            term::Raw::from("1234"),
             term::ControlCodes::cursor_position(1, 5),
             term::control_codes().clear_attrs
 }
@@ -536,7 +529,6 @@ frag! {
     => ContentRegion::All =>
             reset_codes,
             term::Raw::from("Xef"),
-            term::Crlf::default(),
             term::ControlCodes::cursor_position(1, 2),
             term::control_codes().clear_attrs
 }

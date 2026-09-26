@@ -148,8 +148,10 @@ fn cursor_past_the_end_of_the_text_keeps_its_place() {
     term.resize(Size { width: 4, height: 3 });
     term.process(b"X");
 
+    // The blanks that the cursor skipped over look just like the rest of
+    // the empty space on the screen.
     let mut want = Term::new(100, Size { width: 4, height: 3 });
-    want.process(b"abc     X");
+    want.process(b"abc\r\n\r\nX");
     assert_eq!(dump(&term), dump(&want));
 }
 

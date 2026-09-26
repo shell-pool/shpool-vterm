@@ -58,8 +58,12 @@ impl AsTermInput for Line {
         let mut current_attrs = &blank_attrs;
         // The column up to which the chars we have emitted so far reach.
         let mut covered_until = 0;
+        // Blanks at the end of the line look just like the cells past the
+        // end of it that nothing has been written to, so there is no need
+        // to paint them.
+        let end = self.cells.iter().rposition(|cell| !cell.looks_unused()).map_or(0, |i| i + 1);
 
-        for (col, cell) in self.cells.iter().enumerate() {
+        for (col, cell) in self.cells[..end].iter().enumerate() {
             if cell.attrs() != current_attrs {
                 for code in current_attrs.transition_to(cell.attrs()) {
                     code.term_input_into(buf);

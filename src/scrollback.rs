@@ -205,7 +205,7 @@ impl Scrollback {
             .unwrap_or(usize::MAX);
         let max = std::cmp::min(overflow, below_anchors);
 
-        let is_blank = |line: &Line| !line.is_wrapped && line.cells.iter().all(looks_unused);
+        let is_blank = |line: &Line| !line.is_wrapped && line.cells.iter().all(Cell::looks_unused);
         let mut n = 0;
         // The rest of a wrapped line is part of it, blank or not.
         while n < max
@@ -229,23 +229,33 @@ impl Scrollback {
         size: crate::Size,
         dump_region: ContentRegion,
     ) {
+        // Blank rows at the bottom of a screen that is not full yet look just
+        // like the rows below the content that nothing has been written to,
+        // which the restore leaves blank without being told. Once there is
+        // scrollback, the bottom rows hold everything above them in place.
+        let blank_rows = if self.buf.len() <= size.height {
+            self.buf.iter().take_while(|line| line.cells.iter().all(Cell::looks_unused)).count()
+        } else {
+            0
+        };
+
         let nlines = match dump_region {
             ContentRegion::All => self.buf.len(),
             ContentRegion::Screen => size.height,
             ContentRegion::BottomLines(nlines) => nlines,
         };
-        let nlines = std::cmp::min(nlines, self.buf.len());
+        let nlines = std::cmp::min(nlines, self.buf.len() - blank_rows);
 
         // When there are fewer lines than rows on the screen, the lines go
         // on the rows they came from rather than at the top of the screen.
         // Everything else, like the cursor, gets put back at an absolute
         // position, and has to end up in the same place relative to them.
-        let first_row = self.lines_below_grid_start(size).saturating_sub(nlines);
+        let first_row = self.lines_below_grid_start(size).saturating_sub(blank_rows + nlines);
         if first_row > 0 {
             term::ControlCodes::cursor_position((first_row + 1) as u16, 1).term_input_into(buf);
         }
 
-        for (i, line) in self.buf.iter().take(nlines).enumerate().rev() {
+        for (i, line) in self.buf.iter().skip(blank_rows).take(nlines).enumerate().rev() {
             line.term_input_into(buf);
             if i != 0 {
                 term::Crlf::default().term_input_into(buf);
@@ -301,7 +311,7 @@ impl Scrollback {
             let edge_fill = line
                 .cells
                 .last()
-                .filter(|c| line.cells.len() >= old_width && is_erased(c) && !looks_unused(c))
+                .filter(|c| line.cells.len() >= old_width && c.is_erased() && !c.looks_unused())
                 .cloned();
             logical_line.extend(line.cells);
             // The last line has nothing to continue onto, even if it claims
@@ -690,7 +700,7 @@ fn rewrap(cells: &mut Vec<Cell>, width: usize, painted_to_edge: bool) -> Vec<(us
     // Blank cells at the end of the line are just the part of it that
     // nothing has been written to (DCH, for one, pads lines out to the full
     // width). They should not spill over onto rows of their own.
-    let trailing_blank = if painted_to_edge { is_erased } else { looks_unused };
+    let trailing_blank = if painted_to_edge { Cell::is_erased } else { Cell::looks_unused };
     while cells.last().is_some_and(trailing_blank) {
         cells.pop();
     }
@@ -737,25 +747,6 @@ fn rewrap(cells: &mut Vec<Cell>, width: usize, painted_to_edge: bool) -> Vec<(us
     }
 
     rows
-}
-
-/// True for a cell that looks just like one nothing has been written to: a
-/// blank without any attrs that would show up on a blank.
-fn looks_unused(cell: &Cell) -> bool {
-    is_erased(cell) && matches!(cell.attrs().bgcolor, term::Color::Default)
-}
-
-/// True for a cell that looks like erasing left it behind: a blank without
-/// any attrs that would show up on a blank, other than a background color.
-fn is_erased(cell: &Cell) -> bool {
-    let attrs = cell.attrs();
-    cell.is_empty()
-        && !cell.is_wide_padding()
-        && !attrs.inverse
-        && attrs.underline.is_none()
-        && !attrs.strikethrough
-        && !attrs.overline
-        && attrs.framed.is_none()
 }
 
 /// Pad `line` out to `width` cells with `blank`.

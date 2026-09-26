@@ -299,6 +299,8 @@ impl Screen {
                 Cell::empty()
             }
         };
+        // Neither do the attrs of a blank that don't show up on a blank.
+        let cell = if cell.looks_unused() { Cell::empty() } else { cell };
 
         term::ControlCodes::cursor_position((addressed_row + 1) as u16, (col + 1) as u16)
             .term_input_into(buf);

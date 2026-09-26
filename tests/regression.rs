@@ -66,7 +66,6 @@ frag! {
             term::Raw::from("11"),
             term::Crlf::default(),
             term::Raw::from("33"),
-            term::Crlf::default(),
             term::ControlCodes::cursor_position(2, 1),
             term::control_codes().clear_attrs
 }
@@ -91,7 +90,7 @@ frag! {
        term::ControlCodes::delete_character(3)
     => ContentRegion::All =>
             reset_codes,
-            term::Raw::from("ab   "),
+            term::Raw::from("ab"),
             term::ControlCodes::cursor_position(1, 3),
             term::control_codes().clear_attrs
 }
@@ -104,7 +103,7 @@ frag! {
        term::ControlCodes::delete_character(3)
     => ContentRegion::All =>
             reset_codes,
-            term::Raw::from("ab   "),
+            term::Raw::from("ab"),
             term::ControlCodes::cursor_position(1, 5),
             term::control_codes().clear_attrs
 }
@@ -117,7 +116,7 @@ frag! {
        term::ControlCodes::delete_character(3)
     => ContentRegion::All =>
             reset_codes,
-            term::Raw::from("ab   "),
+            term::Raw::from("ab"),
             term::ControlCodes::cursor_position(1, 5),
             term::control_codes().clear_attrs
 }
@@ -130,7 +129,7 @@ frag! {
        term::ControlCodes::delete_character(3)
     => ContentRegion::All =>
             reset_codes,
-            term::Raw::from("ab   "),
+            term::Raw::from("ab"),
             term::ControlCodes::cursor_position(1, 5),
             term::control_codes().clear_attrs
 }
@@ -146,7 +145,7 @@ frag! {
             reset_codes,
             term::Raw::from("ab"),
             term::Crlf::default(),
-            term::Raw::from("cd   "),
+            term::Raw::from("cd"),
             term::ControlCodes::cursor_position(2, 5),
             term::control_codes().clear_attrs
 }
@@ -769,8 +768,6 @@ fn shrinking_a_cleared_screen_keeps_the_prompt_on_it() {
     let mut expected = vec![];
     crate::support::frag::reset_codes.term_input_into(&mut expected);
     term::Raw::from("$ ").term_input_into(&mut expected);
-    term::Crlf::default().term_input_into(&mut expected);
-    term::Crlf::default().term_input_into(&mut expected);
     term::ControlCodes::cursor_position(1, 3).term_input_into(&mut expected);
     term::control_codes().clear_attrs.term_input_into(&mut expected);
 
@@ -1202,5 +1199,22 @@ frag! {
             term::Raw::from("  alt"),
             term::ControlCodes::cursor_position(3, 5),
             term::Raw::from("t"),
+            term::control_codes().clear_attrs
+}
+
+// Clearing the screen leaves its rows stored, but blank rows at the bottom of
+// a screen that has not filled up yet are no different from the rows below
+// the content that nothing has been written to. Restoring the bottom lines
+// of it should restore the prompt rather than a couple of those blank rows.
+frag! {
+    bottom_lines_of_a_cleared_screen_include_the_prompt { scrollback_lines: 100, width: 5, height: 3 }
+    <= term::Raw::from("11\r\n22\r\n33"),
+       term::ControlCodes::cursor_position(1, 1),
+       term::control_codes().erase_screen,
+       term::Raw::from("$ ")
+    => ContentRegion::BottomLines(2) =>
+            reset_codes,
+            term::Raw::from("$ "),
+            term::ControlCodes::cursor_position(1, 3),
             term::control_codes().clear_attrs
 }

@@ -56,7 +56,7 @@ frag! {
        term::Raw::from("😃")
     => ContentRegion::All =>
             reset_codes,
-            term::Raw::from("a 😃 "),
+            term::Raw::from("a 😃"),
             term::ControlCodes::cursor_position(1, 5),
             term::control_codes().clear_attrs
 }
@@ -68,7 +68,7 @@ frag! {
        term::control_codes().erase_to_end_of_line
     => ContentRegion::All =>
             reset_codes,
-            term::Raw::from("a "),
+            term::Raw::from("a"),
             term::ControlCodes::cursor_position(1, 3),
             term::control_codes().clear_attrs
 }
@@ -104,7 +104,7 @@ frag! {
        term::ControlCodes::delete_character(1)
     => ContentRegion::All =>
             reset_codes,
-            term::Raw::from("a b  "),
+            term::Raw::from("a b"),
             term::ControlCodes::cursor_position(1, 3),
             term::control_codes().clear_attrs
 }
@@ -117,7 +117,7 @@ frag! {
        term::ControlCodes::insert_character(1)
     => ContentRegion::All =>
             reset_codes,
-            term::Raw::from(" ab "),
+            term::Raw::from(" ab"),
             term::ControlCodes::cursor_position(1, 1),
             term::control_codes().clear_attrs
 }
@@ -159,11 +159,21 @@ fn alt_screen_narrowing_resize_cuts_wide_char() {
     term.process("ab😊".as_bytes());
     term.resize(Size { width: 3, height: 2 });
 
-    // The cursor was waiting to wrap at the right edge, and still is.
-    let mut want = Term::new(100, Size { width: 3, height: 2 });
-    want.process(b"\x1b[?1049hab ");
+    // The cursor was waiting to wrap at the right edge, and still is. What
+    // is left of the wide char is a blank, which is what gets printed in the
+    // last column to get the wrap back.
+    use shpool_vterm::term::AsTermInput;
+    let mut want = vec![];
+    crate::support::frag::reset_codes.term_input_into(&mut want);
+    term::ControlCodes::cursor_position(1, 1).term_input_into(&mut want);
+    term::control_codes().enable_alt_screen.term_input_into(&mut want);
+    term::Raw::from("ab").term_input_into(&mut want);
+    term::Crlf::default().term_input_into(&mut want);
+    term::ControlCodes::cursor_position(1, 3).term_input_into(&mut want);
+    term::Raw::from(" ").term_input_into(&mut want);
+    term::control_codes().clear_attrs.term_input_into(&mut want);
     assert_eq!(
         String::from_utf8_lossy(term.contents(ContentRegion::All).as_slice()),
-        String::from_utf8_lossy(want.contents(ContentRegion::All).as_slice()),
+        String::from_utf8_lossy(&want),
     );
 }
