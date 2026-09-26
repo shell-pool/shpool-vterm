@@ -340,7 +340,10 @@ frag! {
             reset_codes,
             term::Crlf::default(),
             term::Raw::from("\x1b[44mabcde\x1b[49m"),
-            term::Crlf::default(),
+            // The f that wraps onto the next row gets printed without its
+            // background color first, so that the scroll it might cause
+            // only paints the blanks that the row really has.
+            term::Raw::from("f\r"),
             term::Raw::from("\x1b[44mf    \x1b[49m"),
             term::ControlCodes::cursor_position(2, 2),
             term::control_codes().clear_attrs,

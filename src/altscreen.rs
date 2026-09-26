@@ -20,7 +20,7 @@ use crate::{
     cell::Cell,
     line::{self, Line},
     log,
-    term::{self, AsTermInput, OriginMode, Pos, ScrollRegion},
+    term::{OriginMode, Pos, ScrollRegion},
 };
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -240,20 +240,17 @@ impl std::fmt::Display for AltScreen {
     }
 }
 
-impl AsTermInput for AltScreen {
-    fn term_input_into(&self, buf: &mut Vec<u8>) {
-        for (i, line) in self.buf.iter().enumerate() {
-            line.term_input_into(buf);
-            if i != self.buf.len() - 1 {
-                term::Crlf::default().term_input_into(buf);
-            }
-        }
+impl AltScreen {
+    /// Emit the codes that paint the alt screen, from the top left corner.
+    pub fn dump_contents_into(&self, buf: &mut Vec<u8>, width: usize) {
+        line::dump_lines_into(buf, width, self.buf.iter());
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::term;
 
     const SIZE: crate::Size = crate::Size { width: 5, height: 3 };
 

@@ -16,6 +16,7 @@
 //! and that restoring whatever state it ends up in gives back that state.
 
 use shpool_vterm::{ContentRegion, Size, Term};
+use unicode_width::UnicodeWidthChar;
 
 /// A small, fast and deterministic PRNG (splitmix64), so that a failing case
 /// can be reproduced from its seed.
@@ -146,12 +147,51 @@ fn osc(rng: &mut Rng) -> String {
 /// can even add a row to the bottom of a screen that is not full, so blank
 /// rows at the bottom get dropped too, but only when the dump shows signs of
 /// that having happened, since they matter once there is scrollback.
+///
+/// The same goes for the spaces in front of a wide char. The row with the
+/// blank in its last column might have wrapped because the wide char at the
+/// start of the next one did not fit there, which makes the space part of the
+/// same line as the wide char.
 fn normalize(dump: &[u8], lenient: bool) -> Vec<u8> {
     let dump = drop_before_line_end(dump, b" ", true);
     if lenient {
-        drop_before_line_end(&dump, b"\r\n", false)
+        drop_blanks_before_wide_chars(&drop_before_line_end(&dump, b"\r\n", false))
     } else {
         dump
+    }
+}
+
+/// Drop the runs of spaces that come before a wide char, along with any in
+/// between the codes that set the attrs of the chars.
+fn drop_blanks_before_wide_chars(dump: &[u8]) -> Vec<u8> {
+    let dump = String::from_utf8_lossy(dump);
+    let mut out = String::with_capacity(dump.len());
+    for (i, c) in dump.char_indices() {
+        if c == ' ' && starts_with_wide_char(&dump[i..]) {
+            continue;
+        }
+        out.push(c);
+    }
+    out.into_bytes()
+}
+
+/// Whether `s` starts with a wide char, once the spaces, SGR codes and links
+/// at the start of it are out of the way.
+fn starts_with_wide_char(mut s: &str) -> bool {
+    loop {
+        let rest = s.trim_start_matches(' ');
+        let rest = if let Some(sgr) = rest.strip_prefix("\x1b[") {
+            let n = sgr.bytes().take_while(|b| b.is_ascii_digit() || matches!(b, b';' | b':'));
+            sgr[n.count()..].strip_prefix('m').unwrap_or(rest)
+        } else if let Some(link) = rest.strip_prefix("\x1b]8;") {
+            link.find("\x1b\\").map_or(rest, |end| &link[end + 2..])
+        } else {
+            rest
+        };
+        if rest.len() == s.len() {
+            return s.chars().next().is_some_and(|c| UnicodeWidthChar::width(c) == Some(2));
+        }
+        s = rest;
     }
 }
 

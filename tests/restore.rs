@@ -128,6 +128,34 @@ fn unsaved_cursor() {
     );
 }
 
+// A line that wrapped still wraps after the restore, so it gets reflowed
+// along with the rest of it when the window gets resized.
+#[test]
+fn wrapped_lines_reflow_after_a_restore() {
+    let size = Size { width: 4, height: 8 };
+    let mut session = Term::new(100, size);
+    session.process(b"$ echo abcdef\r\nabcdef\r\n$ ");
+    let mut client = Term::new(100, size);
+    client.process(&session.contents(ContentRegion::All));
+
+    let size = Size { width: 20, height: 8 };
+    session.resize(size);
+    client.resize(size);
+    assert_same(&client, &session, "after the resize");
+}
+
+// Wrapping onto a new row at the bottom of the screen scrolls, which paints
+// the new row with the background color. The row that the app wrapped onto
+// was not at the bottom, so it did not get painted.
+#[test]
+fn wrap_that_scrolls_on_restore() {
+    assert_restores(
+        Size { width: 3, height: 3 },
+        b"1\r\n2\r\n3\r\n4\r\n5\x1b[Habc\x1b[44md\x1b[m",
+        b"",
+    );
+}
+
 // Themes can change a lot of the palette, and all of it has to come back.
 #[test]
 fn lots_of_palette_colors() {

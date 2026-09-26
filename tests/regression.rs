@@ -600,9 +600,7 @@ fn blank_lines_survive_a_reflowing_resize() {
 
     let mut expected = vec![];
     crate::support::frag::reset_codes.term_input_into(&mut expected);
-    term::Raw::from("abc").term_input_into(&mut expected);
-    term::Crlf::default().term_input_into(&mut expected);
-    term::Raw::from("def").term_input_into(&mut expected);
+    term::Raw::from("abcdef").term_input_into(&mut expected);
     term::Crlf::default().term_input_into(&mut expected);
     term::Crlf::default().term_input_into(&mut expected);
     term::Raw::from("gh").term_input_into(&mut expected);
@@ -701,9 +699,7 @@ fn cursor_follows_its_row_when_reflow_adds_rows() {
 
     let mut expected = vec![];
     crate::support::frag::reset_codes.term_input_into(&mut expected);
-    term::Raw::from("abc").term_input_into(&mut expected);
-    term::Crlf::default().term_input_into(&mut expected);
-    term::Raw::from("def").term_input_into(&mut expected);
+    term::Raw::from("abcdef").term_input_into(&mut expected);
     term::Crlf::default().term_input_into(&mut expected);
     term::Raw::from("gh").term_input_into(&mut expected);
     term::ControlCodes::cursor_position(3, 3).term_input_into(&mut expected);
@@ -856,9 +852,7 @@ fn narrowing_drops_blank_rows_from_below_the_cursor() {
 
     let mut expected = vec![];
     crate::support::frag::reset_codes.term_input_into(&mut expected);
-    term::Raw::from("abc").term_input_into(&mut expected);
-    term::Crlf::default().term_input_into(&mut expected);
-    term::Raw::from("def").term_input_into(&mut expected);
+    term::Raw::from("abcdef").term_input_into(&mut expected);
     term::Crlf::default().term_input_into(&mut expected);
     term::Raw::from("gh").term_input_into(&mut expected);
     term::ControlCodes::cursor_position(3, 3).term_input_into(&mut expected);

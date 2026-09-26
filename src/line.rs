@@ -58,11 +58,7 @@ impl AsTermInput for Line {
         let mut current_attrs = &blank_attrs;
         // The column up to which the chars we have emitted so far reach.
         let mut covered_until = 0;
-        // Blanks at the end of the line look just like the cells past the
-        // end of it that nothing has been written to, so there is no need
-        // to paint them.
-        let end = self.cells.iter().rposition(|cell| !cell.looks_unused()).map_or(0, |i| i + 1);
-
+        let end = self.painted_width();
         for (col, cell) in self.cells[..end].iter().enumerate() {
             if cell.attrs() != current_attrs {
                 for code in current_attrs.transition_to(cell.attrs()) {
@@ -121,6 +117,54 @@ impl Line {
         if fill.attrs().has_attrs() {
             self.cells.resize(std::cmp::max(width, self.cells.len()), fill.clone());
         }
+    }
+
+    /// How many columns painting the line covers.
+    ///
+    /// Blanks at the end of the line look just like the cells past the end
+    /// of it that nothing has been written to, so there is no need to paint
+    /// them.
+    fn painted_width(&self) -> usize {
+        self.cells.iter().rposition(|cell| !cell.looks_unused()).map_or(0, |i| i + 1)
+    }
+
+    /// Whether painting `next` right after this line wraps onto it, the same
+    /// way that printing it did in the first place.
+    ///
+    /// That takes a line that wrapped, and a char at the start of `next`
+    /// that makes the terminal wrap: any char at all once the line reaches
+    /// the last column, or a wide char that does not fit in the columns the
+    /// line leaves free.
+    fn wraps_onto(&self, next: &Line, width: usize) -> bool {
+        if !self.is_wrapped || next.painted_width() == 0 {
+            return false;
+        }
+        let first_width = next.cells.first().map_or(1, |cell| std::cmp::max(cell.width(), 1));
+        self.painted_width() + first_width as usize > width
+    }
+
+    /// Emit the codes that wrap the line above this one onto it, before it
+    /// gets painted.
+    ///
+    /// Printing the first char of the line is what wraps. If that scrolls
+    /// the screen, the terminal fills the new row with the background color
+    /// the char gets printed with, which the row the app printed the line
+    /// on did not necessarily get filled with. So a char with a background
+    /// color gets printed without one first, and then the cursor goes back
+    /// to the start of the row for the painting to print it again.
+    fn dump_wrap_into(&self, buf: &mut Vec<u8>) {
+        let Some(first) = self.cells.first() else {
+            return;
+        };
+        if matches!(first.attrs().bgcolor, term::Color::Default) {
+            return;
+        }
+        if first.is_wide_padding() {
+            buf.push(b' ');
+        } else {
+            first.term_input_into(buf);
+        }
+        buf.push(b'\r');
     }
 
     /// Get the cell at the given grid position.
@@ -319,6 +363,32 @@ impl Line {
         }
         while self.cells.len() < erase_to {
             self.cells.push(fill.clone());
+        }
+    }
+}
+
+/// Emit the codes that paint `lines`, from the top down, each on the row
+/// below the one before.
+///
+/// Instead of breaking a line that wrapped onto the next one off from it
+/// with a CRLF, we let the terminal wrap it again where we can, so that it
+/// knows that the two belong together. That way it can still copy them as
+/// one line, and reflow them when its window gets resized.
+pub fn dump_lines_into<'a>(buf: &mut Vec<u8>, width: usize, lines: impl Iterator<Item = &'a Line>) {
+    let mut lines = lines.peekable();
+    let mut wrapping = false;
+    while let Some(line) = lines.next() {
+        if wrapping {
+            line.dump_wrap_into(buf);
+        }
+        line.term_input_into(buf);
+
+        let Some(next) = lines.peek() else {
+            break;
+        };
+        wrapping = line.wraps_onto(next, width);
+        if !wrapping {
+            term::Crlf::default().term_input_into(buf);
         }
     }
 }

@@ -232,7 +232,7 @@ impl Screen {
             Grid::Scrollback(scrollback) => {
                 scrollback.dump_contents_into(buf, self.size, dump_region)
             }
-            Grid::AltScreen(altscreen) => altscreen.term_input_into(buf),
+            Grid::AltScreen(altscreen) => altscreen.dump_contents_into(buf, self.size.width),
         }
     }
 

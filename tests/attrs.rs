@@ -28,7 +28,6 @@ frag! {
             term::ControlCodes::start_link(smallvec![], smallvec![b'h', b't', b't', b'p']),
             term::Raw::from("abcde"),
             term::control_codes().end_link,
-            term::Crlf::default(),
             term::ControlCodes::start_link(smallvec![], smallvec![b'h', b't', b't', b'p']),
             term::Raw::from("f"),
             term::control_codes().end_link,
