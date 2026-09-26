@@ -1218,3 +1218,15 @@ frag! {
             term::ControlCodes::cursor_position(1, 3),
             term::control_codes().clear_attrs
 }
+
+// A link gets left out of the saved cursor when it is restored, and without
+// it, a cursor saved at home restores just like an empty slot.
+frag! {
+    saved_cursor_with_nothing_but_a_link_is_not_restored { scrollback_lines: 100, width: 5, height: 2 }
+    <= term::Raw::from("\x1b]8;;http://x/\x1b\\"),
+       term::control_codes().save_cursor
+    => ContentRegion::All =>
+            reset_codes,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs
+}

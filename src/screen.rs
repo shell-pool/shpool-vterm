@@ -178,7 +178,7 @@ impl Screen {
         // empty slot, so there is only something to do if the app saved a
         // different one.
         match &self.saved_cursor {
-            Some(saved) if *saved != SavedCursor::new(Pos { row: 0, col: 0 }) => {
+            Some(saved) if !saved.restores_like_home() => {
                 self.dump_saved_cursor_into(buf, saved);
                 term::control_codes().save_cursor.term_input_into(buf);
                 saved.dump_reset_into(buf);
@@ -767,6 +767,14 @@ impl SavedCursor {
     /// into has no idea that it is in the middle of one.
     fn dump_attrs(&self) -> term::Attrs {
         term::Attrs { link_target: None, ..self.attrs.clone() }
+    }
+
+    /// Whether restoring this saved cursor into a terminal saves the same
+    /// thing as an empty slot does. The link does not count, since it does
+    /// not get restored.
+    fn restores_like_home(&self) -> bool {
+        let saved = SavedCursor { attrs: self.dump_attrs(), ..self.clone() };
+        saved == SavedCursor::new(Pos { row: 0, col: 0 })
     }
 
     /// Undo the attrs, charsets and origin mode that restoring this saved
