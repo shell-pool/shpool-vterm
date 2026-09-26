@@ -282,6 +282,25 @@ test_pub! {
     enum UnderlineStyle {
         Single,
         Double,
+        // The styles below only exist as kitty's extension of SGR 4, which
+        // picks the style with a subparameter as in `CSI 4:3 m`.
+        Curly,
+        Dotted,
+        Dashed,
+    }
+}
+
+impl UnderlineStyle {
+    /// The SGR code that turns this underline style on.
+    fn code(&self) -> ControlCode {
+        let controls = control_codes();
+        match self {
+            UnderlineStyle::Single => controls.underline.clone(),
+            UnderlineStyle::Double => controls.double_underline.clone(),
+            UnderlineStyle::Curly => controls.curly_underline.clone(),
+            UnderlineStyle::Dotted => controls.dotted_underline.clone(),
+            UnderlineStyle::Dashed => controls.dashed_underline.clone(),
+        }
     }
 }
 
@@ -334,6 +353,9 @@ impl std::fmt::Display for Attrs {
         match self.underline {
             Some(UnderlineStyle::Single) => write!(f, "_")?,
             Some(UnderlineStyle::Double) => write!(f, "‗")?,
+            Some(UnderlineStyle::Curly) => write!(f, "~")?,
+            Some(UnderlineStyle::Dotted) => write!(f, "┈")?,
+            Some(UnderlineStyle::Dashed) => write!(f, "╌")?,
             _ => {}
         }
         if self.inverse {
@@ -418,17 +440,14 @@ impl Attrs {
         match (&self.underline, &next.underline) {
             (None, None) => {}
             (Some(_), None) => codes.push(controls.undo_underline.clone()),
-            (None, Some(style)) => match style {
-                UnderlineStyle::Single => codes.push(controls.underline.clone()),
-                UnderlineStyle::Double => codes.push(controls.double_underline.clone()),
-            },
+            (None, Some(style)) => codes.push(style.code()),
             (Some(old), Some(new)) if old == new => {}
             (Some(_), Some(style)) => {
+                // Terminals like xterm track some underline styles as
+                // separate flags, so clear the old style rather than
+                // counting on the new one to replace it.
                 codes.push(controls.undo_underline.clone());
-                match style {
-                    UnderlineStyle::Single => codes.push(controls.underline.clone()),
-                    UnderlineStyle::Double => codes.push(controls.double_underline.clone()),
-                }
+                codes.push(style.code());
             }
         }
 
@@ -547,6 +566,9 @@ test_pub! {
         pub underline_color_default: ControlCode,
         pub underline: ControlCode,
         pub double_underline: ControlCode,
+        pub curly_underline: ControlCode,
+        pub dotted_underline: ControlCode,
+        pub dashed_underline: ControlCode,
         pub undo_underline: ControlCode,
         pub bold: ControlCode,
         pub faint: ControlCode,
@@ -899,6 +921,21 @@ test_pub! {
             },
             double_underline: ControlCode::CSI {
                 params: smallvec![smallvec![21]],
+                intermediates: smallvec![],
+                action: 'm',
+            },
+            curly_underline: ControlCode::CSI {
+                params: smallvec![smallvec![4, 3]],
+                intermediates: smallvec![],
+                action: 'm',
+            },
+            dotted_underline: ControlCode::CSI {
+                params: smallvec![smallvec![4, 4]],
+                intermediates: smallvec![],
+                action: 'm',
+            },
+            dashed_underline: ControlCode::CSI {
+                params: smallvec![smallvec![4, 5]],
                 intermediates: smallvec![],
                 action: 'm',
             },

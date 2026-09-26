@@ -1541,18 +1541,18 @@ impl vte::Perform for State {
                     [] | [0] => self.cursor_attrs = term::Attrs::default(),
 
                     // Underline Handling
-                    // TODO: there are lots of other underline styles. To fix,
-                    // we need to update attrs.
                     //
-                    // Kitty extensions:
-                    //      CSI 4 : 3 m => curly
-                    //      CSI 4 : 2 m => double
-                    //
-                    // Other:
-                    //      CSI 58 ; 2 ; r ; g ; b m => RGB colored underline
-                    [4] => self.cursor_attrs.underline = Some(UnderlineStyle::Single),
-                    [21] => self.cursor_attrs.underline = Some(UnderlineStyle::Double),
-                    [24] => self.cursor_attrs.underline = None,
+                    // Kitty extends SGR 4 with a subparameter that picks the
+                    // underline style: `CSI 4:0 m` turns underlining off
+                    // and 4:1 through 4:5 select single, double, curly,
+                    // dotted and dashed underlines. Most modern terminals
+                    // understand it.
+                    [4] | [4, 1] => self.cursor_attrs.underline = Some(UnderlineStyle::Single),
+                    [21] | [4, 2] => self.cursor_attrs.underline = Some(UnderlineStyle::Double),
+                    [4, 3] => self.cursor_attrs.underline = Some(UnderlineStyle::Curly),
+                    [4, 4] => self.cursor_attrs.underline = Some(UnderlineStyle::Dotted),
+                    [4, 5] => self.cursor_attrs.underline = Some(UnderlineStyle::Dashed),
+                    [24] | [4, 0] => self.cursor_attrs.underline = None,
 
                     // Font Weight Handling.
                     [1] => self.cursor_attrs.font_weight = Some(FontWeight::Bold),

@@ -297,6 +297,107 @@ frag! {
 }
 
 frag! {
+    curly_underline { scrollback_lines: 100, width: 100, height: 100 }
+    <= term::Raw::from("a"),
+       term::control_codes().curly_underline,
+       term::Raw::from("b"),
+       term::control_codes().undo_underline,
+       term::Raw::from("a")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("a"),
+            term::control_codes().curly_underline,
+            term::Raw::from("b"),
+            term::control_codes().undo_underline,
+            term::Raw::from("a"),
+            term::ControlCodes::cursor_position(1, 4),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    dotted_underline { scrollback_lines: 100, width: 100, height: 100 }
+    <= term::Raw::from("a"),
+       term::control_codes().dotted_underline,
+       term::Raw::from("b"),
+       term::control_codes().undo_underline,
+       term::Raw::from("a")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("a"),
+            term::control_codes().dotted_underline,
+            term::Raw::from("b"),
+            term::control_codes().undo_underline,
+            term::Raw::from("a"),
+            term::ControlCodes::cursor_position(1, 4),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    dashed_underline { scrollback_lines: 100, width: 100, height: 100 }
+    <= term::Raw::from("a"),
+       term::control_codes().dashed_underline,
+       term::Raw::from("b"),
+       term::control_codes().undo_underline,
+       term::Raw::from("a")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("a"),
+            term::control_codes().dashed_underline,
+            term::Raw::from("b"),
+            term::control_codes().undo_underline,
+            term::Raw::from("a"),
+            term::ControlCodes::cursor_position(1, 4),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    underline_style_subparams { scrollback_lines: 10, width: 20, height: 10 }
+    <= term::Raw::from("\x1b[4:1ma\x1b[4:2mb\x1b[4:3mc\x1b[4:4md\x1b[4:5me\x1b[4:0mf")
+    => ContentRegion::All =>
+            reset_codes,
+            term::control_codes().underline,
+            term::Raw::from("a\x1b[24;21mb\x1b[24;4:3mc\x1b[24;4:4md\x1b[24;4:5me"),
+            term::control_codes().undo_underline,
+            term::Raw::from("f"),
+            term::ControlCodes::cursor_position(1, 7),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    unknown_underline_style_is_ignored { scrollback_lines: 10, width: 20, height: 10 }
+    <= term::Raw::from("\x1b[4:3ma\x1b[4:9mb")
+    => ContentRegion::All =>
+            reset_codes,
+            term::control_codes().curly_underline,
+            term::Raw::from("ab"),
+            term::control_codes().undo_underline,
+            term::ControlCodes::cursor_position(1, 3),
+            term::control_codes().clear_attrs,
+            term::control_codes().curly_underline
+}
+
+frag! {
+    colored_curly_underline { scrollback_lines: 10, width: 20, height: 10 }
+    <= term::Raw::from("\x1b[4:3;58:2::255:0:0mtypo\x1b[4:0;59m ok")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("\x1b[58;2;255;0;0;4:3mtypo\x1b[59;24m ok"),
+            term::ControlCodes::cursor_position(1, 8),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    underline_style_of_pen_survives_restore { scrollback_lines: 10, width: 20, height: 10 }
+    <= term::Raw::from("a\x1b[4:5m")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("a"),
+            term::ControlCodes::cursor_position(1, 2),
+            term::control_codes().clear_attrs,
+            term::control_codes().dashed_underline
+}
+
+frag! {
     save_restore_cursor_attrs { scrollback_lines: 100, width: 10, height: 10 }
     <= term::control_codes().bold,
        term::Raw::from("A"),
