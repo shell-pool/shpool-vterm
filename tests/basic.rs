@@ -180,7 +180,6 @@ frag! {
        term::control_codes().erase_scrollback
     => ContentRegion::All =>
             reset_codes,
-            term::Crlf::default(),
             term::ControlCodes::cursor_position(2, 2),
             term::control_codes().clear_attrs
 }
@@ -276,8 +275,6 @@ frag! {
             term::Raw::from("22222"),
             term::Crlf::default(),
             term::Raw::from("33"),
-            term::Crlf::default(),
-            term::Crlf::default(),
             term::ControlCodes::set_scroll_region(2, 4),
             term::control_codes().enable_scroll_region_origin_mode,
             term::ControlCodes::cursor_position(2, 3),
@@ -323,10 +320,6 @@ frag! {
        term::control_codes().erase_screen
     => ContentRegion::All =>
             reset_codes,
-            term::Crlf::default(),
-            term::Crlf::default(),
-            term::Crlf::default(),
-            term::Crlf::default(),
             term::ControlCodes::set_scroll_region(2, 4),
             term::control_codes().enable_scroll_region_origin_mode,
             term::ControlCodes::cursor_position(2, 3),

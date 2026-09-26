@@ -228,23 +228,36 @@ impl Scrollback {
         size: crate::Size,
         dump_region: ContentRegion,
     ) {
+        // Blank rows at the bottom of a screen that is not full yet look just
+        // like the rows below the content that nothing has been written to,
+        // which the restore leaves blank without being told. Once there is
+        // scrollback, the bottom rows hold everything above them in place.
+        let blank_rows = if self.buf.len() <= size.height {
+            self.buf
+                .iter()
+                .take_while(|line| line.shown_at(size.width).cells.iter().all(Cell::looks_unused))
+                .count()
+        } else {
+            0
+        };
+
         let nlines = match dump_region {
             ContentRegion::All => self.buf.len(),
             ContentRegion::Screen => size.height,
             ContentRegion::BottomLines(nlines) => nlines,
         };
-        let nlines = std::cmp::min(nlines, self.buf.len());
+        let nlines = std::cmp::min(nlines, self.buf.len() - blank_rows);
 
         // When there are fewer lines than rows on the screen, the lines go
         // on the rows they came from rather than at the top of the screen.
         // Everything else, like the cursor, gets put back at an absolute
         // position, and has to end up in the same place relative to them.
-        let first_row = self.lines_below_grid_start(size).saturating_sub(nlines);
+        let first_row = self.lines_below_grid_start(size).saturating_sub(blank_rows + nlines);
         if first_row > 0 {
             term::ControlCodes::cursor_position((first_row + 1) as u16, 1).term_input_into(buf);
         }
 
-        for (i, line) in self.buf.iter().take(nlines).enumerate().rev() {
+        for (i, line) in self.buf.iter().skip(blank_rows).take(nlines).enumerate().rev() {
             line.shown_at(size.width).term_input_into(buf);
             if i != 0 {
                 term::Crlf::default().term_input_into(buf);

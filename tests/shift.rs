@@ -61,9 +61,6 @@ frag! {
     => ContentRegion::All =>
             reset_codes,
             term::Raw::from("11"),
-            term::Crlf::default(),
-            term::Crlf::default(),
-            term::Crlf::default(),
             term::ControlCodes::cursor_position(2, 1),
             term::control_codes().clear_attrs
 }
@@ -174,7 +171,6 @@ frag! {
             term::Raw::from("33"),
             term::Crlf::default(),
             term::Raw::from("44"),
-            term::Crlf::default(),
             term::ControlCodes::cursor_position(2, 1),
             term::control_codes().clear_attrs
 }
@@ -216,9 +212,6 @@ frag! {
     => ContentRegion::All =>
             reset_codes,
             term::Raw::from("11"),
-            term::Crlf::default(),
-            term::Crlf::default(),
-            term::Crlf::default(),
             term::ControlCodes::cursor_position(2, 1),
             term::control_codes().clear_attrs
 }
@@ -536,7 +529,6 @@ frag! {
     => ContentRegion::All =>
             reset_codes,
             term::Raw::from("Xef"),
-            term::Crlf::default(),
             term::ControlCodes::cursor_position(1, 2),
             term::control_codes().clear_attrs
 }
