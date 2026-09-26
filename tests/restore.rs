@@ -199,3 +199,15 @@ fn unsaved_cursor() {
         &input![term::control_codes().restore_cursor, term::Raw::from("x")],
     );
 }
+
+// Themes can change a lot of the palette, and all of it has to come back.
+#[test]
+fn lots_of_palette_colors() {
+    let mut setup = vec![];
+    for idx in 0..20 {
+        let spec = format!("rgb:{idx:02x}/00/00");
+        let color = term::ControlCodes::set_color_indices([(idx, spec.as_bytes().into())]);
+        setup.extend(input![color]);
+    }
+    assert_restores(Size { width: 10, height: 3 }, &setup, b"");
+}
