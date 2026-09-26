@@ -20,6 +20,15 @@ use crate::term::{self, AsTermInput};
 
 static EMPTY_CELL: OnceLock<Cell> = OnceLock::new();
 
+/// The most zero width chars a cell holds on top of the char it starts with.
+///
+/// Nothing stops an app from piling combining marks onto the same cell for
+/// as long as it likes, and every one of them would take up memory and make
+/// the restore longer. Real text never needs anywhere near this many, and
+/// terminals don't keep them either: xterm keeps 2 by default, and 5 at
+/// most.
+const MAX_ZERO_WIDTH_CHARS: usize = 16;
+
 // A shared empty cell const. Should be used to generate empty cell
 // references when needed to avoid duplicating empty cells to reference
 // everywhere.
@@ -121,7 +130,9 @@ impl Cell {
             "only zero width chars may be added to an existing cell"
         );
 
-        self.grapheme_cluster.push(c);
+        if self.grapheme_cluster.len() <= MAX_ZERO_WIDTH_CHARS {
+            self.grapheme_cluster.push(c);
+        }
     }
 
     pub fn width(&self) -> u8 {
