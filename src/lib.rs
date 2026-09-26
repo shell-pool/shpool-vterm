@@ -439,6 +439,14 @@ impl State {
         }
     }
 
+    /// Set or clear the tab stop at `col`. A screen with no columns has
+    /// nowhere to put one.
+    fn set_tabstop(&mut self, col: usize, on: bool) {
+        if col < self.tabstops.len() {
+            self.tabstops.set(col, on);
+        }
+    }
+
     /// Dump the current tabstop state into the given control code
     /// vector. This is assumed to be right after a reset, so it will
     /// elide setting tabstops in the default position. The cursor
@@ -1227,11 +1235,11 @@ impl vte::Perform for State {
                 match code {
                     0 => {
                         let col = self.screen().cursor.col;
-                        self.tabstops.set(col, true);
+                        self.set_tabstop(col, true);
                     },
                     2 => {
                         let col = self.screen().cursor.col;
-                        self.tabstops.set(col, false);
+                        self.set_tabstop(col, false);
                     }
                     5 => {
                         self.tabstops.fill(false);
@@ -1390,7 +1398,7 @@ impl vte::Perform for State {
                 match code {
                     0 => {
                         let col = self.screen().cursor.col;
-                        self.tabstops.set(col, false);
+                        self.set_tabstop(col, false);
                     },
                     3 => {
                         self.tabstops.fill(false);
@@ -1745,7 +1753,7 @@ impl vte::Perform for State {
             // HTS (Horizontal Tabluation Set, ESC H)
             ([], b'H') => {
                 let col = self.screen().cursor.col;
-                self.tabstops.set(col, true);
+                self.set_tabstop(col, true);
             }
             // RI (Reverse Index)
             ([], b'M') => {
