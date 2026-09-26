@@ -68,9 +68,9 @@ impl Screen {
         Screen {
             grids: Grids {
                 scrollback: Scrollback::new(scrollback_lines),
-                scrollback_saved_cursor: SavedCursor::new(Pos { row: 0, col: 0 }),
+                scrollback_saved_cursor: None,
                 altscreen: AltScreen::new(size),
-                altscreen_saved_cursor: SavedCursor::new(Pos { row: 0, col: 0 }),
+                altscreen_saved_cursor: None,
                 alt_active: false,
             },
             size,
@@ -115,13 +115,14 @@ impl Screen {
 
     /// The slot where the SCP/RCP and ESC 7 / ESC 8 commands save the
     /// cursor. Like in xterm, the main screen and the alt screen each have
-    /// their own, and this is the one of the active screen.
-    pub fn saved_cursor(&self) -> &SavedCursor {
-        self.grids.saved_cursor()
+    /// their own, and this is the one of the active screen. It stays empty
+    /// until something gets saved.
+    pub fn saved_cursor(&self) -> Option<&SavedCursor> {
+        self.grids.saved_cursor().as_ref()
     }
 
     /// `saved_cursor`, for changing it.
-    pub fn saved_cursor_mut(&mut self) -> &mut SavedCursor {
+    pub fn saved_cursor_mut(&mut self) -> &mut Option<SavedCursor> {
         self.grids.saved_cursor_mut()
     }
 
@@ -169,7 +170,7 @@ impl Screen {
             // Switching to the alt screen saves the cursor like DECSC does,
             // and the app switches back with a DECRC, so the cursor has to be
             // where the main screen has it saved for the switch to save.
-            let saved = &self.grids.scrollback_saved_cursor;
+            let saved = SavedCursor::or_home(self.grids.scrollback_saved_cursor.as_ref());
             self.dump_cursor_into(buf, scrollback, saved.pos, saved.pending_wrap, saved.pos.row);
 
             // Re-enable alt screen, then dump the contents. This is
@@ -293,7 +294,9 @@ impl Screen {
         // A cursor with a wrap pending is logically just past the char in
         // the last column, and that is the spot it should keep following.
         let cursor = logical_unwrapped_pos(self.cursor, self.pending_wrap);
-        let saved = &self.grids.scrollback_saved_cursor;
+        // An empty slot has nothing to follow, so the top left corner, which
+        // gets tracked below anyway, stands in for it.
+        let saved = SavedCursor::or_home(self.grids.scrollback_saved_cursor.as_ref());
         let saved_cursor = logical_unwrapped_pos(saved.pos, saved.pending_wrap);
 
         // A row of the main screen is derived from the buffer length and the
@@ -336,11 +339,14 @@ impl Screen {
         self.scroll_region = ScrollRegion::TrackSize;
 
         (self.cursor, self.pending_wrap) = settle_cursor(cursor, pending_wrap, self.size);
-        let saved = &mut self.grids.scrollback_saved_cursor;
-        (saved.pos, saved.pending_wrap) = settle_cursor(saved_cursor.0, saved_cursor.1, self.size);
-        let saved = &mut self.grids.altscreen_saved_cursor;
-        let pos = logical_unwrapped_pos(saved.pos, saved.pending_wrap);
-        (saved.pos, saved.pending_wrap) = settle_cursor(pos, saved.pending_wrap, self.size);
+        if let Some(saved) = &mut self.grids.scrollback_saved_cursor {
+            (saved.pos, saved.pending_wrap) =
+                settle_cursor(saved_cursor.0, saved_cursor.1, self.size);
+        }
+        if let Some(saved) = &mut self.grids.altscreen_saved_cursor {
+            let pos = logical_unwrapped_pos(saved.pos, saved.pending_wrap);
+            (saved.pos, saved.pending_wrap) = settle_cursor(pos, saved.pending_wrap, self.size);
+        }
     }
 
     /// Move the cursor up `n` rows. It stops at the top of the scroll region,
@@ -685,6 +691,10 @@ impl std::fmt::Display for Screen {
 
 /// A position that the terminal was writing at. Includes attributes that
 /// have been previously set via control codes.
+///
+/// Restoring the cursor when nothing has been saved restores `new` at the
+/// top left corner, which homes the cursor and puts the attrs, charsets and
+/// origin mode back to their defaults, like in xterm and kitty.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct SavedCursor {
     pub pos: Pos,
@@ -712,6 +722,11 @@ impl SavedCursor {
             origin_mode: OriginMode::Term,
         }
     }
+
+    /// What restoring the cursor from `slot` restores.
+    pub fn or_home(slot: Option<&SavedCursor>) -> SavedCursor {
+        slot.cloned().unwrap_or_else(|| SavedCursor::new(Pos { row: 0, col: 0 }))
+    }
 }
 
 /// The grids of the main screen and the alt screen, and which one is active.
@@ -721,9 +736,9 @@ impl SavedCursor {
 #[derive(Debug)]
 struct Grids {
     scrollback: Scrollback,
-    scrollback_saved_cursor: SavedCursor,
+    scrollback_saved_cursor: Option<SavedCursor>,
     altscreen: AltScreen,
-    altscreen_saved_cursor: SavedCursor,
+    altscreen_saved_cursor: Option<SavedCursor>,
     alt_active: bool,
 }
 
@@ -747,7 +762,7 @@ impl Grids {
     }
 
     /// The saved cursor slot of the active screen.
-    fn saved_cursor(&self) -> &SavedCursor {
+    fn saved_cursor(&self) -> &Option<SavedCursor> {
         if self.alt_active {
             &self.altscreen_saved_cursor
         } else {
@@ -756,7 +771,7 @@ impl Grids {
     }
 
     /// `saved_cursor`, for changing it.
-    fn saved_cursor_mut(&mut self) -> &mut SavedCursor {
+    fn saved_cursor_mut(&mut self) -> &mut Option<SavedCursor> {
         if self.alt_active {
             &mut self.altscreen_saved_cursor
         } else {
@@ -865,14 +880,15 @@ mod tests {
     fn altscreen_cursor_clamping() {
         let mut screen = alt_screen(Size { width: 10, height: 10 });
         screen.cursor = Pos { row: 9, col: 9 };
-        screen.saved_cursor_mut().pos = Pos { row: 8, col: 8 };
+        *screen.saved_cursor_mut() = Some(SavedCursor::new(Pos { row: 8, col: 8 }));
 
         screen.resize(Size { width: 5, height: 5 });
 
         assert_eq!(screen.cursor.row, 4);
         assert_eq!(screen.cursor.col, 4);
-        assert_eq!(screen.saved_cursor().pos.row, 4);
-        assert_eq!(screen.saved_cursor().pos.col, 4);
+        let saved = screen.saved_cursor().expect("saved cursor");
+        assert_eq!(saved.pos.row, 4);
+        assert_eq!(saved.pos.col, 4);
     }
 
     fn get_screen_cell(screen: &Screen, row: usize, col: usize) -> Option<Cell> {

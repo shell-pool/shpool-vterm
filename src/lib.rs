@@ -641,14 +641,14 @@ impl State {
         let pending_wrap = screen.pending_wrap;
         let origin_mode = screen.origin_mode();
         *screen.saved_cursor_mut() =
-            SavedCursor { pos, attrs, pending_wrap, charsets, origin_mode };
+            Some(SavedCursor { pos, attrs, pending_wrap, charsets, origin_mode });
     }
 
     /// DECRC. Put back whatever `save_cursor` saved for the active screen.
     fn restore_cursor(&mut self) {
         let screen = &mut self.screen;
         let SavedCursor { pos, attrs, pending_wrap, charsets, origin_mode } =
-            screen.saved_cursor().clone();
+            SavedCursor::or_home(screen.saved_cursor());
         // Unlike DECOM, this does not home the cursor.
         screen.set_origin_mode(origin_mode);
         screen.cursor = pos;
@@ -704,7 +704,7 @@ impl State {
         let screen = &mut self.screen;
         screen.set_scroll_region(term::ScrollRegion::TrackSize);
         screen.set_origin_mode(OriginMode::Term);
-        *screen.saved_cursor_mut() = SavedCursor::new(term::Pos { row: 0, col: 0 });
+        *screen.saved_cursor_mut() = None;
     }
 
     /// Switch to the alt screen. With `erase`, the alt screen gets erased
