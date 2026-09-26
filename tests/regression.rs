@@ -228,6 +228,28 @@ frag! {
             term::control_codes().clear_attrs
 }
 
+// An app can pile as many combining marks onto a cell as it likes, but past
+// a point they only take up memory, so the cell stops taking them.
+#[test]
+fn combining_marks_pile_up_to_a_limit() {
+    use shpool_vterm::term::AsTermInput;
+
+    let mut term = shpool_vterm::Term::new(100, shpool_vterm::Size { width: 10, height: 10 });
+    term.process(b"e");
+    for _ in 0..100_000 {
+        term.process("\u{301}".as_bytes());
+    }
+    term.process(b"x");
+
+    let mut expected = vec![];
+    crate::support::frag::reset_codes.term_input_into(&mut expected);
+    let marks = "\u{301}".repeat(16);
+    term::Raw::from(format!("e{marks}x").as_str()).term_input_into(&mut expected);
+    term::ControlCodes::cursor_position(1, 3).term_input_into(&mut expected);
+    term::control_codes().clear_attrs.term_input_into(&mut expected);
+    assert_eq!(term.contents(ContentRegion::All), expected);
+}
+
 //
 // Scroll region bottom past the last row of the screen.
 //
