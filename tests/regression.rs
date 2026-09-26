@@ -509,6 +509,7 @@ fn dump_prefix_resets_terminal_modes() {
         controls.disable_report_focus,
         controls.disable_paste_mode,
         term::ControlCodes::cursor_position(1, 1),
+        controls.save_cursor,
         controls.clear_screen,
         term::Raw::from("hi"),
         term::ControlCodes::cursor_position(1, 3),
@@ -536,6 +537,7 @@ fn restore_resets_modes_left_over_in_the_client() {
 
     let mut client = shpool_vterm::Term::new(100, size);
     client.process(&input![
+        term::ControlCodes::cursor_position(3, 3),
         term::control_codes().enable_alt_screen,
         term::control_codes().bold,
         term::ControlCodes::fgcolor_idx(1),
@@ -927,6 +929,8 @@ fn saved_cursor_follows_its_row_across_a_resize() {
     term::Raw::from("44").term_input_into(&mut expected);
     term::Crlf::default().term_input_into(&mut expected);
     term::Raw::from("55X").term_input_into(&mut expected);
+    term::ControlCodes::cursor_position(5, 3).term_input_into(&mut expected);
+    term::control_codes().save_cursor.term_input_into(&mut expected);
     term::ControlCodes::cursor_position(5, 4).term_input_into(&mut expected);
     term::control_codes().clear_attrs.term_input_into(&mut expected);
 
