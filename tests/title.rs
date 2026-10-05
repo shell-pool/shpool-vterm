@@ -244,3 +244,71 @@ frag! {
             term::control_codes().clear_attrs,
             term::ControlCodes::set_title(smallvec![b'A'])
 }
+
+fn new_term() -> shpool_vterm::Term {
+    shpool_vterm::Term::new(10, shpool_vterm::Size { width: 10, height: 10 })
+}
+
+#[test]
+fn getter_unset() {
+    assert_eq!(new_term().title(), None);
+}
+
+#[test]
+fn getter_osc2_bel_terminated() {
+    let mut term = new_term();
+    term.process(b"\x1b]2;A\x07");
+    assert_eq!(term.title(), Some(&b"A"[..]));
+}
+
+#[test]
+fn getter_osc0_st_terminated() {
+    let mut term = new_term();
+    term.process(b"\x1b]0;A\x1b\\");
+    assert_eq!(term.title(), Some(&b"A"[..]));
+}
+
+#[test]
+fn getter_ignores_icon_name() {
+    let mut term = new_term();
+    term.process(b"\x1b]1;A\x07");
+    assert_eq!(term.title(), None);
+}
+
+#[test]
+fn getter_empty_title_is_none() {
+    let mut term = new_term();
+    term.process(b"\x1b]2;A\x07");
+    assert_eq!(term.title(), Some(&b"A"[..]));
+    term.process(b"\x1b]2;\x07");
+    assert_eq!(term.title(), None);
+}
+
+#[test]
+fn getter_follows_save_and_restore() {
+    let mut term = new_term();
+    term.process(b"\x1b]2;A\x07");
+    term.process(b"\x1b[22;2t"); // save
+    assert_eq!(term.title(), Some(&b"A"[..]));
+    term.process(b"\x1b]2;B\x07");
+    assert_eq!(term.title(), Some(&b"B"[..]));
+    term.process(b"\x1b[23;2t"); // restore
+    assert_eq!(term.title(), Some(&b"A"[..]));
+}
+
+#[test]
+fn getter_sequence_split_across_chunks() {
+    let mut term = new_term();
+    term.process(b"\x1b]2;wo");
+    assert_eq!(term.title(), None);
+    term.process(b"rk\x07");
+    assert_eq!(term.title(), Some(&b"work"[..]));
+}
+
+#[test]
+fn getter_returns_bytes_unchanged() {
+    // Not UTF-8: the getter does not decode or validate.
+    let mut term = new_term();
+    term.process(b"\x1b]2;caf\xe9\x07");
+    assert_eq!(term.title(), Some(&b"caf\xe9"[..]));
+}

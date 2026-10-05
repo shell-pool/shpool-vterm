@@ -146,6 +146,17 @@ impl Term {
 
         buf
     }
+
+    /// Get the current window title, or None if it is unset or empty.
+    ///
+    /// The title is not checked to be UTF-8.
+    pub fn title(&self) -> Option<&[u8]> {
+        self.state
+            .title_stack
+            .last()
+            .map(|title| title.as_slice())
+            .filter(|title| !title.is_empty())
+    }
 }
 
 /// A section of the screen to dump.
