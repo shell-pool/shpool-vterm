@@ -22,6 +22,7 @@ log = "0.4" # logging facade (not used directly, but required if we have tracing
 tracing = "0.1" # logging and performance monitoring facade
 anyhow = "1" # errors
 bitvec = "1" # packed bitset
+bitflags = "2" # packed mode flags
 
 [features]
 # This opens up some visibility that we don't want in the main crate API.

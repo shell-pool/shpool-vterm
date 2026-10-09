@@ -201,6 +201,34 @@ pub struct Size {
     pub height: usize,
 }
 
+bitflags::bitflags! {
+    /// The terminal modes that are simply on or off, packed into one word.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct Modes: u16 {
+        /// The cursor is hidden. Controlled via `CSI ? 25 {h,l}`.
+        const CURSOR_HIDDEN = 1 << 0;
+        /// Application cursor keys mode (DECCKM), which changes what the
+        /// arrow keys send. Controlled via `CSI ? 1 {h,l}`.
+        const APPLICATION_CURSOR_KEYS = 1 << 1;
+        /// Application keypad mode (DECKPAM), which changes what the numeric
+        /// keypad sends. Controlled via `ESC =` and `ESC >`.
+        ///
+        /// This is a different mode to DECCKM above, covering a different
+        /// group of keys, so the two cannot share a flag.
+        const APPLICATION_KEYPAD = 1 << 2;
+        /// When set, the underlying terminal is supposed to emit `\x1b[I`
+        /// sentinals when the window gains focus. For our purposes we just
+        /// need to know how to track and restore the state.
+        ///
+        /// Controlled via `CSI ? 1004 {h,l}`.
+        const REPORT_FOCUS = 1 << 3;
+        /// Bracketed paste mode. Controlled via `CSI ? 2004 {h,l}`.
+        const BRACKETED_PASTE = 1 << 4;
+        /// Insertion / replacement mode (IRM). Controlled via `CSI 4 {h,l}`.
+        const INSERT = 1 << 5;
+    }
+}
+
 /// The complete terminal state. An internal implementation detail.
 struct State {
     /// The state for the normal terminal screen.
@@ -234,20 +262,10 @@ struct State {
     /// Color overrides for things like foreground and background.
     /// These slots extend from OSC 10 to OSC 19.
     functional_colors: [Option<Vec<u8>>; 10],
-    /// Tracks if the cursor is currently hidden. Controlled
-    /// via the `CSI ? 25 {h,l}` codes.
-    cursor_hidden: bool,
+    /// The terminal modes that are simply on or off.
+    modes: Modes,
     /// Tracks cursor blinking mode. Controlled via `CSI ? 12 {h,l}`.
     cursor_blinking: Option<bool>,
-    /// Tracks application cursor keys mode (DECCKM), which changes what the
-    /// arrow keys send. Controlled via `CSI ? 1 {h,l}`.
-    application_cursor_keys_enabled: bool,
-    /// Tracks application keypad mode (DECKPAM), which changes what the
-    /// numeric keypad sends. Controlled via `ESC =` and `ESC >`.
-    ///
-    /// This is a different mode to DECCKM above, covering a different group
-    /// of keys, so the two cannot share a flag.
-    application_keypad_mode_enabled: bool,
     /// Tracks the mouse reporting modes listed in `MOUSE_MODES`, indexed
     /// in parallel with it.
     ///
@@ -256,17 +274,6 @@ struct State {
     /// collapsed into a single effective mode, since the application will
     /// expect everything it set to still be in force after a reattach.
     mouse_modes: [bool; MOUSE_MODES.len()],
-    /// When set, the underlying terminal is supposed to emit
-    /// `\x1b[I` sentinals when the window gains focus. For our
-    /// purposes we just need to know how to track and restore
-    /// the state.
-    ///
-    /// Controlled via `CSI ? 1004 {h,l}`.
-    report_focus: bool,
-    /// Tracks paste mode. Controlled via `CSI ? 2004 {h,l}`.
-    in_paste_mode: bool,
-    /// Tracks insertion / replacement mode (IRM). Controlled via `CSI 4 {h,l}`.
-    insert_mode: bool,
     /// Tab stop columns. By default, these are spaced 8 cols apart
     /// starting at col 9, but they can be directly manipulated by certain
     /// control codes as well.
@@ -309,14 +316,9 @@ impl State {
             working_dir: None,
             palette_overrides: BTreeMap::new(),
             functional_colors: [NONE_VEC; 10],
-            cursor_hidden: false,
+            modes: Modes::empty(),
             cursor_blinking: None,
-            application_cursor_keys_enabled: false,
-            application_keypad_mode_enabled: false,
             mouse_modes: [false; MOUSE_MODES.len()],
-            report_focus: false,
-            in_paste_mode: false,
-            insert_mode: false,
             tabstops: bitvec![0; size.width],
             last_print_char: None,
             logger: log::Context::None,
@@ -506,7 +508,7 @@ impl State {
             .term_input_into(buf);
         }
 
-        if self.cursor_hidden {
+        if self.modes.contains(Modes::CURSOR_HIDDEN) {
             controls.hide_cursor.term_input_into(buf);
         }
         if let Some(blinking) = self.cursor_blinking {
@@ -516,19 +518,19 @@ impl State {
                 controls.disable_cursor_blink.term_input_into(buf);
             }
         }
-        if self.application_cursor_keys_enabled {
+        if self.modes.contains(Modes::APPLICATION_CURSOR_KEYS) {
             controls.enable_application_cursor_keys.term_input_into(buf);
         }
-        if self.application_keypad_mode_enabled {
+        if self.modes.contains(Modes::APPLICATION_KEYPAD) {
             controls.enable_application_keypad_mode.term_input_into(buf);
         }
-        if self.report_focus {
+        if self.modes.contains(Modes::REPORT_FOCUS) {
             controls.enable_report_focus.term_input_into(buf);
         }
-        if self.in_paste_mode {
+        if self.modes.contains(Modes::BRACKETED_PASTE) {
             controls.enable_paste_mode.term_input_into(buf);
         }
-        if self.insert_mode {
+        if self.modes.contains(Modes::INSERT) {
             controls.enable_insert_mode.term_input_into(buf);
         }
         for (idx, mode) in MOUSE_MODES.iter().enumerate() {
@@ -598,7 +600,7 @@ impl State {
     }
 
     fn write_char_at_cursor(&mut self, cell: Cell) {
-        let insert_mode = self.insert_mode;
+        let insert_mode = self.modes.contains(Modes::INSERT);
         if let Err(e) = self.screen_mut().write_at_cursor(cell, insert_mode) {
             warn!(self.logger, "writing char at cursor: {:?}", e);
         }
@@ -1191,7 +1193,7 @@ impl vte::Perform for State {
             'h' => match intermediates {
                 [] => while let Some(code) = params_iter.next() {
                     match code {
-                        [4] => self.insert_mode = true,
+                        [4] => self.modes.insert(Modes::INSERT),
                         _ => {
                             warn!(
                                 self.logger,
@@ -1204,7 +1206,7 @@ impl vte::Perform for State {
                 }
                 [b'?'] => while let Some(code) = params_iter.next() {
                     match code {
-                        [1] => self.application_cursor_keys_enabled = true,
+                        [1] => self.modes.insert(Modes::APPLICATION_CURSOR_KEYS),
                         // 132 Column Mode (DECCOLM). Terminal dimensions are controlled
                         // by the client window/multiplexer, not child process escape sequences.
                         [3] => {},
@@ -1213,8 +1215,8 @@ impl vte::Perform for State {
                         [4] => {},
                         [6] => self.screen_mut().set_origin_mode(OriginMode::ScrollRegion),
                         [12] => self.cursor_blinking = Some(true),
-                        [25] => self.cursor_hidden = false,
-                        [1004] => self.report_focus = true,
+                        [25] => self.modes.remove(Modes::CURSOR_HIDDEN),
+                        [1004] => self.modes.insert(Modes::REPORT_FOCUS),
                         // enable alt screen
                         [1049] => {
                             // The alt-screen gets reset upon entry, so we need to
@@ -1222,7 +1224,7 @@ impl vte::Perform for State {
                             self.altscreen = Screen::alt(self.altscreen.size);
                             self.screen_mode = ScreenMode::Alt;
                         }
-                        [2004] => self.in_paste_mode = true,
+                        [2004] => self.modes.insert(Modes::BRACKETED_PASTE),
                         // Means "pause visual rendering." We are not rendering
                         // anything visually so we don't care.
                         [2026] => {},
@@ -1251,7 +1253,7 @@ impl vte::Perform for State {
             'l' => match intermediates {
                 [] => while let Some(code) = params_iter.next() {
                     match code {
-                        [4] => self.insert_mode = false,
+                        [4] => self.modes.remove(Modes::INSERT),
                         _ => {
                             warn!(
                                 self.logger,
@@ -1264,7 +1266,7 @@ impl vte::Perform for State {
                 }
                 [b'?'] => while let Some(code) = params_iter.next() {
                     match code {
-                        [1] => self.application_cursor_keys_enabled = false,
+                        [1] => self.modes.remove(Modes::APPLICATION_CURSOR_KEYS),
                         // 80 Column Mode (DECCOLM). Terminal dimensions are controlled
                         // by the client window/multiplexer. Standard terminfo `is2` sends
                         // `\E[?3;4l` on startup; resetting column width or clearing the screen
@@ -1275,10 +1277,10 @@ impl vte::Perform for State {
                         [4] => {},
                         [6] => self.screen_mut().set_origin_mode(OriginMode::Term),
                         [12] => self.cursor_blinking = Some(false),
-                        [25] => self.cursor_hidden = true,
-                        [1004] => self.report_focus = false,
+                        [25] => self.modes.insert(Modes::CURSOR_HIDDEN),
+                        [1004] => self.modes.remove(Modes::REPORT_FOCUS),
                         [1049] => self.screen_mode = ScreenMode::Scrollback,
-                        [2004] => self.in_paste_mode = false,
+                        [2004] => self.modes.remove(Modes::BRACKETED_PASTE),
                         // Means "resume & flush visual rendering." We are
                         // not rendering anything visually so we don't care.
                         [2026] => {},
@@ -1428,7 +1430,7 @@ impl vte::Perform for State {
                     self.cursor_style = term::CursorStyle::Default;
                     self.cursor_attrs = term::Attrs::default();
                     self.cursor_blinking = None;
-                    self.insert_mode = false;
+                    self.modes.remove(Modes::INSERT);
 
                     warn!(self.logger, "DECSTR only partially handled");
                 }
@@ -1547,14 +1549,14 @@ impl vte::Perform for State {
                 self.cursor_style = term::CursorStyle::Default;
                 self.cursor_attrs = term::Attrs::default();
                 self.cursor_blinking = None;
-                self.insert_mode = false;
+                self.modes.remove(Modes::INSERT);
 
                 warn!(self.logger, "RIS only partially handled");
             }
 
             // DECKPAM / DECKPNM (application and numeric keypad mode)
-            ([], b'=') => self.application_keypad_mode_enabled = true,
-            ([], b'>') => self.application_keypad_mode_enabled = false,
+            ([], b'=') => self.modes.insert(Modes::APPLICATION_KEYPAD),
+            ([], b'>') => self.modes.remove(Modes::APPLICATION_KEYPAD),
 
             // Designates US-ASCII or UK-ASCII as a G0-G3 character set. We handle
             // utf-8, which is a superset of ascii, so this is a no-op.
