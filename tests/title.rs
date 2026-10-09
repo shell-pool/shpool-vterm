@@ -170,7 +170,10 @@ frag! {
 
 frag! {
     dimension_queries_ignored { scrollback_lines: 10, width: 10, height: 10 }
-    <= term::Raw::from("\x1b[14t\x1b[16t\x1b[18t\x1b[19t"),
+    <= term::ControlCodes::xtwinops(&[14]),
+       term::ControlCodes::xtwinops(&[16]),
+       term::ControlCodes::xtwinops(&[18]),
+       term::ControlCodes::xtwinops(&[19]),
        term::ControlCodes::set_title(smallvec![b'A'])
     => ContentRegion::All =>
             reset_codes,
@@ -197,18 +200,18 @@ fn title_stack_depth_limit() {
     let mut term = shpool_vterm::Term::new(10, shpool_vterm::Size { width: 10, height: 10 });
 
     // Set initial title A
-    term.process(b"\x1b]2;A\x1b\\");
+    term.process(&input![term::ControlCodes::set_title(smallvec![b'A'])]);
 
     // Push 20 times (exceeding MAX_TITLE_STACK_DEPTH = 16)
     for _ in 0..20 {
-        term.process(b"\x1b[22;2t");
+        term.process(&input![term::ControlCodes::save_title(Some(2))]);
     }
 
     // Set title B
-    term.process(b"\x1b]2;B\x1b\\");
+    term.process(&input![term::ControlCodes::set_title(smallvec![b'B'])]);
 
     // Pop once -> should restore A
-    term.process(b"\x1b[23;2t");
+    term.process(&input![term::ControlCodes::restore_title(Some(2))]);
 
     let mut want = vec![];
     support::frag::reset_codes.term_input_into(&mut want);
@@ -271,28 +274,28 @@ fn getter_osc0_st_terminated() {
 #[test]
 fn getter_ignores_icon_name() {
     let mut term = new_term();
-    term.process(b"\x1b]1;A\x07");
+    term.process(&input![term::ControlCodes::set_icon_name(smallvec![b'A'])]);
     assert_eq!(term.title(), None);
 }
 
 #[test]
 fn getter_empty_title_is_none() {
     let mut term = new_term();
-    term.process(b"\x1b]2;A\x07");
+    term.process(&input![term::ControlCodes::set_title(smallvec![b'A'])]);
     assert_eq!(term.title(), Some(&b"A"[..]));
-    term.process(b"\x1b]2;\x07");
+    term.process(&input![term::ControlCodes::set_title(smallvec![])]);
     assert_eq!(term.title(), None);
 }
 
 #[test]
 fn getter_follows_save_and_restore() {
     let mut term = new_term();
-    term.process(b"\x1b]2;A\x07");
-    term.process(b"\x1b[22;2t"); // save
+    term.process(&input![term::ControlCodes::set_title(smallvec![b'A'])]);
+    term.process(&input![term::ControlCodes::save_title(Some(2))]);
     assert_eq!(term.title(), Some(&b"A"[..]));
-    term.process(b"\x1b]2;B\x07");
+    term.process(&input![term::ControlCodes::set_title(smallvec![b'B'])]);
     assert_eq!(term.title(), Some(&b"B"[..]));
-    term.process(b"\x1b[23;2t"); // restore
+    term.process(&input![term::ControlCodes::restore_title(Some(2))]);
     assert_eq!(term.title(), Some(&b"A"[..]));
 }
 
@@ -309,6 +312,6 @@ fn getter_sequence_split_across_chunks() {
 fn getter_returns_bytes_unchanged() {
     // Not UTF-8: the getter does not decode or validate.
     let mut term = new_term();
-    term.process(b"\x1b]2;caf\xe9\x07");
+    term.process(&input![term::ControlCodes::set_title(b"caf\xe9"[..].into())]);
     assert_eq!(term.title(), Some(&b"caf\xe9"[..]));
 }

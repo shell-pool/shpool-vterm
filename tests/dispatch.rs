@@ -12,7 +12,7 @@ frag! {
     xtmodkeys_is_not_sgr { scrollback_lines: 100, width: 10, height: 5 }
     <= term::Raw::from("A"),
        // XTMODKEYS, not underline + faint
-       term::Raw::from("\x1b[>4;2m"),
+       term::ControlCodes::xtmodkeys(4, 2),
        term::Raw::from("B")
     => ContentRegion::All =>
             reset_codes,
@@ -25,7 +25,7 @@ frag! {
     xtsmgraphics_is_not_scroll_up { scrollback_lines: 100, width: 10, height: 5 }
     <= term::Raw::from("A\r\nB"),
        // XTSMGRAPHICS query, not SU
-       term::Raw::from("\x1b[?1;1;0S")
+       term::ControlCodes::xtsmgraphics(1, 1, 0)
     => ContentRegion::All =>
             reset_codes,
             term::Raw::from("A"),
@@ -38,7 +38,7 @@ frag! {
 frag! {
     mouse_highlight_tracking_is_not_scroll_down { scrollback_lines: 100, width: 10, height: 5 }
     <= term::Raw::from("A\r\nB"),
-       term::Raw::from("\x1b[1;1;1;1;1T")
+       term::ControlCodes::highlight_mouse_tracking(1, 1, 1, 1, 1)
     => ContentRegion::All =>
             reset_codes,
             term::Raw::from("A"),
@@ -53,12 +53,12 @@ frag! {
     <= term::control_codes().save_cursor_position,
        term::Raw::from("AB"),
        // push, pop, set and query the kitty keyboard flags
-       term::Raw::from("\x1b[>1u"),
-       term::Raw::from("\x1b[<u"),
-       term::Raw::from("\x1b[=1;1u"),
-       term::Raw::from("\x1b[?u"),
+       term::ControlCodes::kitty_keyboard_push(1),
+       term::ControlCodes::kitty_keyboard_pop(None),
+       term::ControlCodes::kitty_keyboard_set(1, 1),
+       term::control_codes().kitty_keyboard_query,
        // DECSMBV (set margin bell volume)
-       term::Raw::from("\x1b[8 u"),
+       term::ControlCodes::decsmbv(8),
        term::Raw::from("C")
     => ContentRegion::All =>
             reset_codes,
@@ -73,7 +73,7 @@ frag! {
        term::control_codes().save_cursor_position,
        term::ControlCodes::cursor_position(3, 3),
        // XTSAVE, not SCP
-       term::Raw::from("\x1b[?25s"),
+       term::ControlCodes::xtsave(&[25]),
        term::ControlCodes::cursor_position(1, 1),
        term::control_codes().restore_cursor_position,
        term::Raw::from("X")
@@ -87,7 +87,7 @@ frag! {
 
 frag! {
     deccara_is_not_set_scroll_region { scrollback_lines: 100, width: 10, height: 5 }
-    <= term::Raw::from("\x1b[1;1;2;2;1$r")
+    <= term::ControlCodes::deccara(1, 1, 2, 2, &[1])
     => ContentRegion::All =>
             reset_codes,
             term::ControlCodes::cursor_position(1, 1),
@@ -97,7 +97,7 @@ frag! {
 frag! {
     decst8c_resets_tab_stops { scrollback_lines: 100, width: 20, height: 5 }
     <= term::ControlCodes::tab_clear(Some(3)),
-       term::Raw::from("\x1b[?5W"),
+       term::control_codes().decst8c,
        term::Raw::from("\tA")
     => ContentRegion::All =>
             reset_codes,
@@ -109,7 +109,7 @@ frag! {
 frag! {
     decsed_erases_like_ed { scrollback_lines: 100, width: 10, height: 5 }
     <= term::Raw::from("ABC"),
-       term::Raw::from("\x1b[?2J")
+       term::ControlCodes::decsed(Some(2))
     => ContentRegion::All =>
             reset_codes,
             term::ControlCodes::cursor_position(1, 4),
@@ -120,7 +120,7 @@ frag! {
     decsel_erases_like_el { scrollback_lines: 100, width: 10, height: 5 }
     <= term::Raw::from("ABC"),
        term::ControlCodes::cursor_position(1, 2),
-       term::Raw::from("\x1b[?K")
+       term::ControlCodes::decsel(None)
     => ContentRegion::All =>
             reset_codes,
             term::Raw::from("A"),

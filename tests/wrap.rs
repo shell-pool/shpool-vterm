@@ -57,7 +57,9 @@ frag! {
 // before that.
 frag! {
     backspace_cancels_a_pending_wrap { scrollback_lines: 100, width: 3, height: 3 }
-    <= term::Raw::from("abc\x08X")
+    <= term::Raw::from("abc"),
+       term::control_codes().backspace,
+       term::Raw::from("X")
     => ContentRegion::All =>
             reset_codes,
             term::Raw::from("aXc"),
@@ -234,7 +236,11 @@ fn pending_wrap_after_a_wide_char_survives_a_restore() {
 
 #[test]
 fn pending_wrap_on_the_alt_screen_survives_a_restore() {
-    assert_restores(Size { width: 3, height: 2 }, b"\x1b[?1049habc\r\ndef", b"g");
+    assert_restores(
+        Size { width: 3, height: 2 },
+        &input![term::control_codes().enable_alt_screen, term::Raw::from("abc\r\ndef")],
+        b"g",
+    );
 }
 
 /// The contents of a terminal of the given size after processing `input`.

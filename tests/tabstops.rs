@@ -229,7 +229,7 @@ frag! {
 frag! {
     backward_tab_explicit_zero_param { scrollback_lines: 100, width: 20, height: 10 }
     <= term::Raw::from("0123456789"),
-       term::Raw::from("\x1b[0Z"),
+       term::ControlCodes::cursor_backward_tab(0),
        term::Raw::from("X")
     => ContentRegion::All =>
             reset_codes,

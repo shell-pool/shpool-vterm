@@ -155,13 +155,13 @@ frag! {
 #[test]
 fn alt_screen_narrowing_resize_cuts_wide_char() {
     let mut term = Term::new(100, Size { width: 4, height: 2 });
-    term.process(b"\x1b[?1049h");
+    term.process(&input![term::control_codes().enable_alt_screen]);
     term.process("ab😊".as_bytes());
     term.resize(Size { width: 3, height: 2 });
 
     // The cursor was waiting to wrap at the right edge, and still is.
     let mut want = Term::new(100, Size { width: 3, height: 2 });
-    want.process(b"\x1b[?1049hab ");
+    want.process(&input![term::control_codes().enable_alt_screen, term::Raw::from("ab ")]);
     assert_eq!(
         String::from_utf8_lossy(term.contents(ContentRegion::All).as_slice()),
         String::from_utf8_lossy(want.contents(ContentRegion::All).as_slice()),

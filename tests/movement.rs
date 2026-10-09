@@ -530,7 +530,7 @@ frag! {
 frag! {
     backspace { scrollback_lines: 100, width: 10, height: 10 }
     <= term::Raw::from("A"),
-       term::Raw::from("\x08"),
+       term::control_codes().backspace,
        term::Raw::from("B")
     => ContentRegion::All =>
             reset_codes,
@@ -541,7 +541,7 @@ frag! {
 
 frag! {
     backspace_saturate { scrollback_lines: 100, width: 10, height: 10 }
-    <= term::Raw::from("\x08"),
+    <= term::control_codes().backspace,
        term::Raw::from("A")
     => ContentRegion::All =>
             reset_codes,
@@ -689,7 +689,8 @@ frag! {
 
 frag! {
     repeat_character_reset_on_backspace { scrollback_lines: 100, width: 10, height: 10 }
-    <= term::Raw::from("AB\x08"),
+    <= term::Raw::from("AB"),
+       term::control_codes().backspace,
        term::ControlCodes::repeat_character(2)
     => ContentRegion::All =>
             reset_codes,
@@ -760,7 +761,8 @@ frag! {
 
 frag! {
     repeat_character_reset_on_dcs_hook { scrollback_lines: 100, width: 10, height: 10 }
-    <= term::Raw::from("A\x1bP+q\x1b\\"),
+    <= term::Raw::from("A"),
+       term::ControlCodes::xtgettcap(b""),
        term::ControlCodes::repeat_character(3)
     => ContentRegion::All =>
             reset_codes,

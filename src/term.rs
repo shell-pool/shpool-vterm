@@ -562,6 +562,7 @@ test_pub! {
         pub save_cursor: ControlCode,
         pub restore_cursor: ControlCode,
         pub reverse_index: ControlCode,
+        pub backspace: ControlCode,
         pub cursor_backward_tab: ControlCode,
         pub cursor_backwards_tab: ControlCode,
         pub insert_character: ControlCode,
@@ -592,6 +593,7 @@ test_pub! {
         pub disable_application_cursor_keys: ControlCode,
         pub enable_application_keypad_mode: ControlCode,
         pub disable_application_keypad_mode: ControlCode,
+        pub kitty_keyboard_query: ControlCode,
         pub enable_report_focus: ControlCode,
         pub disable_report_focus: ControlCode,
         pub enable_paste_mode: ControlCode,
@@ -609,6 +611,7 @@ test_pub! {
         pub enable_decsclm: ControlCode,
         pub disable_decsclm: ControlCode,
         pub horizontal_tab_set: ControlCode,
+        pub decst8c: ControlCode,
         pub soft_reset: ControlCode,
         pub hard_reset: ControlCode,
         pub designate_g0_us_ascii: ControlCode,
@@ -639,6 +642,18 @@ test_pub! {
         },
         ESC {
             intermediates: SmallVec<[u8; 8]>,
+            byte: u8,
+        },
+        DCS {
+            params: SmallVec<[SmallVec<[u16; 4]>; 2]>,
+            /// Private parameter prefixes and intermediate bytes, like the
+            /// `intermediates` of a CSI.
+            intermediates: SmallVec<[u8; 8]>,
+            action: char,
+            data: SmallVec<[u8; 8]>,
+        },
+        /// A single C0 control char, like BS or SO.
+        C0 {
             byte: u8,
         },
         __NonExhaustive,
@@ -683,55 +698,72 @@ impl AsTermInput for ControlCode {
             }
             ControlCode::CSI { params, intermediates, action } => {
                 buf.extend_from_slice(b"\x1b["); // CSI
-
-                // In ANSI / ECMA-48 escape sequences, private
-                // parameter prefixes (0x3C..=0x3F, such as '?', '>',
-                // '=') must precede parameter digits, while true
-                // intermediate characters (0x20..=0x2F, such as space
-                // or '$') must follow parameters and precede the final
-                // action character.
-                //
-                // For convenience, both prefixes and intermediates are
-                // stored together in `intermediates` to mirror `vte`'s
-                // `csi_dispatch` signature. We filter by `>= 0x30` and
-                // `< 0x30` to serialize each byte into its correct
-                // position.
-                for intermediate in intermediates {
-                    if *intermediate >= 0x30 {
-                        buf.push(*intermediate);
-                    }
-                }
-
-                for (i, param) in params.iter().enumerate() {
-                    if i != 0 {
-                        buf.push(b';');
-                    }
-
-                    for (j, subparam) in param.iter().enumerate() {
-                        if j != 0 {
-                            buf.push(b':');
-                        }
-                        extend_itoa(buf, *subparam);
-                    }
-                }
-
-                for intermediate in intermediates {
-                    if *intermediate < 0x30 {
-                        buf.push(*intermediate);
-                    }
-                }
-
-                let mut action_buf = [0; 4];
-                buf.extend_from_slice(action.encode_utf8(&mut action_buf).as_bytes());
+                params_and_action_into(buf, params, intermediates, *action);
             }
             ControlCode::ESC { intermediates, byte } => {
                 buf.extend_from_slice(b"\x1b"); // ESC
                 buf.extend_from_slice(intermediates);
                 buf.push(*byte);
             }
+            ControlCode::DCS { params, intermediates, action, data } => {
+                buf.extend_from_slice(b"\x1bP"); // DCS
+                params_and_action_into(buf, params, intermediates, *action);
+                buf.extend_from_slice(data);
+                buf.extend_from_slice(b"\x1b\\"); // ST
+            }
+            ControlCode::C0 { byte } => buf.push(*byte),
             _ => {}
         }
     }
+}
+
+/// Serialize the part of a CSI or DCS that follows its introducer, up to and
+/// including its final byte.
+fn params_and_action_into(
+    buf: &mut Vec<u8>,
+    params: &[SmallVec<[u16; 4]>],
+    intermediates: &[u8],
+    action: char,
+) {
+    // In ANSI / ECMA-48 escape sequences, private
+    // parameter prefixes (0x3C..=0x3F, such as '?', '>',
+    // '=') must precede parameter digits, while true
+    // intermediate characters (0x20..=0x2F, such as space
+    // or '$') must follow parameters and precede the final
+    // action character.
+    //
+    // For convenience, both prefixes and intermediates are
+    // stored together in `intermediates` to mirror `vte`'s
+    // `csi_dispatch` signature. We filter by `>= 0x30` and
+    // `< 0x30` to serialize each byte into its correct
+    // position.
+    for intermediate in intermediates {
+        if *intermediate >= 0x30 {
+            buf.push(*intermediate);
+        }
+    }
+
+    for (i, param) in params.iter().enumerate() {
+        if i != 0 {
+            buf.push(b';');
+        }
+
+        for (j, subparam) in param.iter().enumerate() {
+            if j != 0 {
+                buf.push(b':');
+            }
+            extend_itoa(buf, *subparam);
+        }
+    }
+
+    for intermediate in intermediates {
+        if *intermediate < 0x30 {
+            buf.push(*intermediate);
+        }
+    }
+
+    let mut action_buf = [0; 4];
+    buf.extend_from_slice(action.encode_utf8(&mut action_buf).as_bytes());
 }
 
 impl AsTermInput for OSCTerm {
@@ -999,6 +1031,7 @@ test_pub! {
             save_cursor: ControlCode::ESC { intermediates: smallvec![], byte: b'7' },
             restore_cursor: ControlCode::ESC { intermediates: smallvec![], byte: b'8' },
             reverse_index: ControlCode::ESC { intermediates: smallvec![], byte: b'M' },
+            backspace: ControlCode::C0 { byte: 0x08 },
             cursor_backward_tab: ControlCode::CSI {
                 params: smallvec![],
                 intermediates: smallvec![],
@@ -1143,6 +1176,12 @@ test_pub! {
                 intermediates: smallvec![],
                 byte: b'>',
             },
+            // Queries the kitty keyboard protocol flags.
+            kitty_keyboard_query: ControlCode::CSI {
+                params: smallvec![],
+                intermediates: smallvec![b'?'],
+                action: 'u',
+            },
             enable_report_focus: ControlCode::CSI {
                 params: smallvec![smallvec![1004]],
                 intermediates: smallvec![b'?'],
@@ -1224,6 +1263,12 @@ test_pub! {
                 action: 'l',
             },
             horizontal_tab_set: ControlCode::ESC { intermediates: smallvec![], byte: b'H' },
+            // Resets the tab stops to every 8 columns.
+            decst8c: ControlCode::CSI {
+                params: smallvec![smallvec![5]],
+                intermediates: smallvec![b'?'],
+                action: 'W',
+            },
             soft_reset: ControlCode::CSI {
                 params: smallvec![],
                 intermediates: smallvec![b'!'],
@@ -1630,6 +1675,101 @@ impl ControlCodes {
             None => smallvec![smallvec![23]],
         };
         ControlCode::CSI { params, intermediates: smallvec![], action: 't' }
+    }
+
+    /// XTWINOPS (`CSI Ps ; ... t`), xterm's window manipulation and report
+    /// requests.
+    pub fn xtwinops(params: &[u16]) -> ControlCode {
+        Self::csi(b"", params.iter().copied(), 't')
+    }
+
+    /// XTMODKEYS (`CSI > Pp ; Pv m`), which sets xterm's key modifier
+    /// options.
+    pub fn xtmodkeys(resource: u16, value: u16) -> ControlCode {
+        Self::csi(b">", [resource, value], 'm')
+    }
+
+    /// XTSMGRAPHICS (`CSI ? Pi ; Pa ; Pv S`), which sets or queries xterm's
+    /// graphics attributes.
+    pub fn xtsmgraphics(item: u16, action: u16, value: u16) -> ControlCode {
+        Self::csi(b"?", [item, action, value], 'S')
+    }
+
+    /// `CSI Ps ; Ps ; Ps ; Ps ; Ps T`, which starts xterm's highlight mouse
+    /// tracking.
+    pub fn highlight_mouse_tracking(
+        func: u16,
+        col: u16,
+        row: u16,
+        first_row: u16,
+        last_row: u16,
+    ) -> ControlCode {
+        Self::csi(b"", [func, col, row, first_row, last_row], 'T')
+    }
+
+    /// `CSI > flags u`, which pushes kitty keyboard protocol flags.
+    pub fn kitty_keyboard_push(flags: u16) -> ControlCode {
+        Self::csi(b">", [flags], 'u')
+    }
+
+    /// `CSI < n u`, which pops kitty keyboard protocol flags.
+    pub fn kitty_keyboard_pop(n: Option<u16>) -> ControlCode {
+        Self::csi(b"<", n, 'u')
+    }
+
+    /// `CSI = flags ; mode u`, which sets kitty keyboard protocol flags.
+    pub fn kitty_keyboard_set(flags: u16, mode: u16) -> ControlCode {
+        Self::csi(b"=", [flags, mode], 'u')
+    }
+
+    /// DECSMBV (`CSI Ps SP u`), which sets the margin bell volume.
+    pub fn decsmbv(volume: u16) -> ControlCode {
+        Self::csi(b" ", [volume], 'u')
+    }
+
+    /// XTSAVE (`CSI ? Pm s`), which saves DEC private modes.
+    pub fn xtsave(modes: &[u16]) -> ControlCode {
+        Self::csi(b"?", modes.iter().copied(), 's')
+    }
+
+    /// DECCARA (`CSI Pt ; Pl ; Pb ; Pr ; Ps $ r`), which changes the attrs
+    /// of a rectangle.
+    pub fn deccara(top: u16, left: u16, bottom: u16, right: u16, attrs: &[u16]) -> ControlCode {
+        Self::csi(b"$", [top, left, bottom, right].into_iter().chain(attrs.iter().copied()), 'r')
+    }
+
+    /// DECSED (`CSI ? Ps J`), the selective version of ED.
+    pub fn decsed(code: Option<u16>) -> ControlCode {
+        Self::csi(b"?", code, 'J')
+    }
+
+    /// DECSEL (`CSI ? Ps K`), the selective version of EL.
+    pub fn decsel(code: Option<u16>) -> ControlCode {
+        Self::csi(b"?", code, 'K')
+    }
+
+    /// XTGETTCAP (`DCS + q Pt ST`), which requests termcap values.
+    pub fn xtgettcap(names: &[u8]) -> ControlCode {
+        ControlCode::DCS {
+            params: smallvec![],
+            intermediates: smallvec![b'+'],
+            action: 'q',
+            data: names.into(),
+        }
+    }
+
+    /// A CSI with the given private marker or intermediates and a single
+    /// value for each param.
+    fn csi<P: IntoIterator<Item = u16>>(
+        intermediates: &[u8],
+        params: P,
+        action: char,
+    ) -> ControlCode {
+        ControlCode::CSI {
+            params: params.into_iter().map(|p| smallvec![p]).collect(),
+            intermediates: intermediates.into(),
+            action,
+        }
     }
 
     pub fn dec_private_modes_set(modes: &[u16]) -> ControlCode {
