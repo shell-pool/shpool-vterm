@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.8](https://github.com/shell-pool/shpool-vterm/compare/v0.2.7...v0.2.8) - 2026-10-10
+
+### Added
+
+- support auto-wrap mode (DECAWM)
+
+### Fixed
+
+- reset the modes a restore depends on before painting it
+- don't drop scrollback lines on resize
+- keep wide chars, blank space and the cursor intact across reflow
+- blank out wide chars that are only partly overwritten or erased
+- implement the pending wrap state of the last column
+- scroll the whole screen when the main screen is partly filled
+- don't treat CSI sequences with private markers as plain commands
+
+### Other
+
+- use named control codes instead of raw escapes
+- pack State's on/off modes into a bitflags word
+
 ## [0.2.7](https://github.com/shell-pool/shpool-vterm/compare/v0.2.6...v0.2.7) - 2026-10-05
 
 ### Added
