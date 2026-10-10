@@ -52,7 +52,7 @@ impl Pos {
             self.row = low_row;
         }
         if self.row >= high_row {
-            self.row = high_row - 1;
+            self.row = high_row.saturating_sub(1);
         }
 
         let (low_col, high_col) = region.col_bounds();
@@ -60,7 +60,7 @@ impl Pos {
             self.col = low_col;
         }
         if self.col >= high_col {
-            self.col = high_col - 1;
+            self.col = high_col.saturating_sub(1);
         }
     }
 }
@@ -141,6 +141,48 @@ impl AsTermInput for ScrollRegion {
 }
 
 test_pub! {
+    /// Left/right margin mode (DECLRMM) and the margins it lets DECSLRM
+    /// set, which keep printing, scrolling and inserting or deleting chars
+    /// and lines between them, the way the scroll region does for rows.
+    #[derive(Debug, Eq, PartialEq, Clone, Copy, Default)]
+    enum LeftRightMargins {
+        /// The mode is off, which keeps the margins at the edges of the
+        /// screen.
+        #[default]
+        Off,
+        /// The mode is on, with the margins at the edges of the screen.
+        Full,
+        /// The mode is on and the margins are set.
+        Window {
+            // The first column between the margins (inclusive, zero
+            // indexed).
+            left: usize,
+            // The end of the columns between the margins (exclusive, zero
+            // indexed), like the bottom of a scroll region window.
+            right: usize,
+        },
+    }
+}
+
+impl AsTermInput for LeftRightMargins {
+    fn term_input_into(&self, buf: &mut Vec<u8>) {
+        match self {
+            LeftRightMargins::Off => {}
+            LeftRightMargins::Full => {
+                control_codes().enable_left_right_margin_mode.term_input_into(buf)
+            }
+            LeftRightMargins::Window { left, right } => {
+                // Without the mode, the terminal would take DECSLRM for
+                // SCOSC and save the cursor instead.
+                control_codes().enable_left_right_margin_mode.term_input_into(buf);
+                ControlCodes::set_left_right_margins((left + 1) as u16, *right as u16)
+                    .term_input_into(buf);
+            }
+        }
+    }
+}
+
+test_pub! {
     /// OriginMode indicates the origin position for the terminal's
     /// coordinate system. OriginMode::Term is the "normal" behavior
     /// for the terminal. (1, 1) refers to the upper leftmost cell in
@@ -148,6 +190,7 @@ test_pub! {
     /// (1, 1) referrs to the upper leftmost cell in the currently
     /// configured scoll region, if there is one, and the upper leftmost
     /// cell in the terminal overall if there is no current scroll region.
+    /// Likewise, columns count from the left margin, if there is one.
     ///
     /// This construct is often referred to as the "DECOM bit."
     #[derive(Debug, Eq, PartialEq, Clone, Default, Copy)]
@@ -156,7 +199,8 @@ test_pub! {
         #[default]
         Term,
         /// (physical_row, physical_col) =
-        ///     (logical_row + (top_margin - 1), logical_col)
+        ///     (logical_row + (top_margin - 1),
+        ///      logical_col + (left_margin - 1))
         ScrollRegion,
     }
 }
@@ -282,6 +326,25 @@ test_pub! {
     enum UnderlineStyle {
         Single,
         Double,
+        // The styles below only exist as kitty's extension of SGR 4, which
+        // picks the style with a subparameter as in `CSI 4:3 m`.
+        Curly,
+        Dotted,
+        Dashed,
+    }
+}
+
+impl UnderlineStyle {
+    /// The SGR code that turns this underline style on.
+    fn code(&self) -> ControlCode {
+        let controls = control_codes();
+        match self {
+            UnderlineStyle::Single => controls.underline.clone(),
+            UnderlineStyle::Double => controls.double_underline.clone(),
+            UnderlineStyle::Curly => controls.curly_underline.clone(),
+            UnderlineStyle::Dotted => controls.dotted_underline.clone(),
+            UnderlineStyle::Dashed => controls.dashed_underline.clone(),
+        }
     }
 }
 
@@ -334,6 +397,9 @@ impl std::fmt::Display for Attrs {
         match self.underline {
             Some(UnderlineStyle::Single) => write!(f, "_")?,
             Some(UnderlineStyle::Double) => write!(f, "‗")?,
+            Some(UnderlineStyle::Curly) => write!(f, "~")?,
+            Some(UnderlineStyle::Dotted) => write!(f, "┈")?,
+            Some(UnderlineStyle::Dashed) => write!(f, "╌")?,
             _ => {}
         }
         if self.inverse {
@@ -418,17 +484,14 @@ impl Attrs {
         match (&self.underline, &next.underline) {
             (None, None) => {}
             (Some(_), None) => codes.push(controls.undo_underline.clone()),
-            (None, Some(style)) => match style {
-                UnderlineStyle::Single => codes.push(controls.underline.clone()),
-                UnderlineStyle::Double => codes.push(controls.double_underline.clone()),
-            },
+            (None, Some(style)) => codes.push(style.code()),
             (Some(old), Some(new)) if old == new => {}
             (Some(_), Some(style)) => {
+                // Terminals like xterm track some underline styles as
+                // separate flags, so clear the old style rather than
+                // counting on the new one to replace it.
                 codes.push(controls.undo_underline.clone());
-                match style {
-                    UnderlineStyle::Single => codes.push(controls.underline.clone()),
-                    UnderlineStyle::Double => codes.push(controls.double_underline.clone()),
-                }
+                codes.push(style.code());
             }
         }
 
@@ -528,6 +591,9 @@ impl Attrs {
 /// charset table that printable chars get looked up in.
 pub const SHIFT_IN: u8 = 0x0f;
 
+/// Shift Out (SO), which invokes the G1 charset into GL. See `SHIFT_IN`.
+pub const SHIFT_OUT: u8 = 0x0e;
+
 test_pub! {
     // A dictionary of standard control codes. Access codes via the
     // control_codes() function. Most are constant struct members.
@@ -541,6 +607,9 @@ test_pub! {
         pub underline_color_default: ControlCode,
         pub underline: ControlCode,
         pub double_underline: ControlCode,
+        pub curly_underline: ControlCode,
+        pub dotted_underline: ControlCode,
+        pub dashed_underline: ControlCode,
         pub undo_underline: ControlCode,
         pub bold: ControlCode,
         pub faint: ControlCode,
@@ -566,8 +635,13 @@ test_pub! {
         pub save_cursor: ControlCode,
         pub restore_cursor: ControlCode,
         pub reverse_index: ControlCode,
+        pub index: ControlCode,
+        pub next_line: ControlCode,
         pub backspace: ControlCode,
         pub shift_in: ControlCode,
+        pub shift_out: ControlCode,
+        pub vertical_tab: ControlCode,
+        pub form_feed: ControlCode,
         pub cursor_backward_tab: ControlCode,
         pub cursor_backwards_tab: ControlCode,
         pub insert_character: ControlCode,
@@ -587,6 +661,9 @@ test_pub! {
         pub unset_scroll_region: ControlCode,
         pub enable_scroll_region_origin_mode: ControlCode,
         pub disable_scroll_region_origin_mode: ControlCode,
+        pub enable_left_right_margin_mode: ControlCode,
+        pub disable_left_right_margin_mode: ControlCode,
+        pub unset_left_right_margins: ControlCode,
         pub end_link: ControlCode,
         pub show_cursor: ControlCode,
         pub hide_cursor: ControlCode,
@@ -624,6 +701,10 @@ test_pub! {
         pub designate_g2_us_ascii: ControlCode,
         pub designate_g3_us_ascii: ControlCode,
         pub designate_g0_uk_ascii: ControlCode,
+        pub locking_shift_2: ControlCode,
+        pub locking_shift_3: ControlCode,
+        pub single_shift_2: ControlCode,
+        pub single_shift_3: ControlCode,
     }
 }
 
@@ -925,6 +1006,21 @@ test_pub! {
                 intermediates: smallvec![],
                 action: 'm',
             },
+            curly_underline: ControlCode::CSI {
+                params: smallvec![smallvec![4, 3]],
+                intermediates: smallvec![],
+                action: 'm',
+            },
+            dotted_underline: ControlCode::CSI {
+                params: smallvec![smallvec![4, 4]],
+                intermediates: smallvec![],
+                action: 'm',
+            },
+            dashed_underline: ControlCode::CSI {
+                params: smallvec![smallvec![4, 5]],
+                intermediates: smallvec![],
+                action: 'm',
+            },
             undo_underline: ControlCode::CSI {
                 params: smallvec![smallvec![24]],
                 intermediates: smallvec![],
@@ -1038,8 +1134,13 @@ test_pub! {
             save_cursor: ControlCode::ESC { intermediates: smallvec![], byte: b'7' },
             restore_cursor: ControlCode::ESC { intermediates: smallvec![], byte: b'8' },
             reverse_index: ControlCode::ESC { intermediates: smallvec![], byte: b'M' },
+            index: ControlCode::ESC { intermediates: smallvec![], byte: b'D' },
+            next_line: ControlCode::ESC { intermediates: smallvec![], byte: b'E' },
             backspace: ControlCode::C0 { byte: 0x08 },
             shift_in: ControlCode::C0 { byte: SHIFT_IN },
+            shift_out: ControlCode::C0 { byte: SHIFT_OUT },
+            vertical_tab: ControlCode::C0 { byte: 0x0b },
+            form_feed: ControlCode::C0 { byte: 0x0c },
             cursor_backward_tab: ControlCode::CSI {
                 params: smallvec![],
                 intermediates: smallvec![],
@@ -1134,6 +1235,23 @@ test_pub! {
                 params: smallvec![smallvec![6]],
                 intermediates: smallvec![b'?'],
                 action: 'l',
+            },
+            enable_left_right_margin_mode: ControlCode::CSI {
+                params: smallvec![smallvec![69]],
+                intermediates: smallvec![b'?'],
+                action: 'h',
+            },
+            disable_left_right_margin_mode: ControlCode::CSI {
+                params: smallvec![smallvec![69]],
+                intermediates: smallvec![b'?'],
+                action: 'l',
+            },
+            // DECSLRM without params, which only drops the margins while
+            // left/right margin mode is on. Otherwise it is SCOSC.
+            unset_left_right_margins: ControlCode::CSI {
+                params: smallvec![],
+                intermediates: smallvec![],
+                action: 's',
             },
             end_link: ControlCode::OSC { params: smallvec![smallvec![b'8'], smallvec![], smallvec![]], term: OSCTerm::default() },
             show_cursor: ControlCode::CSI {
@@ -1303,6 +1421,10 @@ test_pub! {
                 intermediates: smallvec![b'('],
                 byte: b'A',
             },
+            locking_shift_2: ControlCode::ESC { intermediates: smallvec![], byte: b'n' },
+            locking_shift_3: ControlCode::ESC { intermediates: smallvec![], byte: b'o' },
+            single_shift_2: ControlCode::ESC { intermediates: smallvec![], byte: b'N' },
+            single_shift_3: ControlCode::ESC { intermediates: smallvec![], byte: b'O' },
         })
     }
 }
@@ -1427,6 +1549,10 @@ impl ControlCodes {
         Self::cursor_backward_tab(n)
     }
 
+    pub fn cursor_forward_tab(n: u16) -> ControlCode {
+        Self::move_cursor(n, 'I')
+    }
+
     pub fn cursor_next_line(n: u16) -> ControlCode {
         Self::move_cursor(n, 'E')
     }
@@ -1481,6 +1607,14 @@ impl ControlCodes {
             intermediates: smallvec![],
             action: 'd',
         }
+    }
+
+    pub fn horizontal_position_relative(n: u16) -> ControlCode {
+        Self::move_cursor(n, 'a')
+    }
+
+    pub fn vertical_position_relative(n: u16) -> ControlCode {
+        Self::move_cursor(n, 'e')
     }
 
     fn move_cursor(n: u16, action: char) -> ControlCode {
@@ -1596,6 +1730,15 @@ impl ControlCodes {
         }
     }
 
+    /// DECSLRM, which only works while left/right margin mode is on.
+    pub fn set_left_right_margins(left: u16, right: u16) -> ControlCode {
+        ControlCode::CSI {
+            params: smallvec![smallvec![left], smallvec![right]],
+            intermediates: smallvec![],
+            action: 's',
+        }
+    }
+
     pub fn set_title_and_icon_name(title: SmallVec<[u8; 8]>) -> ControlCode {
         ControlCode::OSC { params: smallvec![smallvec![b'0'], title], term: OSCTerm::default() }
     }
@@ -1608,8 +1751,9 @@ impl ControlCodes {
         ControlCode::OSC { params: smallvec![smallvec![b'2'], title], term: OSCTerm::default() }
     }
 
-    pub fn set_working_dir(host: SmallVec<[u8; 8]>, dir: SmallVec<[u8; 8]>) -> ControlCode {
-        ControlCode::OSC { params: smallvec![smallvec![b'7'], host, dir], term: OSCTerm::default() }
+    /// Takes the `file://host/path` URL of the working dir.
+    pub fn set_working_dir(url: SmallVec<[u8; 8]>) -> ControlCode {
+        ControlCode::OSC { params: smallvec![smallvec![b'7'], url], term: OSCTerm::default() }
     }
 
     pub fn start_link(params: SmallVec<[u8; 8]>, url: SmallVec<[u8; 8]>) -> ControlCode {
@@ -1651,6 +1795,15 @@ impl ControlCodes {
             params.push(SmallVec::from(spec));
         }
         ControlCode::OSC { params, term: OSCTerm::default() }
+    }
+
+    /// OSC 110 through OSC 119, which reset the functional color at `offset`
+    /// (see `set_functional_color`) to its default.
+    pub fn reset_functional_color(offset: usize) -> ControlCode {
+        ControlCode::OSC {
+            params: smallvec![smallvec![b'1', b'1', b'0' + offset as u8]],
+            term: OSCTerm::default(),
+        }
     }
 
     pub fn tab_clear(code: Option<u16>) -> ControlCode {
@@ -1774,6 +1927,14 @@ impl ControlCodes {
         }
     }
 
+    /// The one CSI that `codes` fuse into, the way the dump fuses runs of
+    /// SGRs. The codes all have to share an action and intermediates.
+    pub fn fused_csi(codes: &[&ControlCode]) -> ControlCode {
+        let mut fused = ControlCode::fuse_csi(codes.iter().map(|&code| code.clone()));
+        assert_eq!(fused.len(), 1, "codes do not fuse into one CSI");
+        fused.pop().unwrap()
+    }
+
     /// A CSI with the given private marker or intermediates and a single
     /// value for each param.
     fn csi<P: IntoIterator<Item = u16>>(
@@ -1796,6 +1957,18 @@ impl ControlCodes {
     pub fn dec_private_modes_reset(modes: &[u16]) -> ControlCode {
         let params = modes.iter().map(|&m| smallvec![m]).collect();
         ControlCode::CSI { params, intermediates: smallvec![b'?'], action: 'l' }
+    }
+
+    /// SCS (Select Character Set), which designates the 94 char set with
+    /// the given final byte into one of the G0-G3 slots.
+    pub fn designate_charset(slot: usize, designator: u8) -> ControlCode {
+        let intermediate = match slot {
+            0 => b'(',
+            1 => b')',
+            2 => b'*',
+            _ => b'+',
+        };
+        ControlCode::ESC { intermediates: smallvec![intermediate], byte: designator }
     }
 }
 

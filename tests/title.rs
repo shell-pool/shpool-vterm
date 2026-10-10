@@ -248,6 +248,56 @@ frag! {
             term::ControlCodes::set_title(smallvec![b'A'])
 }
 
+frag! {
+    title_with_semicolons { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::ControlCodes::set_title(b"a;b;c"[..].into())
+    => ContentRegion::All =>
+            reset_codes,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs,
+            term::ControlCodes::set_title(b"a;b;c"[..].into())
+}
+
+frag! {
+    title_and_icon_with_semicolons { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::ControlCodes::set_title_and_icon_name(b"vim; ~/src;"[..].into())
+    => ContentRegion::All =>
+            reset_codes,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs,
+            term::ControlCodes::set_title_and_icon_name(b"vim; ~/src;"[..].into())
+}
+
+frag! {
+    icon_with_semicolons { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::ControlCodes::set_icon_name(b";a;"[..].into())
+    => ContentRegion::All =>
+            reset_codes,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs,
+            term::ControlCodes::set_icon_name(b";a;"[..].into())
+}
+
+frag! {
+    title_over_long_truncated { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::ControlCodes::set_title("a".repeat(10000).as_bytes().into())
+    => ContentRegion::All =>
+            reset_codes,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs,
+            term::ControlCodes::set_title("a".repeat(8192).as_bytes().into())
+}
+
+frag! {
+    title_over_long_truncated_on_char_boundary { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::ControlCodes::set_title(format!("{}éé", "a".repeat(8189)).as_bytes().into())
+    => ContentRegion::All =>
+            reset_codes,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs,
+            term::ControlCodes::set_title(format!("{}é", "a".repeat(8189)).as_bytes().into())
+}
+
 fn new_term() -> shpool_vterm::Term {
     shpool_vterm::Term::new(10, shpool_vterm::Size { width: 10, height: 10 })
 }

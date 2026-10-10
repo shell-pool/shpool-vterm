@@ -17,9 +17,10 @@
 use std::collections::VecDeque;
 
 use crate::{
+    cell::Cell,
     line::{self, Line},
     log,
-    term::{self, AsTermInput, OriginMode, Pos, ScrollRegion},
+    term::{OriginMode, Pos, ScrollRegion},
 };
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -70,13 +71,13 @@ impl AltScreen {
     }
 
     /// SU (CSI S). Move the content of the scroll region up by `rows`,
-    /// opening blank rows at the bottom. Also what a linefeed at the bottom
-    /// of the scroll region does.
-    pub fn scroll_up(&mut self, rows: usize) {
+    /// opening rows of `fill` at the bottom. Also what a linefeed at the
+    /// bottom of the scroll region does.
+    pub fn scroll_up(&mut self, width: usize, rows: usize, fill: &Cell) {
         if let ScrollRegion::TrackSize = self.scroll_region {
-            for _ in 0..rows {
+            for _ in 0..std::cmp::min(rows, self.buf.len()) {
                 self.buf.pop_front();
-                self.buf.push_back(Line::new());
+                self.buf.push_back(Line::blank(width, fill));
             }
             return;
         }
@@ -90,7 +91,7 @@ impl AltScreen {
             // If we have to scroll past the whole scroll region, just
             // clobber everything.
             for i in top..bottom {
-                self.buf[i] = Line::new();
+                self.buf[i] = Line::blank(width, fill);
             }
             return;
         }
@@ -100,17 +101,17 @@ impl AltScreen {
             self.buf[top + i] = self.buf[top + rows + i].clone();
         }
         for i in 0..rows {
-            self.buf[top + to_shuffle + i] = Line::new();
+            self.buf[top + to_shuffle + i] = Line::blank(width, fill);
         }
     }
 
     /// SD (CSI T). Move the content of the scroll region down by `rows`,
-    /// opening blank rows at the top. Rows pushed past the bottom of the
+    /// opening rows of `fill` at the top. Rows pushed past the bottom of the
     /// region are lost. Also what a reverse index at the top of the scroll
     /// region does.
-    pub fn scroll_down(&mut self, rows: usize) {
+    pub fn scroll_down(&mut self, width: usize, rows: usize, fill: &Cell) {
         let (top, _) = self.scroll_region_rows();
-        self.insert_lines(&Pos { row: top, col: 0 }, rows);
+        self.insert_lines(width, &Pos { row: top, col: 0 }, rows, fill);
     }
 
     pub fn clamp_to_scroll_region(&self, cursor: &mut Pos, size: &crate::Size) {
@@ -150,47 +151,36 @@ impl AltScreen {
     // Command handlers
     //
 
-    pub fn erase_to_end(&mut self, cursor: Pos) {
+    /// ED 0 (CSI 0 J). Erase from the cursor to the end of the screen. Like
+    /// the rest of ED, this covers the whole screen whatever the scroll
+    /// region and origin mode are.
+    pub fn erase_to_end(&mut self, width: usize, cursor: Pos, fill: &Cell) {
         if let Some(line) = self.buf.get_mut(cursor.row) {
-            line.truncate(cursor.col);
+            line.erase(width, line::Section::ToEnd(cursor.col), fill);
         }
-
-        let end = match (self.origin_mode, &self.scroll_region) {
-            (OriginMode::ScrollRegion, ScrollRegion::Window { bottom, .. }) => *bottom,
-            _ => self.buf.len(),
-        };
-
-        for i in (cursor.row + 1)..std::cmp::min(end, self.buf.len()) {
-            self.buf[i].truncate(0);
+        for line in self.buf.iter_mut().skip(cursor.row + 1) {
+            *line = Line::blank(width, fill);
         }
     }
 
-    pub fn erase_from_start(&mut self, cursor: Pos) {
-        let start = match (self.origin_mode, &self.scroll_region) {
-            (OriginMode::ScrollRegion, ScrollRegion::Window { top, .. }) => *top,
-            _ => 0,
-        };
-
-        for i in start..std::cmp::min(cursor.row, self.buf.len()) {
-            self.buf[i].truncate(0);
+    /// ED 1 (CSI 1 J). Erase from the top of the screen to the cursor.
+    pub fn erase_from_start(&mut self, width: usize, cursor: Pos, fill: &Cell) {
+        for line in self.buf.iter_mut().take(cursor.row) {
+            *line = Line::blank(width, fill);
         }
         if let Some(line) = self.buf.get_mut(cursor.row) {
-            line.erase(line::Section::StartTo(cursor.col));
+            line.erase(width, line::Section::StartTo(cursor.col), fill);
         }
     }
 
-    pub fn erase(&mut self) {
-        let (start, end) = match (self.origin_mode, &self.scroll_region) {
-            (OriginMode::ScrollRegion, ScrollRegion::Window { top, bottom }) => (*top, *bottom),
-            _ => (0, self.buf.len()),
-        };
-
-        for i in start..std::cmp::min(end, self.buf.len()) {
-            self.buf[i].truncate(0);
+    /// ED 2 (CSI 2 J). Erase the whole screen.
+    pub fn erase(&mut self, width: usize, fill: &Cell) {
+        for line in self.buf.iter_mut() {
+            *line = Line::blank(width, fill);
         }
     }
 
-    pub fn insert_lines(&mut self, cursor: &Pos, n: usize) {
+    pub fn insert_lines(&mut self, width: usize, cursor: &Pos, n: usize, fill: &Cell) {
         let (top, bottom) = self.scroll_region_rows();
         if cursor.row < top || bottom <= cursor.row {
             // Insert Line does nothing when the cursor is outside
@@ -215,12 +205,12 @@ impl AltScreen {
         }
 
         // clober any lines that are not handled by the initial pass.
-        for i in shuffle_lines..lines_to_insert {
-            self.buf[cursor.row + i] = Line::new();
+        for i in 0..lines_to_insert {
+            self.buf[cursor.row + i] = Line::blank(width, fill);
         }
     }
 
-    pub fn delete_lines(&mut self, cursor: &Pos, n: usize) {
+    pub fn delete_lines(&mut self, width: usize, cursor: &Pos, n: usize, fill: &Cell) {
         let (top, bottom) = self.scroll_region_rows();
         if cursor.row < top || bottom <= cursor.row {
             // Delete Line does nothing when the cursor is outside
@@ -235,8 +225,8 @@ impl AltScreen {
             self.buf[cursor.row + i] =
                 std::mem::replace(&mut self.buf[cursor.row + lines_to_delete + i], Line::new());
         }
-        for i in shuffle_lines..lines_to_delete {
-            self.buf[cursor.row + i] = Line::new();
+        for i in shuffle_lines..(shuffle_lines + lines_to_delete) {
+            self.buf[cursor.row + i] = Line::blank(width, fill);
         }
     }
 }
@@ -250,23 +240,17 @@ impl std::fmt::Display for AltScreen {
     }
 }
 
-impl AsTermInput for AltScreen {
-    fn term_input_into(&self, buf: &mut Vec<u8>) {
-        for (i, line) in self.buf.iter().enumerate() {
-            line.term_input_into(buf);
-            if i != self.buf.len() - 1 {
-                term::Crlf::default().term_input_into(buf);
-            }
-        }
-
-        self.scroll_region.term_input_into(buf);
+impl AltScreen {
+    /// Emit the codes that paint the alt screen, from the top left corner.
+    pub fn dump_contents_into(&self, buf: &mut Vec<u8>, width: usize) {
+        line::dump_lines_into(buf, width, self.buf.iter());
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cell::Cell;
+    use crate::term;
 
     const SIZE: crate::Size = crate::Size { width: 5, height: 3 };
 
@@ -296,7 +280,7 @@ mod tests {
         let mut alt = alt_screen();
         alt.scroll_region = ScrollRegion::Window { top: 0, bottom: SIZE.height + 6 };
 
-        alt.scroll_up(1);
+        alt.scroll_up(SIZE.width, 1, &Cell::empty());
 
         assert_eq!(first_col(&alt), "bc.");
     }
@@ -306,7 +290,7 @@ mod tests {
         let mut alt = alt_screen();
         alt.scroll_region = ScrollRegion::Window { top: 0, bottom: SIZE.height + 6 };
 
-        alt.scroll_down(1);
+        alt.scroll_down(SIZE.width, 1, &Cell::empty());
 
         assert_eq!(first_col(&alt), ".ab");
     }
@@ -317,7 +301,7 @@ mod tests {
         alt.origin_mode = OriginMode::ScrollRegion;
         alt.scroll_region = ScrollRegion::Window { top: 0, bottom: SIZE.height + 6 };
 
-        alt.erase();
+        alt.erase(SIZE.width, &Cell::empty());
 
         assert_eq!(first_col(&alt), "...");
     }
@@ -326,7 +310,7 @@ mod tests {
     fn insert_lines_past_last_row() {
         let mut alt = alt_screen();
 
-        alt.insert_lines(&Pos { row: SIZE.height + 2, col: 0 }, 1);
+        alt.insert_lines(SIZE.width, &Pos { row: SIZE.height + 2, col: 0 }, 1, &Cell::empty());
 
         assert_eq!(first_col(&alt), "abc");
     }
@@ -335,7 +319,7 @@ mod tests {
     fn delete_lines_past_last_row() {
         let mut alt = alt_screen();
 
-        alt.delete_lines(&Pos { row: SIZE.height + 2, col: 0 }, 1);
+        alt.delete_lines(SIZE.width, &Pos { row: SIZE.height + 2, col: 0 }, 1, &Cell::empty());
 
         assert_eq!(first_col(&alt), "abc");
     }
@@ -346,7 +330,7 @@ mod tests {
     fn erase_to_end_past_last_row() {
         let mut alt = alt_screen();
 
-        alt.erase_to_end(Pos { row: SIZE.height + 2, col: 0 });
+        alt.erase_to_end(SIZE.width, Pos { row: SIZE.height + 2, col: 0 }, &Cell::empty());
 
         assert_eq!(first_col(&alt), "abc");
     }
@@ -356,7 +340,7 @@ mod tests {
     fn erase_from_start_past_last_row() {
         let mut alt = alt_screen();
 
-        alt.erase_from_start(Pos { row: SIZE.height + 2, col: 0 });
+        alt.erase_from_start(SIZE.width, Pos { row: SIZE.height + 2, col: 0 }, &Cell::empty());
 
         assert_eq!(first_col(&alt), "...");
     }
