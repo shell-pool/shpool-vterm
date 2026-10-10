@@ -36,6 +36,10 @@ pub(crate) struct Scrollback {
     pub buf: VecDeque<Line>,
     /// The number of lines of scrollback to store, independent of the
     /// size of the grid that is in view.
+    ///
+    /// A resize never drops lines, so narrowing, which takes more lines to
+    /// hold the same content, can leave more lines than this in the buffer.
+    /// New output trims them back down (see `add_line`).
     lines: usize,
     /// The region of the screen in which scrolling happens.
     /// This is set by DECSTBM (CSI n ; n r).
@@ -113,9 +117,16 @@ impl Scrollback {
         self.lines = scrollback_lines;
     }
 
+    /// Add a line at the bottom, pushing the oldest line out once the
+    /// scrollback is full.
+    ///
+    /// After a resize to a narrower width there can be more lines than the
+    /// limit. Until the scrollback is back down to the limit, every new line
+    /// pushes out one extra.
     fn add_line(&mut self, line: Line) {
         self.buf.push_front(line);
-        while self.buf.len() > self.lines {
+        let excess = self.buf.len().saturating_sub(self.lines);
+        for _ in 0..std::cmp::min(excess, 2) {
             self.buf.pop_back();
         }
     }
@@ -303,14 +314,10 @@ impl Scrollback {
             }
         }
 
-        // The bottom line goes at the front of the buffer.
+        // The bottom line goes at the front of the buffer. Narrowing can make
+        // for more lines than the scrollback limit, but they all stay, and
+        // new output trims them back down (see `add_line`).
         self.buf = new_lines.into_iter().rev().collect();
-        // Narrowing makes for more lines, and the ones that no longer fit in
-        // the scrollback fall off the top. An anchor on one of them resolves
-        // to the top row.
-        while self.buf.len() > self.lines {
-            self.buf.pop_back();
-        }
     }
 
     // Resolve a logical offset in the visible grid to an actual Line.

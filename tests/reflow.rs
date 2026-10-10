@@ -116,14 +116,32 @@ fn last_line_claiming_to_wrap_survives() {
     assert_eq!(dump(&term), dump(&want));
 }
 
+// Narrowing takes more lines to hold the same content, but a resize must not
+// lose any of it, even when that takes more lines than the scrollback limit.
 #[test]
-fn narrowing_drops_lines_that_no_longer_fit_in_the_scrollback() {
-    assert_reflows_like_written(
-        3,
-        "aaaa\r\nbbbb\r\ncc",
-        Size { width: 4, height: 2 },
-        Size { width: 2, height: 2 },
-    );
+fn narrowing_keeps_lines_past_the_scrollback_limit() {
+    let size = Size { width: 4, height: 2 };
+    let mut term = Term::new(3, size);
+    term.process(b"aaaa\r\nbbbb\r\ncc");
+    let want = dump(&term);
+
+    term.resize(Size { width: 2, height: 2 });
+    term.resize(size);
+    assert_eq!(dump(&term), want);
+}
+
+// New output gets the scrollback back down to the limit by pushing out an
+// extra line for every line it adds.
+#[test]
+fn output_trims_back_down_to_the_scrollback_limit() {
+    let mut term = Term::new(3, Size { width: 4, height: 2 });
+    term.process(b"aaaa\r\nbbbb\r\ncc");
+    term.resize(Size { width: 2, height: 2 });
+    term.process(b"\r\nd\r\ne");
+
+    let mut want = Term::new(3, Size { width: 2, height: 2 });
+    want.process(b"cc\r\nd\r\ne");
+    assert_eq!(dump(&term), dump(&want));
 }
 
 #[test]
