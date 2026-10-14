@@ -1,6 +1,6 @@
 [package]
 name = "shpool-vterm"
-version = "0.2.7"
+version = "0.2.8"
 edition = "2021"
 repository = "https://github.com/shell-pool/shpool-vterm"
 readme = "README.md"
