@@ -286,8 +286,10 @@ impl Screen {
         row: usize,
     ) {
         let width = self.size.width;
-        let line = grid.get_line(self.size, line_row);
-        let cell_at = |col: usize| line.and_then(|l| l.get_cell(width, col));
+        // What gets printed has to look like what the screen shows, and a
+        // screen too narrow for a wide char shows a blank in its place.
+        let line = grid.get_line(self.size, line_row).map(|l| l.shown_at(width));
+        let cell_at = |col: usize| line.as_ref().and_then(|l| l.get_cell(width, col));
 
         // The last column might be the padding half of a wide char, in which
         // case the char to print starts one column further left.

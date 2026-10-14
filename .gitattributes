@@ -1,0 +1,2 @@
+# Saved fuzz inputs are raw bytes, which git must not convert or diff.
+tests/data/fuzz/** binary

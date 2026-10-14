@@ -217,3 +217,19 @@ fn wide_char_shows_up_as_a_blank_on_a_one_column_screen() {
     want.process(b"a\r\n\r\nb");
     assert_eq!(dump(&term), dump(&want));
 }
+
+// The blank has the wide char's attrs. Restoring a cursor that is waiting to
+// wrap after it prints the blank again, since that is the only way to get the
+// wrap back, and it has to print it with those attrs.
+#[test]
+fn wide_char_blank_with_a_wrap_pending_restores() {
+    for attrs in [term::ControlCodes::bgcolor_idx(4), term::control_codes().inverse.clone()] {
+        let mut session = Term::new(100, Size { width: 5, height: 3 });
+        session.process(&input![attrs, term::Raw::from("中")]);
+        session.resize(Size { width: 1, height: 3 });
+
+        let mut restored = Term::new(100, Size { width: 1, height: 3 });
+        restored.process(&session.contents(ContentRegion::All));
+        assert_eq!(dump(&restored), dump(&session));
+    }
+}
