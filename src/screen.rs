@@ -12,8 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The screen module defines a trait that encapsulates the functionality
-//! which is shared between the normal scrollback screen and the altscreen.
+//! The screen module defines the state of the terminal screen: the main
+//! screen and the alt screen, along with the cursor and the rest of the
+//! state that a real terminal only has one of and shares between them.
 
 use crate::{
     altscreen::AltScreen,
@@ -28,14 +29,14 @@ use crate::{
 
 use anyhow::{anyhow, Context};
 
-/// A screen containts some kind of grid of cells, plus top
-/// level fields that are common to all screen variants.
+/// The main screen and the alt screen, along with the state they share.
+///
+/// Switching screens leaves the cursor, the scroll region and origin mode as
+/// they were, since a real terminal only has one of each.
 #[derive(Debug)]
 pub struct Screen {
-    // The actual storage for lines of cells. This will take
-    // different forms depending on which type of screen this
-    // is, and determins which type of screen it is.
-    grid: Grid,
+    // The storage for the lines of both screens.
+    grids: Grids,
     // The size of the visible window.
     pub size: crate::Size,
     /// The current position of the cursor within the in-view window described
@@ -50,93 +51,104 @@ pub struct Screen {
     /// a blank line behind. Anything that explicitly moves the cursor cancels
     /// the pending wrap. DEC calls this the "last column flag".
     pub pending_wrap: bool,
-    // The slot where cursor position info is saved by the SCP/RCP
-    // and ESC 7 / ESC 8 commands.
-    pub saved_cursor: SavedCursor,
+    /// The region of the screen in which scrolling happens.
+    /// This is set by DECSTBM (CSI n ; n r).
+    scroll_region: ScrollRegion,
+    origin_mode: OriginMode,
     logger: log::Context,
 }
 
 impl Screen {
-    /// Create a new scrollback mode screen (a regular terminal screen).
-    pub fn scrollback(mut scrollback_lines: usize, size: crate::Size) -> Self {
+    /// Create a new screen, with the main screen active.
+    pub fn new(mut scrollback_lines: usize, size: crate::Size) -> Self {
         if scrollback_lines < size.height {
             scrollback_lines = size.height;
         }
 
         Screen {
-            grid: Grid::Scrollback(Scrollback::new(scrollback_lines)),
+            grids: Grids {
+                scrollback: Scrollback::new(scrollback_lines),
+                scrollback_saved_cursor: SavedCursor::new(Pos { row: 0, col: 0 }),
+                altscreen: AltScreen::new(size),
+                altscreen_saved_cursor: SavedCursor::new(Pos { row: 0, col: 0 }),
+                alt_active: false,
+            },
             size,
             cursor: Pos { row: 0, col: 0 },
             pending_wrap: false,
-            saved_cursor: SavedCursor::new(Pos { row: 0, col: 0 }),
-            logger: log::Context::None,
-        }
-    }
-
-    /// Create a new alt screen mode screen (used by ncurses apps like vim).
-    pub fn alt(size: crate::Size) -> Self {
-        Screen {
-            grid: Grid::AltScreen(AltScreen::new(size)),
-            size,
-            cursor: Pos { row: 0, col: 0 },
-            pending_wrap: false,
-            saved_cursor: SavedCursor::new(Pos { row: 0, col: 0 }),
+            scroll_region: ScrollRegion::default(),
+            origin_mode: OriginMode::default(),
             logger: log::Context::None,
         }
     }
 
     pub fn set_logger(&mut self, logger: log::Context) {
-        self.grid.set_logger(logger.clone());
+        self.grids.scrollback.set_logger(logger.clone());
+        self.grids.altscreen.set_logger(logger.clone());
         self.logger = logger;
     }
 
-    /// Return the number of scrollback lines iff this is a scrollback screen.
-    pub fn scrollback_lines(&self) -> Option<usize> {
-        if let Grid::Scrollback(scrollback) = &self.grid {
-            Some(scrollback.scrollback_lines())
-        } else {
-            None
-        }
+    /// Return the number of lines of scrollback the main screen stores.
+    pub fn scrollback_lines(&self) -> usize {
+        self.grids.scrollback.scrollback_lines()
     }
 
-    /// Set the number of scrollback lines. Only works if this is a scrollback
-    /// screen.
+    /// Set the number of lines of scrollback the main screen stores.
     pub fn set_scrollback_lines(&mut self, scrollback_lines: usize) {
-        if let Grid::Scrollback(scrollback) = &mut self.grid {
-            scrollback.set_scrollback_lines(self.size, scrollback_lines);
-        } else {
-            warn!(self.logger, "attempt to set scrollback lines on non-scrollback screen");
-        }
+        self.grids.scrollback.set_scrollback_lines(self.size, scrollback_lines);
+    }
+
+    /// Whether the alt screen is the active one.
+    pub fn alt_active(&self) -> bool {
+        self.grids.alt_active
+    }
+
+    /// Switch to the alt screen, which starts out blank and with nothing
+    /// saved in its slot for DECSC. Like erasing the screen, this cancels a
+    /// pending wrap.
+    pub fn enter_alt_screen(&mut self) {
+        self.grids.altscreen = AltScreen::new(self.size);
+        self.grids.altscreen.set_logger(self.logger.clone());
+        self.grids.altscreen_saved_cursor = SavedCursor::new(Pos { row: 0, col: 0 });
+        self.grids.alt_active = true;
+        self.pending_wrap = false;
+    }
+
+    /// Switch back to the main screen.
+    pub fn exit_alt_screen(&mut self) {
+        self.grids.alt_active = false;
+    }
+
+    /// The slot where the SCP/RCP and ESC 7 / ESC 8 commands save the
+    /// cursor. Like in xterm, the main screen and the alt screen each have
+    /// their own, and this is the one of the active screen.
+    pub fn saved_cursor(&self) -> &SavedCursor {
+        self.grids.saved_cursor()
+    }
+
+    /// `saved_cursor`, for changing it.
+    pub fn saved_cursor_mut(&mut self) -> &mut SavedCursor {
+        self.grids.saved_cursor_mut()
     }
 
     pub fn set_scroll_region(&mut self, scroll_region: ScrollRegion) {
-        self.store_scroll_region(clamp_scroll_region(scroll_region, self.size));
-    }
-
-    fn store_scroll_region(&mut self, scroll_region: ScrollRegion) {
-        match &mut self.grid {
-            Grid::Scrollback(scrollback) => scrollback.scroll_region = scroll_region,
-            Grid::AltScreen(altscreen) => altscreen.scroll_region = scroll_region,
-        }
+        self.scroll_region = clamp_scroll_region(scroll_region, self.size);
     }
 
     pub fn set_origin_mode(&mut self, origin_mode: OriginMode) {
-        match &mut self.grid {
-            Grid::Scrollback(s) => s.origin_mode = origin_mode,
-            Grid::AltScreen(alt) => alt.origin_mode = origin_mode,
-        }
+        self.origin_mode = origin_mode;
     }
 
     /// Given a 1-indexed position as the user would directly provide in
     /// a CUP command, update the cursor position, taking the current origin
     /// mode and scroll region into account.
     pub fn set_cursor(&mut self, pos: Pos) {
-        match self.grid.origin_mode() {
+        match self.origin_mode {
             OriginMode::Term => {
                 self.cursor.row = pos.row.saturating_sub(1);
                 self.cursor.col = pos.col.saturating_sub(1);
             }
-            OriginMode::ScrollRegion => match self.grid.scroll_region() {
+            OriginMode::ScrollRegion => match self.scroll_region {
                 ScrollRegion::TrackSize => {
                     self.cursor.row = pos.row.saturating_sub(1);
                     self.cursor.col = pos.col.saturating_sub(1);
@@ -150,47 +162,91 @@ impl Screen {
     }
 
     pub fn dump_contents_into(&self, buf: &mut Vec<u8>, dump_region: crate::ContentRegion) {
-        match &self.grid {
-            Grid::Scrollback(scrollback) => {
-                scrollback.dump_contents_into(buf, self.size, dump_region)
+        let scrollback = Grid::Scrollback(&self.grids.scrollback);
+        if self.grids.alt_active {
+            // Restore the main screen first so that after the user exits
+            // their curses app, they can still see shell history.
+            self.grids.scrollback.dump_contents_into(buf, self.size, dump_region);
+
+            // Switching to the alt screen saves the cursor like DECSC does,
+            // and the app switches back with a DECRC, so the cursor has to be
+            // where the main screen has it saved for the switch to save.
+            let saved = &self.grids.scrollback_saved_cursor;
+            self.dump_cursor_into(buf, scrollback, saved.pos, saved.pending_wrap, saved.pos.row);
+
+            // Re-enable alt screen, then dump the contents. This is
+            // not actually super important in practice because basically
+            // every curses app respects SIGWINCH. We may even want to
+            // consider exposing a knob to disable alt-screen dumping
+            // since it might make things less flickery. Not worth doing
+            // for now though.
+            term::control_codes().enable_alt_screen.term_input_into(buf);
+
+            // Switching screens doesn't move the cursor, but the alt screen
+            // gets painted from the top left corner down.
+            if saved.pos != (Pos { row: 0, col: 0 }) || saved.pending_wrap {
+                term::ControlCodes::cursor_position(1, 1).term_input_into(buf);
             }
-            Grid::AltScreen(altscreen) => altscreen.dump_contents_into(buf, self.size.width),
+            self.grids.altscreen.dump_contents_into(buf, self.size.width);
+        } else {
+            self.grids.scrollback.dump_contents_into(buf, self.size, dump_region);
         }
+
+        self.scroll_region.term_input_into(buf);
 
         // Origin mode has to be restored before the cursor, since enabling
         // it homes the cursor.
-        let origin_mode = self.grid.origin_mode();
-        if matches!(origin_mode, OriginMode::ScrollRegion) {
+        if matches!(self.origin_mode, OriginMode::ScrollRegion) {
             term::control_codes().enable_scroll_region_origin_mode.term_input_into(buf);
         }
 
         // Rows are relative to the top of the scroll region once origin
         // mode is on, mirroring `set_cursor`.
-        let row = match (origin_mode, self.grid.scroll_region()) {
+        let row = match (self.origin_mode, &self.scroll_region) {
             (OriginMode::ScrollRegion, ScrollRegion::Window { top, .. }) => {
                 self.cursor.row.saturating_sub(*top)
             }
             _ => self.cursor.row,
         };
 
-        if self.pending_wrap {
-            self.dump_pending_wrap_into(buf, row);
+        self.dump_cursor_into(buf, self.grids.active(), self.cursor, self.pending_wrap, row);
+    }
+
+    /// Put the cursor at `pos` on `grid`, waiting to wrap if `pending_wrap`
+    /// is set. `row` is the row the terminal addresses `pos` as.
+    fn dump_cursor_into(
+        &self,
+        buf: &mut Vec<u8>,
+        grid: Grid<'_>,
+        pos: Pos,
+        pending_wrap: bool,
+        row: usize,
+    ) {
+        if pending_wrap {
+            self.dump_pending_wrap_into(buf, grid, pos.row, row);
         } else {
-            term::ControlCodes::cursor_position((row + 1) as u16, (self.cursor.col + 1) as u16)
+            term::ControlCodes::cursor_position((row + 1) as u16, (pos.col + 1) as u16)
                 .term_input_into(buf);
         }
     }
 
-    /// Leave the cursor on the last column with a wrap pending.
+    /// Leave the cursor on the last column of row `line_row` of `grid` with a
+    /// wrap pending.
     ///
     /// There is no control code that sets the pending wrap flag, so we get
     /// the terminal into that state the same way the application did, by
     /// printing the char that sits at the end of the line. It is already on
     /// the screen, so printing it again over itself changes nothing else.
-    /// `row` is the cursor row as `dump_contents_into` addresses it.
-    fn dump_pending_wrap_into(&self, buf: &mut Vec<u8>, row: usize) {
+    /// `row` is the row the terminal addresses `line_row` as.
+    fn dump_pending_wrap_into(
+        &self,
+        buf: &mut Vec<u8>,
+        grid: Grid<'_>,
+        line_row: usize,
+        row: usize,
+    ) {
         let width = self.size.width;
-        let line = self.grid.get_line(self.size, self.cursor.row);
+        let line = grid.get_line(self.size, line_row);
         let cell_at = |col: usize| line.and_then(|l| l.get_cell(width, col));
 
         // The last column might be the padding half of a wide char, in which
@@ -227,36 +283,6 @@ impl Screen {
         }
     }
 
-    /// Emit the codes needed to undo the global terminal state that
-    /// `dump_contents_into` leaves set.
-    ///
-    /// We track the scroll region and origin mode per screen, but a real
-    /// terminal only has one of each, so a dump that restores more than one
-    /// screen has to clean up after the earlier screens. We only emit the
-    /// codes we actually need because restore buffers get written to the
-    /// wire on every reattach.
-    ///
-    /// Both codes home the cursor, so this returns whether it emitted any.
-    pub fn dump_global_state_reset_into(&self, buf: &mut Vec<u8>) -> bool {
-        let mut homed = false;
-        if matches!(self.grid.scroll_region(), ScrollRegion::Window { .. }) {
-            term::control_codes().unset_scroll_region.term_input_into(buf);
-            homed = true;
-        }
-
-        if matches!(self.grid.origin_mode(), OriginMode::ScrollRegion) {
-            term::control_codes().disable_scroll_region_origin_mode.term_input_into(buf);
-            homed = true;
-        }
-
-        homed
-    }
-
-    /// Whether `dump_contents_into` leaves the cursor in the top left corner.
-    pub fn dump_leaves_cursor_home(&self) -> bool {
-        self.cursor == Pos { row: 0, col: 0 } && !self.pending_wrap
-    }
-
     pub fn resize(&mut self, new_size: crate::Size) {
         // shpool resizes the terminal on every reattach, usually to the size
         // it already is. The kernel only sends SIGWINCH when the size changes,
@@ -269,46 +295,48 @@ impl Screen {
         // A cursor with a wrap pending is logically just past the char in
         // the last column, and that is the spot it should keep following.
         let cursor = logical_unwrapped_pos(self.cursor, self.pending_wrap);
+        let saved = &self.grids.scrollback_saved_cursor;
+        let saved_cursor = logical_unwrapped_pos(saved.pos, saved.pending_wrap);
+
+        // A row of the main screen is derived from the buffer length and the
+        // height, both of which this changes, so the cursor has to be
+        // re-derived rather than just clamped. The saved cursor is a row too,
+        // and a resize between DECSC and DECRC moves it just the same, even
+        // while the alt screen is up.
+        let scrollback = &mut self.grids.scrollback;
+        let mut anchors = [
+            scrollback.anchor_cursor(old_size, cursor, self.pending_wrap),
+            scrollback.anchor_cursor(old_size, saved_cursor, saved.pending_wrap),
+        ];
+        // While the alt screen is up, the cursor is on it instead.
+        let on_scrollback =
+            if self.grids.alt_active { &mut anchors[1..] } else { &mut anchors[..] };
+        // Only the width decides where lines wrap.
+        if new_size.width != old_size.width {
+            scrollback.reflow(new_size.width, on_scrollback);
+        }
+        let [cursor_anchor, saved_anchor] = anchors;
         let saved_cursor =
-            logical_unwrapped_pos(self.saved_cursor.pos, self.saved_cursor.pending_wrap);
-        let ((cursor, pending_wrap), (saved_cursor, saved_pending_wrap)) = match &mut self.grid {
-            Grid::Scrollback(scrollback) => {
-                // A row is derived from the buffer length and the height, both
-                // of which this changes, so the cursor has to be re-derived
-                // rather than just clamped. The saved cursor is a row too, and
-                // a resize between DECSC and DECRC moves it just the same.
-                let mut anchors = [
-                    scrollback.anchor_cursor(old_size, cursor, self.pending_wrap),
-                    scrollback.anchor_cursor(
-                        old_size,
-                        saved_cursor,
-                        self.saved_cursor.pending_wrap,
-                    ),
-                ];
-                // Only the width decides where lines wrap.
-                if new_size.width != old_size.width {
-                    scrollback.reflow(new_size.width, &mut anchors);
-                }
-                (
-                    (scrollback.resolve_cursor(new_size, anchors[0]), anchors[0].pending_wrap),
-                    (scrollback.resolve_cursor(new_size, anchors[1]), anchors[1].pending_wrap),
-                )
-            }
-            Grid::AltScreen(altscreen) => {
-                altscreen.resize(new_size);
-                ((cursor, self.pending_wrap), (saved_cursor, self.saved_cursor.pending_wrap))
-            }
+            (scrollback.resolve_cursor(new_size, saved_anchor), saved_anchor.pending_wrap);
+        let (cursor, pending_wrap) = if self.grids.alt_active {
+            (cursor, self.pending_wrap)
+        } else {
+            (scrollback.resolve_cursor(new_size, cursor_anchor), cursor_anchor.pending_wrap)
         };
+        self.grids.altscreen.resize(new_size);
         self.size = new_size;
 
         // Like in other terminals, a resize drops the scroll region. The rows
         // it covered have moved or might not even be there anymore, and apps
         // set up a new one when they redraw for the new size.
-        self.store_scroll_region(ScrollRegion::TrackSize);
+        self.scroll_region = ScrollRegion::TrackSize;
 
         (self.cursor, self.pending_wrap) = settle_cursor(cursor, pending_wrap, self.size);
-        (self.saved_cursor.pos, self.saved_cursor.pending_wrap) =
-            settle_cursor(saved_cursor, saved_pending_wrap, self.size);
+        let saved = &mut self.grids.scrollback_saved_cursor;
+        (saved.pos, saved.pending_wrap) = settle_cursor(saved_cursor.0, saved_cursor.1, self.size);
+        let saved = &mut self.grids.altscreen_saved_cursor;
+        let pos = logical_unwrapped_pos(saved.pos, saved.pending_wrap);
+        (saved.pos, saved.pending_wrap) = settle_cursor(pos, saved.pending_wrap, self.size);
     }
 
     /// Bring the cursor back within the region it may occupy after it has
@@ -318,12 +346,10 @@ impl Screen {
     /// cancels any pending wrap, so this clears it as well.
     pub fn clamp(&mut self) {
         self.pending_wrap = false;
-        match &self.grid {
-            Grid::Scrollback(scrollback) => {
-                scrollback.clamp_to_scroll_region(&mut self.cursor, &self.size)
-            }
-            Grid::AltScreen(altscreen) => {
-                altscreen.clamp_to_scroll_region(&mut self.cursor, &self.size)
+        match self.origin_mode {
+            OriginMode::Term => self.cursor.clamp_to(self.size),
+            OriginMode::ScrollRegion => {
+                self.cursor.clamp_to(self.scroll_region.as_region(&self.size))
             }
         }
     }
@@ -387,7 +413,7 @@ impl Screen {
         }
 
         let col = self.cursor.col;
-        let Some(line) = self.grid.ensure_line(self.size, self.cursor.row) else {
+        let Some(line) = self.grids.active_mut().ensure_line(self.size, self.cursor.row) else {
             return Err(anyhow!("no line for cursor row {}", self.cursor.row));
         };
         if insert_mode {
@@ -411,9 +437,9 @@ impl Screen {
         // The line only continues onto the next one if the cursor is really
         // going to get there. Below the scroll region on the last row it has
         // nowhere to go, so the next char just overwrites this line.
-        let (_, bottom) = self.grid.scroll_region().as_region(&self.size).row_bounds();
+        let (_, bottom) = self.scroll_region.as_region(&self.size).row_bounds();
         if self.cursor.row + 1 == bottom || self.cursor.row + 1 < self.size.height {
-            if let Some(line) = self.grid.ensure_line(self.size, self.cursor.row) {
+            if let Some(line) = self.grids.active_mut().ensure_line(self.size, self.cursor.row) {
                 line.is_wrapped = true;
             }
         }
@@ -433,7 +459,7 @@ impl Screen {
     /// (see `Cell::blank`).
     pub fn linefeed(&mut self, fill: term::Color) {
         self.pending_wrap = false;
-        let (_, bottom) = self.grid.scroll_region().as_region(&self.size).row_bounds();
+        let (_, bottom) = self.scroll_region.as_region(&self.size).row_bounds();
         if self.cursor.row + 1 == bottom {
             self.scroll_up(1, fill);
         } else if self.cursor.row + 1 < self.size.height {
@@ -447,9 +473,9 @@ impl Screen {
     pub fn erase_to_end(&mut self, fill: term::Color) {
         self.pending_wrap = false;
         let width = self.size.width;
-        match &mut self.grid {
-            Grid::Scrollback(s) => s.erase_to_end(self.size, self.cursor, fill),
-            Grid::AltScreen(alt) => alt.erase_to_end(width, self.cursor, fill),
+        match self.grids.active_mut() {
+            GridMut::Scrollback(s) => s.erase_to_end(self.size, self.cursor, fill),
+            GridMut::AltScreen(alt) => alt.erase_to_end(width, self.cursor, fill),
         }
     }
 
@@ -459,9 +485,9 @@ impl Screen {
     pub fn erase_from_start(&mut self, fill: term::Color) {
         self.pending_wrap = false;
         let width = self.size.width;
-        match &mut self.grid {
-            Grid::Scrollback(s) => s.erase_from_start(self.size, self.cursor, fill),
-            Grid::AltScreen(alt) => alt.erase_from_start(width, self.cursor, fill),
+        match self.grids.active_mut() {
+            GridMut::Scrollback(s) => s.erase_from_start(self.size, self.cursor, fill),
+            GridMut::AltScreen(alt) => alt.erase_from_start(width, self.cursor, fill),
         }
     }
 
@@ -469,26 +495,24 @@ impl Screen {
     /// leaving blanks painted with `fill` behind. Used to implement 'CSI 2 J'.
     pub fn erase(&mut self, fill: term::Color) {
         self.pending_wrap = false;
-        match &mut self.grid {
-            Grid::Scrollback(s) => s.erase(self.size, fill),
-            Grid::AltScreen(alt) => alt.erase(fill),
+        match self.grids.active_mut() {
+            GridMut::Scrollback(s) => s.erase(self.size, fill),
+            GridMut::AltScreen(alt) => alt.erase(fill),
         }
     }
 
-    /// Drop the scrollback, leaving what is on the screen alone. Used to
-    /// implement 'CSI 3 J'. The alt screen has no scrollback to drop.
+    /// Drop the scrollback of the main screen, leaving what is on the screen
+    /// alone, even while the alt screen is up. Used to implement 'CSI 3 J'.
     pub fn erase_scrollback(&mut self) {
-        if let Grid::Scrollback(s) = &mut self.grid {
-            s.erase_scrollback(self.size);
-        }
+        self.grids.scrollback.erase_scrollback(self.size);
     }
 
     /// Gets the current line. If the cursor is not currently over an actual
     /// line, this returns nothing.
     pub fn get_line_mut(&mut self) -> Option<&mut Line> {
-        match &mut self.grid {
-            Grid::Scrollback(s) => s.get_line_mut(self.size, self.cursor.row),
-            Grid::AltScreen(alt) => alt.get_line_mut(self.cursor.row),
+        match self.grids.active_mut() {
+            GridMut::Scrollback(s) => s.get_line_mut(self.size, self.cursor.row),
+            GridMut::AltScreen(alt) => alt.get_line_mut(self.cursor.row),
         }
     }
 
@@ -501,7 +525,7 @@ impl Screen {
     /// be stored.
     pub fn line_to_erase(&mut self, fill: term::Color) -> Option<&mut Line> {
         if fill != term::Color::Default {
-            self.grid.ensure_line(self.size, self.cursor.row)
+            self.grids.active_mut().ensure_line(self.size, self.cursor.row)
         } else {
             self.get_line_mut()
         }
@@ -510,29 +534,29 @@ impl Screen {
     /// SU (CSI S). Move the content of the scroll region up by `n` rows,
     /// opening rows of `fill` at the bottom. The cursor does not move.
     pub fn scroll_up(&mut self, n: usize, fill: term::Color) {
-        match &mut self.grid {
-            Grid::Scrollback(s) => s.scroll_up(&self.size, n, fill),
-            Grid::AltScreen(alt) => alt.scroll_up(n, fill),
+        match self.grids.active_mut() {
+            GridMut::Scrollback(s) => s.scroll_up(&self.size, &self.scroll_region, n, fill),
+            GridMut::AltScreen(alt) => alt.scroll_up(&self.scroll_region, n, fill),
         }
     }
 
     /// SD (CSI T). Move the content of the scroll region down by `n` rows,
     /// opening rows of `fill` at the top. The cursor does not move.
     pub fn scroll_down(&mut self, n: usize, fill: term::Color) {
-        match &mut self.grid {
-            Grid::Scrollback(s) => s.scroll_down(&self.size, n, fill),
-            Grid::AltScreen(alt) => alt.scroll_down(n, fill),
+        match self.grids.active_mut() {
+            GridMut::Scrollback(s) => s.scroll_down(&self.size, &self.scroll_region, n, fill),
+            GridMut::AltScreen(alt) => alt.scroll_down(&self.scroll_region, n, fill),
         }
     }
 
     pub fn scroll_region(&self, by_origin_mode: bool) -> ScrollRegion {
         if by_origin_mode {
-            match self.grid.origin_mode() {
+            match self.origin_mode {
                 OriginMode::Term => ScrollRegion::TrackSize,
-                OriginMode::ScrollRegion => self.grid.scroll_region().clone(),
+                OriginMode::ScrollRegion => self.scroll_region.clone(),
             }
         } else {
-            self.grid.scroll_region().clone()
+            self.scroll_region.clone()
         }
     }
 
@@ -542,9 +566,10 @@ impl Screen {
     /// lines that get pushed out of the current scroll region.
     pub fn insert_lines(&mut self, n: usize, fill: term::Color) {
         self.pending_wrap = false;
-        match &mut self.grid {
-            Grid::Scrollback(s) => s.insert_lines(&self.cursor, &self.size, n, fill),
-            Grid::AltScreen(alt) => alt.insert_lines(&self.cursor, n, fill),
+        let region = &self.scroll_region;
+        match self.grids.active_mut() {
+            GridMut::Scrollback(s) => s.insert_lines(&self.cursor, &self.size, region, n, fill),
+            GridMut::AltScreen(alt) => alt.insert_lines(&self.cursor, region, n, fill),
         }
     }
 
@@ -555,9 +580,10 @@ impl Screen {
     /// inserted at the bottom of the scroll region.
     pub fn delete_lines(&mut self, n: usize, fill: term::Color) {
         self.pending_wrap = false;
-        match &mut self.grid {
-            Grid::Scrollback(s) => s.delete_lines(&self.cursor, &self.size, n, fill),
-            Grid::AltScreen(alt) => alt.delete_lines(&self.cursor, n, fill),
+        let region = &self.scroll_region;
+        match self.grids.active_mut() {
+            GridMut::Scrollback(s) => s.delete_lines(&self.cursor, &self.size, region, n, fill),
+            GridMut::AltScreen(alt) => alt.delete_lines(&self.cursor, region, n, fill),
         }
     }
 }
@@ -604,7 +630,7 @@ impl std::fmt::Display for Screen {
         }
         writeln!(f, "")?;
 
-        match &self.grid {
+        match self.grids.active() {
             Grid::Scrollback(s) => write!(f, "{}", s)?,
             Grid::AltScreen(alt) => write!(f, "{}", alt)?,
         }
@@ -644,48 +670,88 @@ impl SavedCursor {
     }
 }
 
+/// The grids of the main screen and the alt screen, and which one is active.
+///
+/// Each screen also has its own slot for DECSC to save the cursor into, the
+/// way xterm does it.
 #[derive(Debug)]
-enum Grid {
-    Scrollback(Scrollback),
-    AltScreen(AltScreen),
+struct Grids {
+    scrollback: Scrollback,
+    scrollback_saved_cursor: SavedCursor,
+    altscreen: AltScreen,
+    altscreen_saved_cursor: SavedCursor,
+    alt_active: bool,
 }
 
-impl Grid {
-    fn origin_mode(&self) -> OriginMode {
-        match self {
-            Grid::Scrollback(s) => s.origin_mode,
-            Grid::AltScreen(alt) => alt.origin_mode,
+impl Grids {
+    /// The grid of the active screen.
+    fn active(&self) -> Grid<'_> {
+        if self.alt_active {
+            Grid::AltScreen(&self.altscreen)
+        } else {
+            Grid::Scrollback(&self.scrollback)
         }
     }
 
-    fn scroll_region(&self) -> &ScrollRegion {
-        match self {
-            Grid::Scrollback(s) => &s.scroll_region,
-            Grid::AltScreen(alt) => &alt.scroll_region,
+    /// `active`, for changing it.
+    fn active_mut(&mut self) -> GridMut<'_> {
+        if self.alt_active {
+            GridMut::AltScreen(&mut self.altscreen)
+        } else {
+            GridMut::Scrollback(&mut self.scrollback)
         }
     }
 
-    fn set_logger(&mut self, logger: log::Context) {
-        match self {
-            Grid::Scrollback(s) => s.set_logger(logger),
-            Grid::AltScreen(alt) => alt.set_logger(logger),
+    /// The saved cursor slot of the active screen.
+    fn saved_cursor(&self) -> &SavedCursor {
+        if self.alt_active {
+            &self.altscreen_saved_cursor
+        } else {
+            &self.scrollback_saved_cursor
         }
     }
 
+    /// `saved_cursor`, for changing it.
+    fn saved_cursor_mut(&mut self) -> &mut SavedCursor {
+        if self.alt_active {
+            &mut self.altscreen_saved_cursor
+        } else {
+            &mut self.scrollback_saved_cursor
+        }
+    }
+}
+
+/// The grid of one of the screens, for the logic that differs between the
+/// two kinds.
+#[derive(Clone, Copy)]
+enum Grid<'a> {
+    Scrollback(&'a Scrollback),
+    AltScreen(&'a AltScreen),
+}
+
+impl<'a> Grid<'a> {
     /// The line at the given screen row, if there is one stored.
-    fn get_line(&self, size: crate::Size, row: usize) -> Option<&Line> {
+    fn get_line(self, size: crate::Size, row: usize) -> Option<&'a Line> {
         match self {
             Grid::Scrollback(s) => s.get_line(size, row),
             Grid::AltScreen(alt) => alt.buf.get(row),
         }
     }
+}
 
+/// `Grid`, for changing the grid.
+enum GridMut<'a> {
+    Scrollback(&'a mut Scrollback),
+    AltScreen(&'a mut AltScreen),
+}
+
+impl<'a> GridMut<'a> {
     /// The line at the given screen row, ready to be written to. Returns
     /// None if the row is not on the screen.
-    fn ensure_line(&mut self, size: crate::Size, row: usize) -> Option<&mut Line> {
+    fn ensure_line(self, size: crate::Size, row: usize) -> Option<&'a mut Line> {
         match self {
-            Grid::Scrollback(s) => s.ensure_line(size, row),
-            Grid::AltScreen(alt) => alt.get_line_mut(row),
+            GridMut::Scrollback(s) => s.ensure_line(size, row),
+            GridMut::AltScreen(alt) => alt.get_line_mut(row),
         }
     }
 }
@@ -696,9 +762,16 @@ mod tests {
     use crate::term::Attrs;
     use crate::Size;
 
+    /// A screen of the given size with the alt screen active.
+    fn alt_screen(size: Size) -> Screen {
+        let mut screen = Screen::new(size.height, size);
+        screen.enter_alt_screen();
+        screen
+    }
+
     #[test]
     fn altscreen_get_line_mut_at_end_of_buf() {
-        let mut screen = Screen::alt(Size { width: 5, height: 3 });
+        let mut screen = alt_screen(Size { width: 5, height: 3 });
         screen.cursor = Pos { row: 3, col: 0 };
 
         assert!(screen.get_line_mut().is_none());
@@ -706,7 +779,7 @@ mod tests {
 
     #[test]
     fn altscreen_get_line_mut_past_end_of_buf() {
-        let mut screen = Screen::alt(Size { width: 5, height: 3 });
+        let mut screen = alt_screen(Size { width: 5, height: 3 });
         screen.cursor = Pos { row: 7, col: 0 };
 
         assert!(screen.get_line_mut().is_none());
@@ -714,94 +787,71 @@ mod tests {
 
     #[test]
     fn altscreen_resize_grow_height() {
-        let mut screen = Screen::alt(Size { width: 10, height: 5 });
+        let mut screen = alt_screen(Size { width: 10, height: 5 });
         screen.resize(Size { width: 10, height: 10 });
 
-        match &screen.grid {
-            Grid::AltScreen(alt) => {
-                assert_eq!(alt.buf.len(), 10);
-            }
-            _ => panic!("wrong grid type"),
-        }
+        assert_eq!(screen.grids.altscreen.buf.len(), 10);
         assert_eq!(screen.size.height, 10);
     }
 
     #[test]
     fn altscreen_resize_shrink_height() {
-        let mut screen = Screen::alt(Size { width: 10, height: 10 });
+        let mut screen = alt_screen(Size { width: 10, height: 10 });
         screen.resize(Size { width: 10, height: 5 });
-        match &screen.grid {
-            Grid::AltScreen(alt) => {
-                assert_eq!(alt.buf.len(), 5);
-            }
-            _ => panic!("wrong grid type"),
-        }
+        assert_eq!(screen.grids.altscreen.buf.len(), 5);
         assert_eq!(screen.size.height, 5);
     }
 
     #[test]
     fn altscreen_resize_shrink_width() {
-        let mut screen = Screen::alt(Size { width: 10, height: 5 });
+        let mut screen = alt_screen(Size { width: 10, height: 5 });
 
-        match &mut screen.grid {
-            Grid::AltScreen(alt) => {
-                alt.buf[0].set_cell(10, 9, crate::cell::Cell::new('a', Attrs::default())).unwrap();
-                assert_eq!(alt.buf[0].cells.len(), 10);
-            }
-            _ => panic!("wrong grid type"),
-        }
+        let alt = &mut screen.grids.altscreen;
+        alt.buf[0].set_cell(10, 9, crate::cell::Cell::new('a', Attrs::default())).unwrap();
+        assert_eq!(alt.buf[0].cells.len(), 10);
 
         screen.resize(Size { width: 5, height: 5 });
         assert_eq!(screen.size.width, 5);
 
         // Line should be truncated
-        match &screen.grid {
-            Grid::AltScreen(alt) => {
-                assert_eq!(alt.buf[0].cells.len(), 5);
-            }
-            _ => panic!("wrong grid type"),
-        }
+        assert_eq!(screen.grids.altscreen.buf[0].cells.len(), 5);
     }
 
     #[test]
     fn altscreen_cursor_clamping() {
-        let mut screen = Screen::alt(Size { width: 10, height: 10 });
+        let mut screen = alt_screen(Size { width: 10, height: 10 });
         screen.cursor = Pos { row: 9, col: 9 };
-        screen.saved_cursor.pos = Pos { row: 8, col: 8 };
+        screen.saved_cursor_mut().pos = Pos { row: 8, col: 8 };
 
         screen.resize(Size { width: 5, height: 5 });
 
         assert_eq!(screen.cursor.row, 4);
         assert_eq!(screen.cursor.col, 4);
-        assert_eq!(screen.saved_cursor.pos.row, 4);
-        assert_eq!(screen.saved_cursor.pos.col, 4);
+        assert_eq!(screen.saved_cursor().pos.row, 4);
+        assert_eq!(screen.saved_cursor().pos.col, 4);
     }
 
     fn get_screen_cell(screen: &Screen, row: usize, col: usize) -> Option<Cell> {
-        match &screen.grid {
-            Grid::Scrollback(sb) => sb
-                .get_line(screen.size, row)
-                .and_then(|l| l.get_cell(screen.size.width, col))
-                .map(|cell| cell.into_owned()),
-            _ => None,
-        }
+        screen
+            .grids
+            .scrollback
+            .get_line(screen.size, row)
+            .and_then(|l| l.get_cell(screen.size.width, col))
+            .map(|cell| cell.into_owned())
     }
 
     #[test]
     fn scrollback_grid_new() {
         let size = Size { width: 10, height: 5 };
-        let screen = Screen::scrollback(5, size);
+        let screen = Screen::new(5, size);
         assert_eq!(screen.size, size);
-        match &screen.grid {
-            Grid::Scrollback(sb) => assert!(sb.buf.is_empty()),
-            _ => panic!("wrong grid type"),
-        }
+        assert!(screen.grids.scrollback.buf.is_empty());
     }
 
     #[test]
     fn scrollback_push_simple() -> anyhow::Result<()> {
         let size = Size { width: 5, height: 2 };
-        let mut screen = Screen::scrollback(5, size);
+        let mut screen = Screen::new(5, size);
         let c = Cell::new('x', term::Attrs::default());
 
         screen.write_at_cursor(c.clone(), Modes::empty())?;
@@ -811,7 +861,7 @@ mod tests {
             get_screen_cell(&screen, pos.row, pos.col),
             Some(c),
             "Scrollback:\n{:?}",
-            screen.grid
+            screen.grids.scrollback
         );
 
         Ok(())
@@ -820,7 +870,7 @@ mod tests {
     #[test]
     fn scrollback_push_wrapping() -> anyhow::Result<()> {
         let size = Size { width: 2, height: 5 };
-        let mut screen = Screen::scrollback(5, size);
+        let mut screen = Screen::new(5, size);
 
         // Fill first line
         screen.write_at_cursor(Cell::new('1', term::Attrs::default()), Modes::empty())?;
@@ -833,19 +883,19 @@ mod tests {
             get_screen_cell(&screen, 0, 0),
             Some(Cell::new('1', term::Attrs::default())),
             "Scrollback:\n{:?}",
-            screen.grid,
+            screen.grids.scrollback,
         );
         assert_eq!(
             get_screen_cell(&screen, 0, 1),
             Some(Cell::new('2', term::Attrs::default())),
             "Scrollback:\n{:?}",
-            screen.grid,
+            screen.grids.scrollback,
         );
         assert_eq!(
             get_screen_cell(&screen, 1, 0),
             Some(Cell::new('3', term::Attrs::default())),
             "Scrollback:\n{:?}",
-            screen.grid,
+            screen.grids.scrollback,
         );
 
         Ok(())
@@ -854,7 +904,7 @@ mod tests {
     #[test]
     fn scrollback_indexing() -> anyhow::Result<()> {
         let size = Size { width: 10, height: 3 };
-        let mut screen = Screen::scrollback(3, size);
+        let mut screen = Screen::new(3, size);
 
         // Populate an initial line that will get pushed off
         for _ in 0..10 {
@@ -893,7 +943,7 @@ mod tests {
     #[test]
     fn scrollback_resize_narrower() -> anyhow::Result<()> {
         let size = Size { width: 10, height: 5 };
-        let mut screen = Screen::scrollback(20, size);
+        let mut screen = Screen::new(20, size);
 
         // Create a line: "0123456789"
         for i in 0..10 {
@@ -915,14 +965,14 @@ mod tests {
             get_screen_cell(&screen, 1, 0),
             Some(Cell::new('5', term::Attrs::default())),
             "Scrollback:\n{:?}",
-            screen.grid
+            screen.grids.scrollback
         );
         // Row 0, col 0 -> '0'
         assert_eq!(
             get_screen_cell(&screen, 0, 0),
             Some(Cell::new('0', term::Attrs::default())),
             "Scrollback:\n{:?}",
-            screen.grid
+            screen.grids.scrollback
         );
 
         Ok(())
@@ -931,7 +981,7 @@ mod tests {
     #[test]
     fn scrollback_resize_wider() -> anyhow::Result<()> {
         let size = Size { width: 5, height: 5 };
-        let mut screen = Screen::scrollback(30, size);
+        let mut screen = Screen::new(30, size);
 
         // Create two wrapped lines: "01234" (wrapped) -> "56789"
         for i in 0..10 {
@@ -946,7 +996,7 @@ mod tests {
             get_screen_cell(&screen, 1, 0),
             Some(Cell::new('5', term::Attrs::default())),
             "Scrollback:\n{:?}",
-            screen.grid
+            screen.grids.scrollback
         );
 
         // Resize to width 10. Should merge back to "0123456789"
@@ -958,13 +1008,13 @@ mod tests {
             get_screen_cell(&screen, 0, 0),
             Some(Cell::new('0', term::Attrs::default())),
             "Scrollback:\n{:?}",
-            screen.grid
+            screen.grids.scrollback
         );
         assert_eq!(
             get_screen_cell(&screen, 0, 9),
             Some(Cell::new('9', term::Attrs::default())),
             "Scrollback:\n{:?}",
-            screen.grid
+            screen.grids.scrollback
         );
 
         Ok(())
@@ -983,7 +1033,7 @@ mod tests {
 
         for (start_w, end_w) in shapes {
             let start_size = Size { width: start_w, height: 10 };
-            let mut screen = Screen::scrollback(100, start_size);
+            let mut screen = Screen::new(100, start_size);
 
             // Fill with deterministic data
             let count = 30;
@@ -1001,7 +1051,7 @@ mod tests {
             screen.resize(start_size);
 
             // Verify content is identical to if we just pushed it
-            let mut expected_screen = Screen::scrollback(100, start_size);
+            let mut expected_screen = Screen::new(100, start_size);
             for i in 0..count {
                 expected_screen.write_at_cursor(
                     Cell::new(char::from_u32(65 + i % 26).unwrap(), term::Attrs::default()),
@@ -1009,16 +1059,11 @@ mod tests {
                 )?;
             }
 
-            match (&screen.grid, &expected_screen.grid) {
-                (Grid::Scrollback(actual), Grid::Scrollback(expected)) => {
-                    assert_eq!(
-                        actual, expected,
-                        "Scrollback state mismatch after roundtrip resize {} -> {} -> {}",
-                        start_w, end_w, start_w
-                    );
-                }
-                _ => panic!("wrong grid type"),
-            }
+            assert_eq!(
+                screen.grids.scrollback, expected_screen.grids.scrollback,
+                "Scrollback state mismatch after roundtrip resize {} -> {} -> {}",
+                start_w, end_w, start_w
+            );
         }
 
         Ok(())
@@ -1031,21 +1076,17 @@ mod tests {
     fn painting_the_screen_stores_no_cells() {
         let fill = term::Color::Idx(4);
 
-        let mut screen = Screen::scrollback(100, Size { width: 80, height: 24 });
+        let mut screen = Screen::new(100, Size { width: 80, height: 24 });
         screen.erase(fill);
         screen.scroll_up(10, fill);
         screen.insert_lines(3, fill);
         screen.erase_to_end(fill);
 
-        match &screen.grid {
-            Grid::Scrollback(sb) => {
-                assert!(!sb.buf.is_empty());
-                for line in sb.buf.iter() {
-                    assert!(line.cells.is_empty());
-                    assert_eq!(line.blank_bgcolor, fill);
-                }
-            }
-            _ => panic!("wrong grid type"),
+        let sb = &screen.grids.scrollback;
+        assert!(!sb.buf.is_empty());
+        for line in sb.buf.iter() {
+            assert!(line.cells.is_empty());
+            assert_eq!(line.blank_bgcolor, fill);
         }
     }
 }

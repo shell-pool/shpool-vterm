@@ -20,7 +20,7 @@ use crate::{
     cell::Cell,
     line::{self, Line},
     log,
-    term::{self, AsTermInput, OriginMode, Pos, ScrollRegion},
+    term::{self, AsTermInput, Pos, ScrollRegion},
     ContentRegion,
 };
 use std::collections::VecDeque;
@@ -41,10 +41,6 @@ pub(crate) struct Scrollback {
     /// hold the same content, can leave more lines than this in the buffer.
     /// New output trims them back down (see `add_line`).
     lines: usize,
-    /// The region of the screen in which scrolling happens.
-    /// This is set by DECSTBM (CSI n ; n r).
-    pub scroll_region: ScrollRegion,
-    pub origin_mode: OriginMode,
     logger: log::Context,
 }
 
@@ -84,13 +80,7 @@ impl Scrollback {
     /// Create a new grid with the given number of lines of scrollback
     /// storage, and the given size window in view.
     pub fn new(scrollback_lines: usize) -> Self {
-        Scrollback {
-            buf: VecDeque::new(),
-            lines: scrollback_lines,
-            scroll_region: ScrollRegion::default(),
-            origin_mode: OriginMode::default(),
-            logger: log::Context::None,
-        }
+        Scrollback { buf: VecDeque::new(), lines: scrollback_lines, logger: log::Context::None }
     }
 
     pub fn set_logger(&mut self, logger: log::Context) {
@@ -128,13 +118,6 @@ impl Scrollback {
         let excess = self.buf.len().saturating_sub(self.lines);
         for _ in 0..std::cmp::min(excess, 2) {
             self.buf.pop_back();
-        }
-    }
-
-    pub fn clamp_to_scroll_region(&self, cursor: &mut Pos, size: &crate::Size) {
-        match self.origin_mode {
-            OriginMode::Term => cursor.clamp_to(*size),
-            OriginMode::ScrollRegion => cursor.clamp_to(self.scroll_region.as_region(size)),
         }
     }
 
@@ -198,8 +181,6 @@ impl Scrollback {
                 term::Crlf::default().term_input_into(buf);
             }
         }
-
-        self.scroll_region.term_input_into(buf);
     }
 
     /// Re-chop the buffer into grid lines of `new_width`, moving each of
@@ -449,8 +430,14 @@ impl Scrollback {
     /// With no scroll region the rows that leave the top of the screen stay
     /// in the buffer as scrollback, which is why this is not just
     /// `delete_lines` at the top of the screen.
-    pub fn scroll_up(&mut self, size: &crate::Size, n: usize, fill: term::Color) {
-        match self.scroll_region {
+    pub fn scroll_up(
+        &mut self,
+        size: &crate::Size,
+        scroll_region: &ScrollRegion,
+        n: usize,
+        fill: term::Color,
+    ) {
+        match *scroll_region {
             ScrollRegion::TrackSize => {
                 // The rows below the last stored line have no storage, but
                 // they are still on the screen and the content has to move
@@ -507,17 +494,30 @@ impl Scrollback {
     /// opening rows of `fill` at the top. Rows pushed past the bottom of the
     /// region are lost. Also what a reverse index at the top of the scroll
     /// region does.
-    pub fn scroll_down(&mut self, size: &crate::Size, n: usize, fill: term::Color) {
-        let top = match self.scroll_region {
+    pub fn scroll_down(
+        &mut self,
+        size: &crate::Size,
+        scroll_region: &ScrollRegion,
+        n: usize,
+        fill: term::Color,
+    ) {
+        let top = match scroll_region {
             ScrollRegion::TrackSize => 0,
-            ScrollRegion::Window { top, .. } => top,
+            ScrollRegion::Window { top, .. } => *top,
         };
 
-        self.insert_lines(&Pos { row: top, col: 0 }, size, n, fill);
+        self.insert_lines(&Pos { row: top, col: 0 }, size, scroll_region, n, fill);
     }
 
-    pub fn insert_lines(&mut self, cursor: &Pos, size: &crate::Size, n: usize, fill: term::Color) {
-        let bottom = match self.scroll_region {
+    pub fn insert_lines(
+        &mut self,
+        cursor: &Pos,
+        size: &crate::Size,
+        scroll_region: &ScrollRegion,
+        n: usize,
+        fill: term::Color,
+    ) {
+        let bottom = match *scroll_region {
             ScrollRegion::TrackSize => size.height,
             ScrollRegion::Window { top, bottom } => {
                 if cursor.row < top || bottom <= cursor.row {
@@ -573,8 +573,15 @@ impl Scrollback {
         }
     }
 
-    pub fn delete_lines(&mut self, cursor: &Pos, size: &crate::Size, n: usize, fill: term::Color) {
-        let bottom = match self.scroll_region {
+    pub fn delete_lines(
+        &mut self,
+        cursor: &Pos,
+        size: &crate::Size,
+        scroll_region: &ScrollRegion,
+        n: usize,
+        fill: term::Color,
+    ) {
+        let bottom = match *scroll_region {
             ScrollRegion::TrackSize => size.height,
             ScrollRegion::Window { top, bottom } => {
                 if cursor.row < top || bottom <= cursor.row {

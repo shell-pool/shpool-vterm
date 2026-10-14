@@ -19,7 +19,7 @@ use std::collections::VecDeque;
 use crate::{
     line::{self, Line},
     log,
-    term::{self, AsTermInput, OriginMode, Pos, ScrollRegion},
+    term::{self, AsTermInput, Pos, ScrollRegion},
 };
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -30,10 +30,6 @@ pub(crate) struct AltScreen {
     /// buf[0] is at the top of the screen and buf[buf.len()-1] is at the
     /// bottom.
     pub buf: VecDeque<Line>,
-    /// The region of the screen in which scrolling happens.
-    /// This is set by DECSTBM (CSI n ; n r).
-    pub scroll_region: ScrollRegion,
-    pub origin_mode: OriginMode,
     logger: log::Context,
 }
 
@@ -43,25 +39,21 @@ impl AltScreen {
         for _ in 0..size.height {
             buf.push_back(Line::new());
         }
-        AltScreen {
-            buf,
-            scroll_region: ScrollRegion::default(),
-            origin_mode: OriginMode::default(),
-            logger: log::Context::None,
-        }
+        AltScreen { buf, logger: log::Context::None }
     }
 
     pub fn set_logger(&mut self, logger: log::Context) {
         self.logger = logger;
     }
 
-    /// The half open range of rows that scrolling operates on.
+    /// The half open range of rows that scrolling within `scroll_region`
+    /// operates on.
     ///
     /// The scroll region is set by the application and is not required to
     /// describe rows that exist, so it gets clipped to the grid here. An
     /// empty range means there is nothing to scroll.
-    fn scroll_region_rows(&self) -> (usize, usize) {
-        match self.scroll_region {
+    fn scroll_region_rows(&self, scroll_region: &ScrollRegion) -> (usize, usize) {
+        match *scroll_region {
             ScrollRegion::TrackSize => (0, self.buf.len()),
             ScrollRegion::Window { top, bottom } => {
                 (std::cmp::min(top, self.buf.len()), std::cmp::min(bottom, self.buf.len()))
@@ -72,8 +64,8 @@ impl AltScreen {
     /// SU (CSI S). Move the content of the scroll region up by `rows`,
     /// opening rows of `fill` at the bottom. Also what a linefeed at the
     /// bottom of the scroll region does.
-    pub fn scroll_up(&mut self, rows: usize, fill: term::Color) {
-        if let ScrollRegion::TrackSize = self.scroll_region {
+    pub fn scroll_up(&mut self, scroll_region: &ScrollRegion, rows: usize, fill: term::Color) {
+        if let ScrollRegion::TrackSize = scroll_region {
             for _ in 0..std::cmp::min(rows, self.buf.len()) {
                 self.buf.pop_front();
                 self.buf.push_back(Line::blank(fill));
@@ -81,7 +73,7 @@ impl AltScreen {
             return;
         }
 
-        let (top, bottom) = self.scroll_region_rows();
+        let (top, bottom) = self.scroll_region_rows(scroll_region);
         if top >= bottom {
             return;
         }
@@ -108,16 +100,9 @@ impl AltScreen {
     /// opening rows of `fill` at the top. Rows pushed past the bottom of the
     /// region are lost. Also what a reverse index at the top of the scroll
     /// region does.
-    pub fn scroll_down(&mut self, rows: usize, fill: term::Color) {
-        let (top, _) = self.scroll_region_rows();
-        self.insert_lines(&Pos { row: top, col: 0 }, rows, fill);
-    }
-
-    pub fn clamp_to_scroll_region(&self, cursor: &mut Pos, size: &crate::Size) {
-        match self.origin_mode {
-            OriginMode::Term => cursor.clamp_to(size),
-            OriginMode::ScrollRegion => cursor.clamp_to(self.scroll_region.as_region(size)),
-        }
+    pub fn scroll_down(&mut self, scroll_region: &ScrollRegion, rows: usize, fill: term::Color) {
+        let (top, _) = self.scroll_region_rows(scroll_region);
+        self.insert_lines(&Pos { row: top, col: 0 }, scroll_region, rows, fill);
     }
 
     /// Resize the alt screen. This does not perform any reflow logic,
@@ -179,8 +164,14 @@ impl AltScreen {
         }
     }
 
-    pub fn insert_lines(&mut self, cursor: &Pos, n: usize, fill: term::Color) {
-        let (top, bottom) = self.scroll_region_rows();
+    pub fn insert_lines(
+        &mut self,
+        cursor: &Pos,
+        scroll_region: &ScrollRegion,
+        n: usize,
+        fill: term::Color,
+    ) {
+        let (top, bottom) = self.scroll_region_rows(scroll_region);
         if cursor.row < top || bottom <= cursor.row {
             // Insert Line does nothing when the cursor is outside
             // the scroll region.
@@ -209,8 +200,14 @@ impl AltScreen {
         }
     }
 
-    pub fn delete_lines(&mut self, cursor: &Pos, n: usize, fill: term::Color) {
-        let (top, bottom) = self.scroll_region_rows();
+    pub fn delete_lines(
+        &mut self,
+        cursor: &Pos,
+        scroll_region: &ScrollRegion,
+        n: usize,
+        fill: term::Color,
+    ) {
+        let (top, bottom) = self.scroll_region_rows(scroll_region);
         if cursor.row < top || bottom <= cursor.row {
             // Delete Line does nothing when the cursor is outside
             // the scroll region.
@@ -249,8 +246,6 @@ impl AltScreen {
                 term::Crlf::default().term_input_into(buf);
             }
         }
-
-        self.scroll_region.term_input_into(buf);
     }
 }
 
@@ -285,9 +280,9 @@ mod tests {
     #[test]
     fn scroll_up_with_region_past_end_of_buf() {
         let mut alt = alt_screen();
-        alt.scroll_region = ScrollRegion::Window { top: 0, bottom: SIZE.height + 6 };
+        let region = ScrollRegion::Window { top: 0, bottom: SIZE.height + 6 };
 
-        alt.scroll_up(1, term::Color::Default);
+        alt.scroll_up(&region, 1, term::Color::Default);
 
         assert_eq!(first_col(&alt), "bc.");
     }
@@ -295,18 +290,16 @@ mod tests {
     #[test]
     fn scroll_down_with_region_past_end_of_buf() {
         let mut alt = alt_screen();
-        alt.scroll_region = ScrollRegion::Window { top: 0, bottom: SIZE.height + 6 };
+        let region = ScrollRegion::Window { top: 0, bottom: SIZE.height + 6 };
 
-        alt.scroll_down(1, term::Color::Default);
+        alt.scroll_down(&region, 1, term::Color::Default);
 
         assert_eq!(first_col(&alt), ".ab");
     }
 
     #[test]
-    fn erase_with_region_past_end_of_buf() {
+    fn erase_blanks_the_whole_screen() {
         let mut alt = alt_screen();
-        alt.origin_mode = OriginMode::ScrollRegion;
-        alt.scroll_region = ScrollRegion::Window { top: 0, bottom: SIZE.height + 6 };
 
         alt.erase(term::Color::Default);
 
@@ -317,7 +310,8 @@ mod tests {
     fn insert_lines_past_last_row() {
         let mut alt = alt_screen();
 
-        alt.insert_lines(&Pos { row: SIZE.height + 2, col: 0 }, 1, term::Color::Default);
+        let region = ScrollRegion::default();
+        alt.insert_lines(&Pos { row: SIZE.height + 2, col: 0 }, &region, 1, term::Color::Default);
 
         assert_eq!(first_col(&alt), "abc");
     }
@@ -326,7 +320,8 @@ mod tests {
     fn delete_lines_past_last_row() {
         let mut alt = alt_screen();
 
-        alt.delete_lines(&Pos { row: SIZE.height + 2, col: 0 }, 1, term::Color::Default);
+        let region = ScrollRegion::default();
+        alt.delete_lines(&Pos { row: SIZE.height + 2, col: 0 }, &region, 1, term::Color::Default);
 
         assert_eq!(first_col(&alt), "abc");
     }

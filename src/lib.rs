@@ -102,7 +102,7 @@ impl Term {
 
     /// Get the current terminal size.
     pub fn size(&self) -> Size {
-        self.state.screen().size
+        self.state.screen.size
     }
 
     /// Set the terminal size.
@@ -119,7 +119,7 @@ impl Term {
 
     /// Get the current number of lines of stored scrollback.
     pub fn scrollback_lines(&self) -> usize {
-        self.state.scrollback.scrollback_lines().expect("scrollback screen to have lines")
+        self.state.screen.scrollback_lines()
     }
 
     /// Set the number of lines of scrollback to store. This will drop
@@ -130,7 +130,7 @@ impl Term {
     /// to match the current height. You cannot store less scrollback than
     /// there are lines in the visible screen region.
     pub fn set_scrollback_lines(&mut self, scrollback_lines: usize) {
-        self.state.scrollback.set_scrollback_lines(scrollback_lines);
+        self.state.screen.set_scrollback_lines(scrollback_lines);
     }
 
     /// Process the given chunk of input. This should be the data read off
@@ -295,12 +295,9 @@ bitflags::bitflags! {
 
 /// The complete terminal state. An internal implementation detail.
 struct State {
-    /// The state for the normal terminal screen.
-    scrollback: Screen,
-    /// The state for the alternate screen.
-    altscreen: Screen,
-    /// The currently active screen mode.
-    screen_mode: ScreenMode,
+    /// The main screen and the alt screen, along with the cursor and the
+    /// rest of the state they share.
+    screen: Screen,
     /// The last graphic char that was printed. This is used by REP
     /// (CSI Pn b).
     last_print_char: Option<char>,
@@ -351,16 +348,12 @@ struct State {
 
 impl std::fmt::Display for State {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.screen_mode {
-            ScreenMode::Scrollback => {
-                writeln!(f, "Screen Mode: Scrollback")?;
-                write!(f, "{}", self.scrollback)?;
-            }
-            ScreenMode::Alt => {
-                writeln!(f, "Screen Mode: AltScreen")?;
-                write!(f, "{}", self.altscreen)?;
-            }
+        if self.screen.alt_active() {
+            writeln!(f, "Screen Mode: AltScreen")?;
+        } else {
+            writeln!(f, "Screen Mode: Scrollback")?;
         }
+        write!(f, "{}", self.screen)?;
 
         Ok(())
     }
@@ -369,9 +362,7 @@ impl std::fmt::Display for State {
 impl State {
     fn new(scrollback_lines: usize, size: Size) -> Self {
         let mut st = State {
-            scrollback: Screen::scrollback(scrollback_lines, size),
-            altscreen: Screen::alt(size),
-            screen_mode: ScreenMode::Scrollback,
+            screen: Screen::new(scrollback_lines, size),
             cursor_attrs: term::Attrs::default(),
             cursor_style: term::CursorStyle::Default,
             title_stack: vec![],
@@ -392,23 +383,8 @@ impl State {
     }
 
     fn set_logger(&mut self, logger: log::Context) {
-        self.scrollback.set_logger(logger.clone());
-        self.altscreen.set_logger(logger.clone());
+        self.screen.set_logger(logger.clone());
         self.logger = logger;
-    }
-
-    fn screen_mut(&mut self) -> &mut Screen {
-        match self.screen_mode {
-            ScreenMode::Scrollback => &mut self.scrollback,
-            ScreenMode::Alt => &mut self.altscreen,
-        }
-    }
-
-    fn screen(&self) -> &Screen {
-        match self.screen_mode {
-            ScreenMode::Scrollback => &self.scrollback,
-            ScreenMode::Alt => &self.altscreen,
-        }
     }
 
     fn resize(&mut self, size: Size) {
@@ -418,8 +394,7 @@ impl State {
             self.fill_tabstops(orig_len, size.width);
         }
 
-        self.scrollback.resize(size);
-        self.altscreen.resize(size);
+        self.screen.resize(size);
     }
 
     /// Fill in the default tabstops within the given range.
@@ -482,38 +457,7 @@ impl State {
     fn dump_contents_into(&self, buf: &mut Vec<u8>, dump_region: ContentRegion) {
         self.dump_tabstops(buf);
 
-        match self.screen_mode {
-            ScreenMode::Scrollback => self.scrollback.dump_contents_into(buf, dump_region),
-            ScreenMode::Alt => {
-                // Restore the regular scrollback first so that after the user
-                // exits their curses app, they can still see shell history.
-                self.scrollback.dump_contents_into(buf, dump_region.clone());
-
-                // Re-enable alt screen, then dump the contents. This is
-                // not actually super important in practice because basically
-                // every curses app respects SIGWINCH. We may even want to
-                // consider exposing a knob to disable alt-screen dumping
-                // since it might make things less flickery. Not worth doing
-                // for now though.
-                term::control_codes().enable_alt_screen.term_input_into(buf);
-
-                // Switching screens does not clear the scroll region or
-                // origin mode the scrollback restore just set, and neither
-                // is per-screen in a real terminal, so we have to clear them
-                // ourselves. This has to happen before the contents get
-                // painted, since it is the paint that a stranded scroll
-                // region corrupts.
-                let homed = self.scrollback.dump_global_state_reset_into(buf);
-
-                // Switching screens doesn't move the cursor either, but the
-                // alt screen gets painted from the top left corner down.
-                if !homed && !self.scrollback.dump_leaves_cursor_home() {
-                    ControlCodes::cursor_position(1, 1).term_input_into(buf);
-                }
-
-                self.altscreen.dump_contents_into(buf, dump_region)
-            }
-        }
+        self.screen.dump_contents_into(buf, dump_region);
 
         let controls = term::control_codes();
 
@@ -681,15 +625,36 @@ impl State {
     /// DECOM. Switching origin mode either way homes the cursor, which is the
     /// top of the scroll region once origin mode is on.
     fn set_origin_mode(&mut self, origin_mode: OriginMode) {
-        let screen = self.screen_mut();
+        let screen = &mut self.screen;
         screen.set_origin_mode(origin_mode);
         screen.set_cursor(term::Pos { row: 1, col: 1 });
         screen.clamp();
     }
 
+    /// DECSC. Save the cursor position, along with the state that printing
+    /// depends on, into the active screen's slot.
+    fn save_cursor(&mut self) {
+        let attrs = self.cursor_attrs.clone();
+        let charsets = self.charsets.clone();
+        let screen = &mut self.screen;
+        let pos = screen.cursor;
+        let pending_wrap = screen.pending_wrap;
+        *screen.saved_cursor_mut() = SavedCursor { pos, attrs, pending_wrap, charsets };
+    }
+
+    /// DECRC. Put back whatever `save_cursor` saved for the active screen.
+    fn restore_cursor(&mut self) {
+        let screen = &mut self.screen;
+        let SavedCursor { pos, attrs, pending_wrap, charsets } = screen.saved_cursor().clone();
+        screen.cursor = pos;
+        screen.pending_wrap = pending_wrap;
+        self.cursor_attrs = attrs;
+        self.charsets = charsets;
+    }
+
     fn write_char_at_cursor(&mut self, cell: Cell) {
         let modes = self.modes & Screen::WRITE_MODES;
-        if let Err(e) = self.screen_mut().write_at_cursor(cell, modes) {
+        if let Err(e) = self.screen.write_at_cursor(cell, modes) {
             warn!(self.logger, "writing char at cursor: {:?}", e);
         }
     }
@@ -703,7 +668,7 @@ impl State {
     /// cursor there is nothing to modify and we drop the char, which is what
     /// xterm does.
     fn add_modifier_char(&mut self, c: char) {
-        let screen = self.screen_mut();
+        let screen = &mut self.screen;
         let width = screen.size.width;
         // With a wrap pending, the cursor stays on top of the cell it just
         // moved past rather than to the right of it.
@@ -733,12 +698,6 @@ impl State {
             _ => {}
         }
     }
-}
-
-/// Indicates which screen mode is active.
-enum ScreenMode {
-    Scrollback,
-    Alt,
 }
 
 impl vte::Perform for State {
@@ -776,15 +735,15 @@ impl vte::Perform for State {
         match byte {
             b'\n' => {
                 let fill = self.cursor_attrs.bgcolor;
-                self.screen_mut().linefeed(fill);
+                self.screen.linefeed(fill);
             }
             b'\r' => {
-                let screen = self.screen_mut();
+                let screen = &mut self.screen;
                 screen.cursor.col = 0;
                 screen.pending_wrap = false;
             }
             b'\t' => {
-                let mut col = self.screen().cursor.col;
+                let mut col = self.screen.cursor.col;
                 col += 1;
                 while col < self.tabstops.len() && !self.tabstops.get(col).is_some_and(|b| *b) {
                     col += 1;
@@ -793,7 +752,7 @@ impl vte::Perform for State {
                 // A tab stops at the last column. If the cursor is already
                 // there it does not move at all, and a pending wrap stays
                 // pending.
-                let screen = self.screen_mut();
+                let screen = &mut self.screen;
                 let col = std::cmp::min(col, screen.size.width.saturating_sub(1));
                 if col != screen.cursor.col {
                     screen.cursor.col = col;
@@ -802,7 +761,7 @@ impl vte::Perform for State {
             }
             b'\x08' => {
                 // backspace
-                let screen = self.screen_mut();
+                let screen = &mut self.screen;
                 screen.cursor.col = screen.cursor.col.saturating_sub(1);
                 screen.pending_wrap = false;
             }
@@ -1000,35 +959,35 @@ impl vte::Perform for State {
             // CUU (Cursor Up)
             'A' if plain => {
                 let n = param_or(&mut params_iter, 1) as usize;
-                let screen = self.screen_mut();
+                let screen = &mut self.screen;
                 screen.cursor.row = screen.cursor.row.saturating_sub(n);
                 screen.clamp();
             }
             // CUD (Cursor Down)
             'B' if plain => {
                 let n = param_or(&mut params_iter, 1) as usize;
-                let screen = self.screen_mut();
+                let screen = &mut self.screen;
                 screen.cursor.row += n;
                 screen.clamp();
             }
             // CUF (Cursor Forward)
             'C' if plain => {
                 let n = param_or(&mut params_iter, 1) as usize;
-                let screen = self.screen_mut();
+                let screen = &mut self.screen;
                 screen.cursor.col += n;
                 screen.clamp();
             }
             // CUF (Cursor Backwards)
             'D' if plain => {
                 let n = param_or(&mut params_iter, 1) as usize;
-                let screen = self.screen_mut();
+                let screen = &mut self.screen;
                 screen.cursor.col = screen.cursor.col.saturating_sub(n);
                 screen.clamp();
             }
             // CNL (Cursor Next Line)
             'E' if plain => {
                 let n = param_or(&mut params_iter, 1) as usize;
-                let screen = self.screen_mut();
+                let screen = &mut self.screen;
                 screen.cursor.row += n;
                 screen.cursor.col = 0;
                 screen.clamp();
@@ -1036,7 +995,7 @@ impl vte::Perform for State {
             // CPL (Cursor Prev Line)
             'F' if plain => {
                 let n = param_or(&mut params_iter, 1) as usize;
-                let screen = self.screen_mut();
+                let screen = &mut self.screen;
                 screen.cursor.row = screen.cursor.row.saturating_sub(n);
                 screen.cursor.col = 0;
                 screen.clamp();
@@ -1047,7 +1006,7 @@ impl vte::Perform for State {
                 let n = param_or(&mut params_iter, 1) as usize;
                 let n = n.saturating_sub(1); // translate to 0 indexing
 
-                let screen = self.screen_mut();
+                let screen = &mut self.screen;
                 screen.cursor.col = n;
                 screen.clamp();
             }
@@ -1057,7 +1016,7 @@ impl vte::Perform for State {
                 // parse the params and adjust 1 indexing to 0 indexing
                 let row = param_or(&mut params_iter, 1) as usize;
                 let col = param_or(&mut params_iter, 1) as usize;
-                let screen = self.screen_mut();
+                let screen = &mut self.screen;
                 screen.set_cursor(term::Pos { row, col });
                 screen.clamp();
             }
@@ -1067,19 +1026,19 @@ impl vte::Perform for State {
             'J' if plain || intermediates == [b'?'] => while let Some(code) = params_iter.next() {
                 let fill = self.cursor_attrs.bgcolor;
                 match code {
-                    [] | [0] => self.screen_mut().erase_to_end(fill),
-                    [1] => self.screen_mut().erase_from_start(fill),
-                    [2] => self.screen_mut().erase(fill),
+                    [] | [0] => self.screen.erase_to_end(fill),
+                    [1] => self.screen.erase_from_start(fill),
+                    [2] => self.screen.erase(fill),
                     // Only the main screen has scrollback, but it goes
                     // even if the alt screen is up.
-                    [3] => self.scrollback.erase_scrollback(),
+                    [3] => self.screen.erase_scrollback(),
                     _ => warn!(self.logger, "unhandled 'CSI {:?} J'", code),
                 }
             }
             // EL (Erase in Line)
             // DECSEL (Selective Erase in Line, CSI ? n K), see DECSED above.
             'K' if plain || intermediates == [b'?'] => while let Some(code) = params_iter.next() {
-                let col = self.screen().cursor.col;
+                let col = self.screen.cursor.col;
                 let section = match code {
                     [] | [0] => line::Section::ToEnd(col),
                     [1] => line::Section::StartTo(col),
@@ -1091,7 +1050,7 @@ impl vte::Perform for State {
                 };
 
                 let fill = self.cursor_attrs.bgcolor;
-                let screen = self.screen_mut();
+                let screen = &mut self.screen;
                 screen.pending_wrap = false;
                 let width = screen.size.width;
                 if let Some(l) = screen.line_to_erase(fill) {
@@ -1102,30 +1061,30 @@ impl vte::Perform for State {
             'L' if plain => {
                 let n = param_or(&mut params_iter, 1) as usize;
                 let fill = self.cursor_attrs.bgcolor;
-                self.screen_mut().insert_lines(n, fill);
+                self.screen.insert_lines(n, fill);
             }
             // DL (Delete Line)
             'M' if plain => {
                 let n = param_or(&mut params_iter, 1) as usize;
                 let fill = self.cursor_attrs.bgcolor;
-                self.screen_mut().delete_lines(n, fill);
+                self.screen.delete_lines(n, fill);
             }
             // SU (Scroll Up)
             'S' if plain => {
                 let n = param_or(&mut params_iter, 1) as usize;
                 let fill = self.cursor_attrs.bgcolor;
-                self.screen_mut().scroll_up(n as usize, fill);
+                self.screen.scroll_up(n as usize, fill);
             }
             // CTC (Cusor Tabulation Control)
             'W' if plain => {
                 let code = param_or(&mut params_iter, 0) as usize;
                 match code {
                     0 => {
-                        let col = self.screen().cursor.col;
+                        let col = self.screen.cursor.col;
                         self.tabstops.set(col, true);
                     },
                     2 => {
-                        let col = self.screen().cursor.col;
+                        let col = self.screen.cursor.col;
                         self.tabstops.set(col, false);
                     }
                     5 => {
@@ -1146,7 +1105,7 @@ impl vte::Perform for State {
             // CBT (Cursor Backward Tabulation)
             'Z' if plain => {
                 let n = param_or(&mut params_iter, 1) as usize;
-                let mut col = self.screen().cursor.col;
+                let mut col = self.screen.cursor.col;
                 for _ in 0..n {
                     if col == 0 {
                         break;
@@ -1157,7 +1116,7 @@ impl vte::Perform for State {
                     }
                 }
 
-                let screen = self.screen_mut();
+                let screen = &mut self.screen;
                 screen.cursor.col = col;
                 screen.clamp();
             }
@@ -1168,7 +1127,7 @@ impl vte::Perform for State {
             'T' if plain && params.len() <= 1 => {
                 let n = param_or(&mut params_iter, 1) as usize;
                 let fill = self.cursor_attrs.bgcolor;
-                self.screen_mut().scroll_down(n as usize, fill);
+                self.screen.scroll_down(n as usize, fill);
             }
 
             // ICH (Insert Character)
@@ -1176,7 +1135,7 @@ impl vte::Perform for State {
                 let n = param_or(&mut params_iter, 1) as usize;
 
                 let fill = self.cursor_attrs.bgcolor;
-                let screen = self.screen_mut();
+                let screen = &mut self.screen;
                 screen.pending_wrap = false;
                 let width = screen.size.width;
                 let col = screen.cursor.col;
@@ -1189,7 +1148,7 @@ impl vte::Perform for State {
                 let n = param_or(&mut params_iter, 1) as usize;
 
                 let fill = self.cursor_attrs.bgcolor;
-                let screen = self.screen_mut();
+                let screen = &mut self.screen;
                 screen.pending_wrap = false;
                 let width = screen.size.width;
                 let col = screen.cursor.col;
@@ -1202,7 +1161,7 @@ impl vte::Perform for State {
                 let n = param_or(&mut params_iter, 1) as usize;
 
                 let fill = self.cursor_attrs.bgcolor;
-                let screen = self.screen_mut();
+                let screen = &mut self.screen;
                 screen.pending_wrap = false;
                 let width = screen.size.width;
                 let col = screen.cursor.col;
@@ -1223,17 +1182,17 @@ impl vte::Perform for State {
             // VPA (Vertical Line Position Absolute)
             'd' if plain => {
                 let row = param_or(&mut params_iter, 1) as usize;
-                let col = self.screen().cursor.col + 1;
-                let screen = self.screen_mut();
+                let col = self.screen.cursor.col + 1;
+                let screen = &mut self.screen;
                 screen.set_cursor(term::Pos { row, col });
                 screen.clamp();
             }
 
             // SCP (Save Cursor Position)
             's' if plain => {
-                let screen = self.screen_mut();
+                let screen = &mut self.screen;
                 let cursor = screen.cursor.clone();
-                screen.saved_cursor.pos = cursor;
+                screen.saved_cursor_mut().pos = cursor;
             }
             // Window Title Operations
             't' if plain => while let Some(code) = params_iter.next() {
@@ -1276,8 +1235,8 @@ impl vte::Perform for State {
             }
             // RCP (Restore Cursor Position)
             'u' if plain => {
-                let screen = self.screen_mut();
-                screen.cursor = screen.saved_cursor.pos;
+                let screen = &mut self.screen;
+                screen.cursor = screen.saved_cursor().pos;
                 screen.clamp();
             }
 
@@ -1286,7 +1245,7 @@ impl vte::Perform for State {
                 let code = param_or(&mut params_iter, 0) as usize;
                 match code {
                     0 => {
-                        let col = self.screen().cursor.col;
+                        let col = self.screen.cursor.col;
                         self.tabstops.set(col, false);
                     },
                     3 => {
@@ -1324,12 +1283,11 @@ impl vte::Perform for State {
                         [12] => self.cursor_blinking = Some(true),
                         [25] => self.modes.remove(Modes::CURSOR_HIDDEN),
                         [1004] => self.modes.insert(Modes::REPORT_FOCUS),
-                        // enable alt screen
+                        // Switch to the alt screen, saving the cursor
+                        // first and starting out with a blank screen.
                         [1049] => {
-                            // The alt-screen gets reset upon entry, so we need to
-                            // clobber it here.
-                            self.altscreen = Screen::alt(self.altscreen.size);
-                            self.screen_mode = ScreenMode::Alt;
+                            self.save_cursor();
+                            self.screen.enter_alt_screen();
                         }
                         [2004] => self.modes.insert(Modes::BRACKETED_PASTE),
                         // Means "pause visual rendering." We are not rendering
@@ -1387,7 +1345,10 @@ impl vte::Perform for State {
                         [12] => self.cursor_blinking = Some(false),
                         [25] => self.modes.insert(Modes::CURSOR_HIDDEN),
                         [1004] => self.modes.remove(Modes::REPORT_FOCUS),
-                        [1049] => self.screen_mode = ScreenMode::Scrollback,
+                        [1049] => {
+                            self.screen.exit_alt_screen();
+                            self.restore_cursor();
+                        }
                         [2004] => self.modes.remove(Modes::BRACKETED_PASTE),
                         // Means "resume & flush visual rendering." We are
                         // not rendering anything visually so we don't care.
@@ -1533,7 +1494,7 @@ impl vte::Perform for State {
                 // DECSTR (DEC Soft Terminal Reset)
                 [b'!'] => {
                     self.tabstops.fill(false);
-                    let width = self.screen().size.width;
+                    let width = self.screen.size.width;
                     self.fill_tabstops(0, width);
                     self.cursor_style = term::CursorStyle::Default;
                     self.cursor_attrs = term::Attrs::default();
@@ -1576,7 +1537,7 @@ impl vte::Perform for State {
             },
             // DECSTBM (Set Scroll Region)
             'r' if plain => {
-                let height = self.screen().size.height;
+                let height = self.screen.size.height;
                 // Like in xterm, a bottom that is missing or off the screen
                 // means the last row.
                 let top = param_or(&mut params_iter, 1) as usize;
@@ -1588,7 +1549,7 @@ impl vte::Perform for State {
                 // A region has to be at least two rows high, and anything
                 // else gets ignored.
                 if top < bottom {
-                    let screen = self.screen_mut();
+                    let screen = &mut self.screen;
                     screen.set_scroll_region(if top == 1 && bottom == height {
                         term::ScrollRegion::TrackSize
                     } else {
@@ -1623,32 +1584,18 @@ impl vte::Perform for State {
 
         match (intermediates, byte) {
             // save cursor (ESC 7)
-            ([], b'7') => {
-                let attrs = self.cursor_attrs.clone();
-                let charsets = self.charsets.clone();
-                let screen = self.screen_mut();
-                let pos = screen.cursor.clone();
-                let pending_wrap = screen.pending_wrap;
-                screen.saved_cursor = SavedCursor { pos, attrs, pending_wrap, charsets };
-            }
+            ([], b'7') => self.save_cursor(),
             // restore cursor (ESC 8)
-            ([], b'8') => {
-                let screen = self.screen_mut();
-                screen.cursor = screen.saved_cursor.pos;
-                screen.pending_wrap = screen.saved_cursor.pending_wrap;
-                let SavedCursor { attrs, charsets, .. } = screen.saved_cursor.clone();
-                self.cursor_attrs = attrs;
-                self.charsets = charsets;
-            }
+            ([], b'8') => self.restore_cursor(),
             // HTS (Horizontal Tabluation Set, ESC H)
             ([], b'H') => {
-                let col = self.screen().cursor.col;
+                let col = self.screen.cursor.col;
                 self.tabstops.set(col, true);
             }
             // RI (Reverse Index)
             ([], b'M') => {
                 let fill = self.cursor_attrs.bgcolor;
-                let screen = self.screen_mut();
+                let screen = &mut self.screen;
                 screen.pending_wrap = false;
                 let (scroll_top, _) =
                     screen.scroll_region(false).as_region(&screen.size).row_bounds();
@@ -1662,7 +1609,7 @@ impl vte::Perform for State {
             // RIS (Reset to Initial State)
             ([], b'c') => {
                 self.tabstops.fill(false);
-                let width = self.screen().size.width;
+                let width = self.screen.size.width;
                 self.fill_tabstops(0, width);
                 self.cursor_style = term::CursorStyle::Default;
                 self.cursor_attrs = term::Attrs::default();
