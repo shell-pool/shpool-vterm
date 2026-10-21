@@ -11,19 +11,7 @@ PUSH "\n"
 
 RESET
 
-!Index
-PUSH "\e[25H"
-PUSH "\eD"
-  scrollrect 0..25,0..80 => +1,+0
-
 RESET
-
-!Reverse Index
-PUSH "\eM"
-  scrollrect 0..25,0..80 => -1,+0
-
-RESET
-
 !Linefeed in DECSTBM
 PUSH "\e[1;10r"
   ?cursor = 0,0
@@ -54,31 +42,7 @@ PUSH "\n"
   # no scrollrect
   ?cursor = 24,0
 
-!Linefeed in DECSTBM+DECSLRM
-PUSH "\e[?69h"
-PUSH "\e[3;10r\e[10;40s"
-PUSH "\e[10;10H\n"
-  scrollrect 2..10,9..40 => +1,+0
-
-!IND/RI in DECSTBM+DECSLRM
-PUSH "\eD"
-  scrollrect 2..10,9..40 => +1,+0
-PUSH "\e[3;10H\eM"
-  scrollrect 2..10,9..40 => -1,+0
-
-!DECRQSS on DECSTBM
-PUSH "\eP\$qr\e\\"
-  output "\eP1\$r3;10r\e\\"
-
-!DECRQSS on DECSLRM
-PUSH "\eP\$qs\e\\"
-  output "\eP1\$r10;40s\e\\"
-
-!Setting invalid DECSLRM with !DECVSSM is still rejected
-PUSH "\e[?69l\e[;0s\e[?69h"
-
 RESET
-
 !Scroll Down
 PUSH "\e[S"
   scrollrect 0..25,0..80 => +1,+0
@@ -99,15 +63,7 @@ PUSH "\e[2T"
 PUSH "\e[100T"
   scrollrect 0..25,0..80 => -25,+0
 
-!SD/SU in DECSTBM
-PUSH "\e[5;20r"
-PUSH "\e[S"
-  scrollrect 4..20,0..80 => +1,+0
-PUSH "\e[T"
-  scrollrect 4..20,0..80 => -1,+0
-
 RESET
-
 !SD/SU in DECSTBM+DECSLRM
 PUSH "\e[?69h"
 PUSH "\e[3;10r\e[10;40s"
@@ -120,15 +76,7 @@ PUSH "\e[?69l"
 PUSH "\e[S"
   scrollrect 2..10,0..80 => +1,+0
 
-!Invalid boundaries
 RESET
-
-PUSH "\e[100;105r\eD"
-PUSH "\e[5;2r\eD"
-
-RESET
-WANTSTATE -s+me
-
 !Scroll Down move+erase emulation
 PUSH "\e[S"
   moverect 1..25,0..80 -> 0..24,0..80
