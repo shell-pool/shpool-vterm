@@ -229,6 +229,45 @@ impl Term {
     pub fn cursor(&self) -> term::Pos {
         self.state.screen.cursor
     }
+
+    /// The attrs that newly printed chars get.
+    #[cfg(feature = "unstable-internal-test")]
+    pub fn cursor_attrs(&self) -> &term::Attrs {
+        &self.state.cursor_attrs
+    }
+
+    /// The cell at the given position on the visible screen, or None if the
+    /// position is off the screen.
+    #[cfg(feature = "unstable-internal-test")]
+    pub fn cell(&self, row: usize, col: usize) -> Option<CellView> {
+        self.state.screen.cell(row, col).map(|cell| CellView {
+            chars: cell.chars().to_vec(),
+            width: cell.width() as usize,
+            wide_padding: cell.is_wide_padding(),
+            attrs: cell.attrs().clone(),
+        })
+    }
+
+    /// Whether the given row of the visible screen was auto-wrapped onto
+    /// the row below it.
+    #[cfg(feature = "unstable-internal-test")]
+    pub fn row_wrapped(&self, row: usize) -> bool {
+        self.state.screen.row_wrapped(row)
+    }
+}
+
+/// A copy of a cell, for tests to inspect.
+#[cfg(feature = "unstable-internal-test")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CellView {
+    /// The char in the cell, followed by any zero width chars that modify
+    /// it. Empty for a blank cell.
+    pub chars: Vec<char>,
+    /// The number of columns the char takes up. 0 for a blank cell.
+    pub width: usize,
+    /// Whether this is the padding to the right of a wide char.
+    pub wide_padding: bool,
+    pub attrs: term::Attrs,
 }
 
 /// A section of the screen to dump.

@@ -21,7 +21,10 @@
 
 use std::{fs, path::PathBuf};
 
-use shpool_vterm::{Size, Term};
+use shpool_vterm::{
+    term::{Attrs, Color, FontWeight, UnderlineStyle},
+    CellView, Size, Term,
+};
 
 /// The size `harness.c` creates its terminal with.
 const INIT_SIZE: Size = Size { width: 80, height: 25 };
@@ -140,6 +143,9 @@ libvterm_tests! {
         "Tabstops after resize",
     ],
     state_save: "22state_save" => [
+        "Set up state",
+        "Change state",
+        "Restore",
         "Save/restore using DECSC/DECRC",
         "Save twice, restore twice happens on both edge transitions",
     ],
@@ -151,11 +157,113 @@ libvterm_tests! {
         // "Double Width, Single Height", // want 1,1, got 0,41
         "Double Height",
     ],
+    state_pen: "30state_pen" => [
+        "Reset",
+        "Bold",
+        "Underline",
+        "Italic",
+        "Blink",
+        "Reverse",
+        // "Font Selection", // alternate fonts (SGR 10-19) unsupported
+        "Foreground",
+        "Background",
+        // "Bold+ANSI colour == highbright", // harness.c turns on bold_highbright
+        // "Super/Subscript", // super/subscript (SGR 73-75) unsupported
+        "DECSTR resets pen attributes",
+    ],
+    state_flow: "32state_flow" => [
+        "Spillover text marks continuation on second line",
+        "CRLF in column 80 does not mark continuation",
+        "EL cancels continuation of following line",
+    ],
+    screen_ascii: "60screen_ascii" => [
+        "Get",
+        "Erase",
+        "Copycell",
+        "Space padding",
+        "Linefeed padding",
+        "Altscreen",
+    ],
+    screen_unicode: "61screen_unicode" => [
+        "Single width UTF-8",
+        "Wide char",
+        "Combining char",
+        // "10 combining accents should not crash", // libvterm keeps 5 combining chars, we keep 16
+        // libvterm keeps 5 combining chars, we keep 16
+        // "40 combining accents in two split writes of 20 should not crash",
+        "Outputing CJK doublewidth in 80th column should wraparound to next line and not crash\"",
+    ],
+    screen_damage: "62screen_damage" => [
+        "Merge scroll*2 with damage",
+    ],
     screen_resize: "63screen_resize" => [
+        "Resize wider preserves cells",
+        "Resize wider allows print in new area",
+        "Resize shorter with blanks just truncates",
+        "Resize shorter with content must scroll",
+        "Resize shorter does not lose line with cursor",
         "Resize shorter does not send the cursor to a negative row",
+        // "Resize taller attempts to pop scrollback", // harness.c makes up the scrollback it pops
+        "Resize can operate on altscreen",
+    ],
+    screen_pen: "64screen_pen" => [
+        "Plain",
+        "Bold",
+        "Italic",
+        "Underline",
+        "Reset",
+        // "Font", // alternate fonts (SGR 10-19) unsupported
+        "Foreground",
+        "Background",
+        // "Super/subscript", // super/subscript (SGR 73-75) unsupported
+        // erased cells don't keep the fg color
+        // "EL sets only colours to end of line, not other attrs",
+        // "DECSCNM xors reverse for entire screen", // DECSCNM unsupported
+        // "Set default colours", // SETDEFAULTCOL is libvterm API
+    ],
+    screen_protect: "65screen_protect" => [
+        // "Selective erase", // DECSCA unsupported
+        "Non-selective erase",
+    ],
+    screen_extent: "66screen_extent" => [
+        "Bold extent",
+    ],
+    screen_dbl_wh: "67screen_dbl_wh" => [
+        "Single Width, Single Height",
+        // "Double Width, Single Height", // DECDWL unsupported
+        // "Double Height", // DECDHL unsupported
+        // "Late change", // DECDWL unsupported
+        // "DWL doesn't spill over on scroll", // DECDWL unsupported
     ],
     screen_reflow: "69screen_reflow" => [
+        "Resize wider reflows wide lines",
+        "Resize narrower can create continuation lines",
+        "Shell wrapped prompt behaviour",
         "Cursor goes missing",
+    ],
+    vttest_01_movement_1: "90vttest_01-movement-1" => [
+        // "Output", // DECALN (ESC # 8) unsupported
+    ],
+    vttest_01_movement_2: "90vttest_01-movement-2" => [
+        "Output",
+    ],
+    vttest_01_movement_3: "90vttest_01-movement-3" => [
+        "Output",
+    ],
+    vttest_01_movement_4: "90vttest_01-movement-4" => [
+        "Output",
+    ],
+    vttest_02_screen_1: "90vttest_02-screen-1" => [
+        "Output",
+    ],
+    vttest_02_screen_2: "90vttest_02-screen-2" => [
+        "Output",
+    ],
+    vttest_02_screen_3: "90vttest_02-screen-3" => [
+        "Output",
+    ],
+    vttest_02_screen_4: "90vttest_02-screen-4" => [
+        "Output",
     ],
 }
 
@@ -220,9 +328,12 @@ fn run_test_file(file: &str, allowlist: &[&str]) {
                     term = Some(Term::new(SCROLLBACK_LINES, size));
                 }
             }
-            // Turning on libvterm's callbacks does not change the terminal
+            // Configuring libvterm's callbacks does not change the terminal
             // state, and shpool-vterm is always in UTF-8 mode.
-            Directive::WantState | Directive::WantScreen | Directive::Utf8(true) => {}
+            Directive::WantState
+            | Directive::WantScreen
+            | Directive::Damage
+            | Directive::Utf8(true) => {}
             Directive::Reset => {
                 if term.is_some() {
                     term = Some(Term::new(SCROLLBACK_LINES, size));
@@ -258,12 +369,12 @@ fn run_test_file(file: &str, allowlist: &[&str]) {
                     failures.push(format!("line {num}: ?{query} before INIT"));
                     continue;
                 };
-                match answer(term, &query) {
-                    Ok(got) if got == want => {}
-                    Ok(got) => failures.push(format!(
+                match (answer(term, &query), normalize_want(&query, &want)) {
+                    (Ok(got), Ok(want)) if got == want => {}
+                    (Ok(got), Ok(want)) => failures.push(format!(
                         "line {num}: ?{query} failed\n    want: {want}\n    got:  {got}\n{term}"
                     )),
-                    Err(e) => failures.push(format!("line {num}: {e}")),
+                    (Err(e), _) | (_, Err(e)) => failures.push(format!("line {num}: {e}")),
                 }
             }
         }
@@ -279,13 +390,266 @@ fn run_test_file(file: &str, allowlist: &[&str]) {
 
 /// Answer a query (without the leading `?`) in the format `harness.c` does.
 fn answer(term: &Term, query: &str) -> Result<String, String> {
-    match query {
+    let (name, args) = match query.split_once(' ') {
+        Some((name, args)) => (name, args.trim()),
+        None => (query, ""),
+    };
+    match name {
         "cursor" => {
             let pos = term.cursor();
             Ok(format!("{},{}", pos.row, pos.col))
         }
+        "pen" => answer_pen(term.cursor_attrs(), args),
+        "lineinfo" => {
+            // We can't see the line above the top of the screen, so the top
+            // row never counts as a continuation.
+            let row = parse_num(args)?;
+            Ok(if row > 0 && term.row_wrapped(row - 1) { "cont" } else { "" }.to_string())
+        }
+        "screen_chars" => {
+            let chars = screen_chars(term, parse_rect(term, args)?)?;
+            Ok(hex_list(chars.into_iter().map(u32::from)))
+        }
+        // `run-test.pl` answers this one with `?screen_chars <row>`.
+        "screen_row" => {
+            let row = parse_num(args)?;
+            let rect =
+                Rect { start_row: row, start_col: 0, end_row: row + 1, end_col: term.size().width };
+            Ok(hex_list(screen_chars(term, rect)?.into_iter().map(u32::from)))
+        }
+        "screen_text" => {
+            let text: String = screen_chars(term, parse_rect(term, args)?)?.into_iter().collect();
+            Ok(hex_list(text.bytes().map(u32::from)))
+        }
+        "screen_cell" => {
+            let (row, col) = parse_pos(args)?;
+            answer_screen_cell(&get_cell(term, row, col)?)
+        }
+        "screen_eol" => {
+            let (row, col) = parse_pos(args)?;
+            for col in col..term.size().width {
+                let cell = get_cell(term, row, col)?;
+                if cell.wide_padding || !cell.chars.is_empty() {
+                    return Ok("0".to_string());
+                }
+            }
+            Ok("1".to_string())
+        }
+        "screen_attrs_extent" => {
+            let (row, col) = parse_pos(args)?;
+            let target = get_cell(term, row, col)?.attrs;
+            let same = |col| get_cell(term, row, col).map(|cell| cell.attrs == target);
+            let mut start = col;
+            while start > 0 && same(start - 1)? {
+                start -= 1;
+            }
+            let mut end = col;
+            while end + 1 < term.size().width && same(end + 1)? {
+                end += 1;
+            }
+            Ok(format!("{row},{start}-{},{end}", row + 1))
+        }
         _ => Err(format!("unsupported query: ?{query}")),
     }
+}
+
+/// Put the want of a query into the same form `answer` produces, the way
+/// `run-test.pl` does.
+fn normalize_want(query: &str, want: &str) -> Result<String, String> {
+    match query.split_whitespace().next() {
+        Some("screen_chars" | "screen_row") if want.starts_with('"') => {
+            Ok(hex_list(eval_perl_string(want)?.into_iter().map(u32::from)))
+        }
+        Some("screen_row") => {
+            let chars = want
+                .split(',')
+                .filter(|c| !c.trim().is_empty())
+                .map(|c| {
+                    let c = c.trim();
+                    u32::from_str_radix(c.trim_start_matches("0x"), 16)
+                        .map_err(|e| format!("bad char '{c}': {e}"))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(hex_list(chars.into_iter()))
+        }
+        _ => Ok(want.to_string()),
+    }
+}
+
+fn hex_list(vals: impl Iterator<Item = u32>) -> String {
+    vals.map(|v| format!("0x{v:02x}")).collect::<Vec<_>>().join(",")
+}
+
+/// A rectangle of cells. The ends are exclusive.
+struct Rect {
+    start_row: usize,
+    start_col: usize,
+    end_row: usize,
+    end_col: usize,
+}
+
+/// Parse either `start_row,start_col,end_row,end_col` or just a row, which
+/// means the whole row.
+fn parse_rect(term: &Term, args: &str) -> Result<Rect, String> {
+    let nums = args.split(',').map(|n| parse_num(n.trim())).collect::<Result<Vec<_>, _>>()?;
+    match nums.as_slice() {
+        [start_row, start_col, end_row, end_col] => Ok(Rect {
+            start_row: *start_row,
+            start_col: *start_col,
+            end_row: *end_row,
+            end_col: *end_col,
+        }),
+        [row] => {
+            Ok(Rect { start_row: *row, start_col: 0, end_row: row + 1, end_col: term.size().width })
+        }
+        _ => Err(format!("bad rect '{args}'")),
+    }
+}
+
+/// Parse `row,col`.
+fn parse_pos(args: &str) -> Result<(usize, usize), String> {
+    let (row, col) = args.split_once(',').ok_or_else(|| format!("bad position '{args}'"))?;
+    Ok((parse_num(row.trim())?, parse_num(col.trim())?))
+}
+
+fn get_cell(term: &Term, row: usize, col: usize) -> Result<CellView, String> {
+    term.cell(row, col).ok_or_else(|| format!("{row},{col} is off the screen"))
+}
+
+/// The chars in the given rect, the way libvterm's `vterm_screen_get_chars`
+/// gets them: blanks at the end of each row get dropped, blanks before a
+/// char become spaces, and rows get joined with newlines.
+fn screen_chars(term: &Term, rect: Rect) -> Result<Vec<char>, String> {
+    let mut chars = vec![];
+    for row in rect.start_row..rect.end_row {
+        let mut blanks = 0;
+        for col in rect.start_col..rect.end_col {
+            let cell = get_cell(term, row, col)?;
+            if cell.wide_padding {
+                continue;
+            }
+            if cell.chars.is_empty() {
+                blanks += 1;
+                continue;
+            }
+            chars.extend(std::iter::repeat(' ').take(blanks));
+            blanks = 0;
+            chars.extend(cell.chars);
+        }
+        if row + 1 < rect.end_row {
+            chars.push('\n');
+        }
+    }
+    Ok(chars)
+}
+
+fn answer_screen_cell(cell: &CellView) -> Result<String, String> {
+    // libvterm marks the padding after a wide char with a char of -1.
+    let chars = if cell.wide_padding {
+        String::from("0xffffffff")
+    } else {
+        cell.chars.iter().map(|c| format!("{:#x}", *c as u32)).collect::<Vec<_>>().join(",")
+    };
+    let width = if cell.width == 2 { 2 } else { 1 };
+
+    let attrs = &cell.attrs;
+    let mut flags = String::new();
+    if attrs.font_weight == Some(FontWeight::Bold) {
+        flags.push('B');
+    }
+    if attrs.underline.is_some() {
+        flags.push_str(&format!("U{}", underline_num(attrs)));
+    }
+    if attrs.italic {
+        flags.push('I');
+    }
+    if attrs.blink.is_some() {
+        flags.push('K');
+    }
+    if attrs.inverse {
+        flags.push('R');
+    }
+
+    Ok(format!(
+        "{{{chars}}} width={width} attrs={{{flags}}} fg={} bg={}",
+        screen_rgb(attrs.fgcolor, DEFAULT_FG)?,
+        screen_rgb(attrs.bgcolor, DEFAULT_BG)?,
+    ))
+}
+
+fn answer_pen(attrs: &Attrs, attr: &str) -> Result<String, String> {
+    let on_off = |on: bool| String::from(if on { "on" } else { "off" });
+    Ok(match attr {
+        "bold" => on_off(attrs.font_weight == Some(FontWeight::Bold)),
+        "underline" => underline_num(attrs).to_string(),
+        "italic" => on_off(attrs.italic),
+        "blink" => on_off(attrs.blink.is_some()),
+        "reverse" => on_off(attrs.inverse),
+        // shpool-vterm ignores the SGR codes for alternate fonts (10-19)
+        // and super/subscript (73-75), so these never change.
+        "font" => String::from("0"),
+        "small" => on_off(false),
+        "baseline" => String::from("normal"),
+        "foreground" => pen_color(attrs.fgcolor, DEFAULT_FG, "is_default_fg"),
+        "background" => pen_color(attrs.bgcolor, DEFAULT_BG, "is_default_bg"),
+        _ => return Err(format!("unsupported query: ?pen {attr}")),
+    })
+}
+
+/// libvterm's numbering for underline styles. It has no dotted or dashed
+/// underlines, and treats them as single ones.
+fn underline_num(attrs: &Attrs) -> u8 {
+    match attrs.underline {
+        None => 0,
+        Some(UnderlineStyle::Double) => 2,
+        Some(UnderlineStyle::Curly) => 3,
+        Some(UnderlineStyle::Single | UnderlineStyle::Dotted | UnderlineStyle::Dashed) => 1,
+    }
+}
+
+/// libvterm's default colors.
+const DEFAULT_FG: (u8, u8, u8) = (240, 240, 240);
+const DEFAULT_BG: (u8, u8, u8) = (0, 0, 0);
+
+/// libvterm's palette for the 16 ANSI colors.
+const ANSI_PALETTE: [(u8, u8, u8); 16] = [
+    (0, 0, 0),
+    (224, 0, 0),
+    (0, 224, 0),
+    (224, 224, 0),
+    (0, 0, 224),
+    (224, 0, 224),
+    (0, 224, 224),
+    (224, 224, 224),
+    (128, 128, 128),
+    (255, 64, 64),
+    (64, 255, 64),
+    (255, 255, 64),
+    (64, 64, 255),
+    (255, 64, 255),
+    (64, 255, 255),
+    (255, 255, 255),
+];
+
+/// A pen color, the way libvterm reports it before it resolves it to RGB.
+fn pen_color(color: Color, default: (u8, u8, u8), default_flag: &str) -> String {
+    match color {
+        Color::Default => format!("rgb({},{},{},{default_flag})", default.0, default.1, default.2),
+        Color::Idx(idx) => format!("idx({idx})"),
+        Color::Rgb(r, g, b) => format!("rgb({r},{g},{b})"),
+    }
+}
+
+/// A cell color, the way libvterm reports it after resolving it to RGB.
+fn screen_rgb(color: Color, default: (u8, u8, u8)) -> Result<String, String> {
+    let (r, g, b) = match color {
+        Color::Default => default,
+        Color::Idx(idx) => *ANSI_PALETTE
+            .get(idx as usize)
+            .ok_or_else(|| format!("no libvterm palette entry for color {idx}"))?,
+        Color::Rgb(r, g, b) => (r, g, b),
+    };
+    Ok(format!("rgb({r},{g},{b})"))
 }
 
 #[derive(Debug)]
@@ -307,6 +671,9 @@ enum Directive {
     WantState,
     /// `WANTSCREEN <flags>`
     WantScreen,
+    /// `DAMAGEMERGE <mode>` or `DAMAGEFLUSH`, which control how libvterm
+    /// batches up its damage callbacks.
+    Damage,
     /// `RESET`
     Reset,
     /// `PUSH <perl string expression>`
@@ -386,6 +753,7 @@ fn parse_command(line: &str) -> Result<Directive, String> {
         "UTF8" => Directive::Utf8(parse_num(args)? != 0),
         "WANTSTATE" => Directive::WantState,
         "WANTSCREEN" => Directive::WantScreen,
+        "DAMAGEMERGE" | "DAMAGEFLUSH" => Directive::Damage,
         "RESET" => Directive::Reset,
         "PUSH" => Directive::Push(eval_perl_string(args)?),
         "RESIZE" => {

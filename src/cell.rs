@@ -139,6 +139,12 @@ impl Cell {
         self.width
     }
 
+    /// The char in the cell, followed by any zero width chars that modify
+    /// it. Empty for a blank cell.
+    pub fn chars(&self) -> &[char] {
+        &self.grapheme_cluster
+    }
+
     pub fn is_empty(&self) -> bool {
         self.empty
     }

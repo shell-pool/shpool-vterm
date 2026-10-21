@@ -233,6 +233,25 @@ impl Screen {
         }
     }
 
+    /// The cell at the given position on the active screen, or None if the
+    /// position is off the screen.
+    #[cfg(feature = "unstable-internal-test")]
+    pub fn cell(&self, row: usize, col: usize) -> Option<std::borrow::Cow<'_, Cell>> {
+        if row >= self.size.height || col >= self.size.width {
+            return None;
+        }
+        match self.grids.active().get_line(self.size, row) {
+            Some(line) => line.get_cell(self.size.width, col),
+            None => Some(std::borrow::Cow::Borrowed(crate::cell::empty())),
+        }
+    }
+
+    /// Whether the given row of the active screen wraps onto the next one.
+    #[cfg(feature = "unstable-internal-test")]
+    pub fn row_wrapped(&self, row: usize) -> bool {
+        self.grids.active().get_line(self.size, row).map_or(false, |line| line.is_wrapped)
+    }
+
     /// Emit the codes that paint the screens and put the cursor back.
     ///
     /// The saved cursors get put back too, since an app that saved the
