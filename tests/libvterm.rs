@@ -74,11 +74,16 @@ libvterm_tests! {
         "Bounds Checking",
         "Horizontal Position Absolute",
         "Horizontal Position Relative",
-        // "Horizontal Position Backward", // want 0,4, got 0,7
+        // xterm ignores HPB (CSI Pn j) and VPB (CSI Pn k). Its parse table
+        // for CSI sequences maps the final bytes j and k to
+        // CASE_GROUND_STATE, which does nothing:
+        // https://github.com/ThomasDickey/xterm-snapshots/blob/5c75ead9a75d4b2e666ca06fa94503b5766ed93f/VTPrsTbl.c#L936-L937
+        // "Horizontal Position Backward",
         "Horizontal and Vertical Position",
         "Vertical Position Absolute",
         "Vertical Position Relative",
-        // "Vertical Position Backward", // want 4,2, got 6,2
+        // xterm ignores VPB (CSI Pn k), see HPB above.
+        // "Vertical Position Backward",
         "Cursor Horizontal Tab",
         "Cursor Backward Tab",
     ],
