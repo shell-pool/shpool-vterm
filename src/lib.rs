@@ -222,6 +222,13 @@ impl Term {
             .map(|title| title.as_slice())
             .filter(|title| !title.is_empty())
     }
+
+    /// The cursor position within the visible screen. (0, 0) is the upper
+    /// left.
+    #[cfg(feature = "unstable-internal-test")]
+    pub fn cursor(&self) -> term::Pos {
+        self.state.screen.cursor
+    }
 }
 
 /// A section of the screen to dump.
