@@ -104,7 +104,10 @@ libvterm_tests! {
         "ICH",
         "DCH",
         "ECH",
-        // "IL", // want 1,1, got 1,0
+        // libvterm keeps the cursor column on IL, but xterm moves it to the
+        // left margin:
+        // https://github.com/ThomasDickey/xterm-snapshots/blob/5c75ead9a75d4b2e666ca06fa94503b5766ed93f/util.c#L1650
+        // "IL",
         "DL",
         "EL 0",
         "EL 1",
