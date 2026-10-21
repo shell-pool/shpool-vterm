@@ -1279,6 +1279,66 @@ frag! {
 }
 
 frag! {
+    enable_linefeed_newline_mode { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::control_codes().enable_linefeed_newline_mode
+    => ContentRegion::All =>
+            reset_codes,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs,
+            term::control_codes().enable_linefeed_newline_mode
+}
+
+frag! {
+    disable_linefeed_newline_mode { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::control_codes().enable_linefeed_newline_mode,
+       term::control_codes().disable_linefeed_newline_mode
+    => ContentRegion::All =>
+            reset_codes,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    linefeed_newline_mode_returns_to_line_start { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::control_codes().enable_linefeed_newline_mode,
+       // LF, VT and FF all do a carriage return in LNM.
+       term::Raw::from("a\nb\x0bc\x0cd")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("a"),
+            term::Crlf::default(),
+            term::Raw::from("b"),
+            term::Crlf::default(),
+            term::Raw::from("c"),
+            term::Crlf::default(),
+            term::Raw::from("d"),
+            term::ControlCodes::cursor_position(4, 2),
+            term::control_codes().clear_attrs,
+            term::control_codes().enable_linefeed_newline_mode
+}
+
+frag! {
+    decstr_keeps_linefeed_newline_mode { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::control_codes().enable_linefeed_newline_mode,
+       term::control_codes().soft_reset
+    => ContentRegion::All =>
+            reset_codes,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs,
+            term::control_codes().enable_linefeed_newline_mode
+}
+
+frag! {
+    ris_resets_linefeed_newline_mode { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::control_codes().enable_linefeed_newline_mode,
+       term::control_codes().hard_reset
+    => ContentRegion::All =>
+            reset_codes,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs
+}
+
+frag! {
     smooth_scroll_mode_ignored { scrollback_lines: 10, width: 10, height: 10 }
     <= term::control_codes().enable_smooth_scroll_mode,
        term::control_codes().disable_smooth_scroll_mode

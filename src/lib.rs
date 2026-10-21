@@ -198,6 +198,9 @@ impl Term {
         ControlCodes::dec_private_modes_reset(&MOUSE_MODES).term_input_into(&mut buf);
         controls.disable_report_focus.term_input_into(&mut buf);
         controls.disable_paste_mode.term_input_into(&mut buf);
+        // LNM makes Enter send CR LF. It makes LF do a CR too, but painting
+        // always sends CR LF anyway.
+        controls.disable_linefeed_newline_mode.term_input_into(&mut buf);
 
         term::ControlCodes::cursor_position(1, 1).term_input_into(&mut buf);
         // With the attrs, charsets and origin mode all back to their
@@ -345,6 +348,10 @@ bitflags::bitflags! {
         /// of the screen overwrite the last column instead of wrapping onto
         /// the next line. Controlled via `CSI ? 7 {h,l}`.
         const AUTOWRAP_DISABLED = 1 << 6;
+        /// Line feed/new line mode (LNM), which makes LF, VT and FF do a
+        /// carriage return too, and makes the Enter key send CR LF rather
+        /// than CR. Controlled via `CSI 20 {h,l}`.
+        const LINEFEED_NEWLINE = 1 << 7;
     }
 }
 
@@ -606,6 +613,9 @@ impl State {
         }
         if self.modes.contains(Modes::INSERT) {
             controls.enable_insert_mode.term_input_into(buf);
+        }
+        if self.modes.contains(Modes::LINEFEED_NEWLINE) {
+            controls.enable_linefeed_newline_mode.term_input_into(buf);
         }
         // This has to come after the screen contents, since restoring a
         // pending wrap relies on the terminal wrapping.
@@ -906,6 +916,9 @@ impl vte::Perform for State {
             b'\n' | term::VERTICAL_TAB | term::FORM_FEED => {
                 let fill = self.cursor_attrs.bgcolor;
                 self.screen.linefeed(fill);
+                if self.modes.contains(Modes::LINEFEED_NEWLINE) {
+                    self.screen.carriage_return();
+                }
             }
             b'\r' => self.screen.carriage_return(),
             b'\t' => self.tab_forward(1),
@@ -1394,6 +1407,7 @@ impl vte::Perform for State {
                 [] => while let Some(code) = params_iter.next() {
                     match code {
                         [4] => self.modes.insert(Modes::INSERT),
+                        [20] => self.modes.insert(Modes::LINEFEED_NEWLINE),
                         _ => {
                             warn!(
                                 self.logger,
@@ -1463,6 +1477,7 @@ impl vte::Perform for State {
                 [] => while let Some(code) = params_iter.next() {
                     match code {
                         [4] => self.modes.remove(Modes::INSERT),
+                        [20] => self.modes.remove(Modes::LINEFEED_NEWLINE),
                         _ => {
                             warn!(
                                 self.logger,

@@ -122,7 +122,7 @@ libvterm_tests! {
     ],
     state_mode: "15state_mode" => [
         "Insert/Replace Mode",
-        // "Newline/Linefeed mode", // want 2,0, got 2,4
+        "Newline/Linefeed mode",
         "DEC origin mode",
         "Origin mode with DECSLRM",
         "Origin mode bounds cursor to scrolling region",

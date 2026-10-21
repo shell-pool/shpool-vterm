@@ -694,6 +694,8 @@ test_pub! {
         pub disable_paste_mode: ControlCode,
         pub enable_insert_mode: ControlCode,
         pub disable_insert_mode: ControlCode,
+        pub enable_linefeed_newline_mode: ControlCode,
+        pub disable_linefeed_newline_mode: ControlCode,
         pub enable_autowrap: ControlCode,
         pub disable_autowrap: ControlCode,
         pub enable_132_column_mode: ControlCode,
@@ -1350,6 +1352,16 @@ test_pub! {
             },
             disable_insert_mode: ControlCode::CSI {
                 params: smallvec![smallvec![4]],
+                intermediates: smallvec![],
+                action: 'l',
+            },
+            enable_linefeed_newline_mode: ControlCode::CSI {
+                params: smallvec![smallvec![20]],
+                intermediates: smallvec![],
+                action: 'h',
+            },
+            disable_linefeed_newline_mode: ControlCode::CSI {
+                params: smallvec![smallvec![20]],
                 intermediates: smallvec![],
                 action: 'l',
             },
