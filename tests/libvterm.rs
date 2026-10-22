@@ -131,7 +131,9 @@ libvterm_tests! {
     state_resize: "16state_resize" => [
         "Resize",
         "Resize without reset",
-        // "Resize shrink moves cursor", // want 0,79, got 1,5
+        // shpool-vterm reflows on resize, so the cursor follows the text onto the
+        // next row rather than being clamped. libvterm's state layer doesn't reflow.
+        // "Resize shrink moves cursor",
         "Resize grow doesn't cancel phantom",
     ],
     state_wrapping: "20state_wrapping" => [
