@@ -182,8 +182,13 @@ libvterm_tests! {
         // "Font Selection",
         "Foreground",
         "Background",
-        // "Bold+ANSI colour == highbright", // harness.c turns on bold_highbright
-        // "Super/Subscript", // super/subscript (SGR 73-75) unsupported
+        // harness.c turns on libvterm's bold_highbright option, which turns bold
+        // colors 0-7 into 8-15. We keep the color as sent and leave that choice to
+        // the client terminal.
+        // "Bold+ANSI colour == highbright",
+        // Superscript/subscript (SGR 73-75) are ignored by xterm, VTE, kitty and
+        // Alacritty, so we ignore them too.
+        // "Super/Subscript",
         "DECSTR resets pen attributes",
     ],
     state_flow: "32state_flow" => [
@@ -231,7 +236,8 @@ libvterm_tests! {
         // "Font",
         "Foreground",
         "Background",
-        // "Super/subscript", // super/subscript (SGR 73-75) unsupported
+        // Superscript/subscript are ignored, see 30state_pen.
+        // "Super/subscript",
         // erased cells don't keep the fg color
         // "EL sets only colours to end of line, not other attrs",
         // "DECSCNM xors reverse for entire screen", // DECSCNM unsupported

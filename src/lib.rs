@@ -1585,6 +1585,12 @@ impl vte::Perform for State {
                         debug!(self.logger, "ignoring alternate font 'CSI {} m'", n)
                     }
 
+                    // Superscript and subscript. xterm, VTE, kitty and
+                    // Alacritty all ignore these, so we do too.
+                    [n] if (73..=75).contains(n) => {
+                        debug!(self.logger, "ignoring superscript/subscript 'CSI {} m'", n)
+                    }
+
                     // Italic Handling.
                     [3] => self.cursor_attrs.italic = true,
                     [23] => self.cursor_attrs.italic = false,
