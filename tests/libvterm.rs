@@ -1,9 +1,9 @@
 //! Runs the libvterm test suite in `tests/data/libvterm` against
 //! shpool-vterm.
 //!
-//! libvterm drives its `.test` files with `run-test.pl` and `harness.c`.
-//! This reimplements just enough of that pair to run them against a `Term`.
-//! The files are made up of a few kinds of lines:
+//! libvterm drives its `.test` files with `t/run-test.pl` and `t/harness.c`
+//! in its own source tree. This reimplements just enough of that pair to run
+//! them against a `Term`. The files are made up of a few kinds of lines:
 //!
 //! - `!Name` starts a section. Sections are not independent: each one picks up
 //!   the terminal state that the sections before it left behind.
