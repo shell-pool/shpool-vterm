@@ -29,9 +29,18 @@ use shpool_vterm::{
 /// The size `harness.c` creates its terminal with.
 const INIT_SIZE: Size = Size { width: 80, height: 25 };
 
-/// libvterm's screen keeps no scrollback, and none of the queries look at
-/// it, so we keep the minimum.
-const SCROLLBACK_LINES: usize = 0;
+/// The scrollback we keep while `WANTSCREEN b` is on. libvterm leaves
+/// storing scrollback to its embedder, and harness.c only takes part while
+/// `b` is on, so the rest of the time we keep none beyond the screen.
+const SCROLLBACK_LINES: usize = 1000;
+
+fn scrollback_lines(want_scrollback: bool) -> usize {
+    if want_scrollback {
+        SCROLLBACK_LINES
+    } else {
+        0
+    }
+}
 
 /// Defines a test for each libvterm test file, which checks the sections
 /// listed for it.
@@ -223,7 +232,7 @@ libvterm_tests! {
         "Resize shorter with content must scroll",
         "Resize shorter does not lose line with cursor",
         "Resize shorter does not send the cursor to a negative row",
-        // "Resize taller attempts to pop scrollback", // harness.c makes up the scrollback it pops
+        "Resize taller attempts to pop scrollback",
         "Resize can operate on altscreen",
     ],
     screen_pen: "64screen_pen" => [
@@ -328,6 +337,7 @@ fn run_test_file(file: &str, allowlist: &[&str]) {
     }
 
     let mut term: Option<Term> = None;
+    let mut want_scrollback = false;
     let mut size = INIT_SIZE;
     // Commands before the first section set things up for all of them,
     // so they always need to be supported.
@@ -348,18 +358,31 @@ fn run_test_file(file: &str, allowlist: &[&str]) {
             }
             Directive::Init => {
                 if term.is_none() {
-                    term = Some(Term::new(SCROLLBACK_LINES, size));
+                    term = Some(Term::new(scrollback_lines(want_scrollback), size));
+                }
+            }
+            // Of the WANTSCREEN flags, only `b` matters to us, since it
+            // decides whether there is any scrollback. Like harness.c, a `-`
+            // turns off the flags after it.
+            Directive::WantScreen(flags) => {
+                let mut sense = true;
+                for flag in flags.chars() {
+                    match flag {
+                        '-' => sense = false,
+                        'b' => want_scrollback = sense,
+                        _ => {}
+                    }
+                }
+                if let Some(term) = term.as_mut() {
+                    term.set_scrollback_lines(scrollback_lines(want_scrollback));
                 }
             }
             // Configuring libvterm's callbacks does not change the terminal
             // state, and shpool-vterm is always in UTF-8 mode.
-            Directive::WantState
-            | Directive::WantScreen
-            | Directive::Damage
-            | Directive::Utf8(true) => {}
+            Directive::WantState | Directive::Damage | Directive::Utf8(true) => {}
             Directive::Reset => {
                 if term.is_some() {
-                    term = Some(Term::new(SCROLLBACK_LINES, size));
+                    term = Some(Term::new(scrollback_lines(want_scrollback), size));
                 }
             }
             Directive::Push(bytes) => match term.as_mut() {
@@ -693,7 +716,7 @@ enum Directive {
     /// `WANTSTATE <flags>`
     WantState,
     /// `WANTSCREEN <flags>`
-    WantScreen,
+    WantScreen(String),
     /// `DAMAGEMERGE <mode>` or `DAMAGEFLUSH`, which control how libvterm
     /// batches up its damage callbacks.
     Damage,
@@ -775,7 +798,7 @@ fn parse_command(line: &str) -> Result<Directive, String> {
         "INIT" => Directive::Init,
         "UTF8" => Directive::Utf8(parse_num(args)? != 0),
         "WANTSTATE" => Directive::WantState,
-        "WANTSCREEN" => Directive::WantScreen,
+        "WANTSCREEN" => Directive::WantScreen(args.to_string()),
         "DAMAGEMERGE" | "DAMAGEFLUSH" => Directive::Damage,
         "RESET" => Directive::Reset,
         "PUSH" => Directive::Push(eval_perl_string(args)?),

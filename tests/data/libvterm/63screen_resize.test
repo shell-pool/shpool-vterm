@@ -89,11 +89,19 @@ RESIZE 20,80
 RESET
 WANTSCREEN -b
 RESIZE 25,80
+# shpool-vterm: harness.c makes up an "ABCDE" line for every sb_popline, but
+# we keep real scrollback, so put five real ones there first.
+WANTSCREEN b
+PUSH "ABCDE\r\n" x 5 . "\e[25H" . "\n" x 5 . "\e[H"
+  sb_pushline 80 = 41 42 43 44 45
+  sb_pushline 80 = 41 42 43 44 45
+  sb_pushline 80 = 41 42 43 44 45
+  sb_pushline 80 = 41 42 43 44 45
+  sb_pushline 80 = 41 42 43 44 45
 PUSH "Line 1\e[25HBottom\e[15H"
   ?screen_row 0  = "Line 1"
   ?screen_row 24 = "Bottom"
   ?cursor = 14,0
-WANTSCREEN b
 RESIZE 30,80
   sb_popline 80
   sb_popline 80
