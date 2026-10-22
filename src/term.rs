@@ -700,6 +700,8 @@ test_pub! {
         pub disable_autowrap: ControlCode,
         pub enable_132_column_mode: ControlCode,
         pub disable_132_column_mode: ControlCode,
+        pub enable_reverse_screen: ControlCode,
+        pub disable_reverse_screen: ControlCode,
         pub enable_smooth_scroll_mode: ControlCode,
         pub disable_smooth_scroll_mode: ControlCode,
         pub enable_deccolm: ControlCode,
@@ -1382,6 +1384,16 @@ test_pub! {
             },
             disable_132_column_mode: ControlCode::CSI {
                 params: smallvec![smallvec![3]],
+                intermediates: smallvec![b'?'],
+                action: 'l',
+            },
+            enable_reverse_screen: ControlCode::CSI {
+                params: smallvec![smallvec![5]],
+                intermediates: smallvec![b'?'],
+                action: 'h',
+            },
+            disable_reverse_screen: ControlCode::CSI {
+                params: smallvec![smallvec![5]],
                 intermediates: smallvec![b'?'],
                 action: 'l',
             },

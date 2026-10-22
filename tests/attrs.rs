@@ -1339,6 +1339,67 @@ frag! {
 }
 
 frag! {
+    enable_reverse_screen { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::control_codes().enable_reverse_screen
+    => ContentRegion::All =>
+            reset_codes,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs,
+            term::control_codes().enable_reverse_screen
+}
+
+frag! {
+    disable_reverse_screen { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::control_codes().enable_reverse_screen,
+       term::control_codes().disable_reverse_screen
+    => ContentRegion::All =>
+            reset_codes,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs
+}
+
+frag! {
+    reverse_screen_leaves_cells_alone { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::Raw::from("a"),
+       term::control_codes().inverse,
+       term::Raw::from("b"),
+       term::control_codes().clear_attrs,
+       term::control_codes().enable_reverse_screen,
+       term::Raw::from("c")
+    => ContentRegion::All =>
+            reset_codes,
+            term::Raw::from("a"),
+            term::control_codes().inverse,
+            term::Raw::from("b"),
+            term::control_codes().undo_inverse,
+            term::Raw::from("c"),
+            term::ControlCodes::cursor_position(1, 4),
+            term::control_codes().clear_attrs,
+            term::control_codes().enable_reverse_screen
+}
+
+frag! {
+    decstr_keeps_reverse_screen { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::control_codes().enable_reverse_screen,
+       term::control_codes().soft_reset
+    => ContentRegion::All =>
+            reset_codes,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs,
+            term::control_codes().enable_reverse_screen
+}
+
+frag! {
+    ris_resets_reverse_screen { scrollback_lines: 10, width: 10, height: 10 }
+    <= term::control_codes().enable_reverse_screen,
+       term::control_codes().hard_reset
+    => ContentRegion::All =>
+            reset_codes,
+            term::ControlCodes::cursor_position(1, 1),
+            term::control_codes().clear_attrs
+}
+
+frag! {
     smooth_scroll_mode_ignored { scrollback_lines: 10, width: 10, height: 10 }
     <= term::control_codes().enable_smooth_scroll_mode,
        term::control_codes().disable_smooth_scroll_mode

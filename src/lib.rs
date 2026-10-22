@@ -187,8 +187,10 @@ impl Term {
         controls.shift_in.term_input_into(&mut buf);
 
         // An app that hid the cursor and never got the chance to show it
-        // again would leave it hidden for good.
+        // again would leave it hidden for good, and one that turned on reverse
+        // video for the whole screen would leave every color inverted.
         controls.show_cursor.term_input_into(&mut buf);
+        controls.disable_reverse_screen.term_input_into(&mut buf);
 
         // These change what the terminal sends rather than what it shows,
         // so leftovers turn keypresses, mouse movement, focus changes and
@@ -256,6 +258,12 @@ impl Term {
     #[cfg(feature = "unstable-internal-test")]
     pub fn row_wrapped(&self, row: usize) -> bool {
         self.state.screen.row_wrapped(row)
+    }
+
+    /// Whether the whole screen is in reverse video (DECSCNM).
+    #[cfg(feature = "unstable-internal-test")]
+    pub fn reverse_screen(&self) -> bool {
+        self.state.modes.contains(Modes::REVERSE_SCREEN)
     }
 }
 
@@ -352,6 +360,10 @@ bitflags::bitflags! {
         /// carriage return too, and makes the Enter key send CR LF rather
         /// than CR. Controlled via `CSI 20 {h,l}`.
         const LINEFEED_NEWLINE = 1 << 7;
+        /// Reverse video for the whole screen (DECSCNM). It only changes
+        /// how the terminal draws the screen, so the cells stay as they are.
+        /// Controlled via `CSI ? 5 {h,l}`.
+        const REVERSE_SCREEN = 1 << 8;
     }
 }
 
@@ -622,6 +634,9 @@ impl State {
         }
         if self.modes.contains(Modes::LINEFEED_NEWLINE) {
             controls.enable_linefeed_newline_mode.term_input_into(buf);
+        }
+        if self.modes.contains(Modes::REVERSE_SCREEN) {
+            controls.enable_reverse_screen.term_input_into(buf);
         }
         // This has to come after the screen contents, since restoring a
         // pending wrap relies on the terminal wrapping.
@@ -1434,6 +1449,7 @@ impl vte::Perform for State {
                         // Smooth Scroll Mode (DECSCLM). Visual display scrolling timing
                         // is irrelevant in a headless virtual terminal.
                         [4] => {},
+                        [5] => self.modes.insert(Modes::REVERSE_SCREEN),
                         [6] => self.set_origin_mode(OriginMode::ScrollRegion),
                         [7] => self.modes.remove(Modes::AUTOWRAP_DISABLED),
                         [12] => self.cursor_blinking = Some(true),
@@ -1506,6 +1522,7 @@ impl vte::Perform for State {
                         // Jump Scroll Mode (DECSCLM). Visual display scrolling timing
                         // is irrelevant in a headless virtual terminal.
                         [4] => {},
+                        [5] => self.modes.remove(Modes::REVERSE_SCREEN),
                         [6] => self.set_origin_mode(OriginMode::Term),
                         [7] => self.modes.insert(Modes::AUTOWRAP_DISABLED),
                         [12] => self.cursor_blinking = Some(false),

@@ -24,6 +24,7 @@ impl shpool_vterm::term::AsTermInput for reset_codes {
         controls.designate_g3_us_ascii.term_input_into(buf);
         controls.shift_in.term_input_into(buf);
         controls.show_cursor.term_input_into(buf);
+        controls.disable_reverse_screen.term_input_into(buf);
         controls.disable_application_cursor_keys.term_input_into(buf);
         controls.disable_application_keypad_mode.term_input_into(buf);
         term::ControlCodes::dec_private_modes_reset(&[1000, 1002, 1003, 1005, 1006, 1015, 1016])

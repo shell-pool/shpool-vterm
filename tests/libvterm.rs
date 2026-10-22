@@ -248,7 +248,7 @@ libvterm_tests! {
         // Superscript/subscript are ignored, see 30state_pen.
         // "Super/subscript",
         "EL sets only colours to end of line, not other attrs",
-        // "DECSCNM xors reverse for entire screen", // DECSCNM unsupported
+        "DECSCNM xors reverse for entire screen",
         // "Set default colours", // SETDEFAULTCOL is libvterm API
     ],
     screen_protect: "65screen_protect" => [
@@ -470,7 +470,7 @@ fn answer(term: &Term, query: &str) -> Result<String, String> {
         }
         "screen_cell" => {
             let (row, col) = parse_pos(args)?;
-            answer_screen_cell(&get_cell(term, row, col)?)
+            answer_screen_cell(&get_cell(term, row, col)?, term.reverse_screen())
         }
         "screen_eol" => {
             let (row, col) = parse_pos(args)?;
@@ -590,7 +590,9 @@ fn screen_chars(term: &Term, rect: Rect) -> Result<Vec<char>, String> {
     Ok(chars)
 }
 
-fn answer_screen_cell(cell: &CellView) -> Result<String, String> {
+/// Answer `?screen_cell`. Like libvterm, a cell shows up reversed if either
+/// it or the whole screen (DECSCNM) is in reverse video, but not both.
+fn answer_screen_cell(cell: &CellView, reverse_screen: bool) -> Result<String, String> {
     // libvterm marks the padding after a wide char with a char of -1.
     let chars = if cell.wide_padding {
         String::from("0xffffffff")
@@ -613,7 +615,7 @@ fn answer_screen_cell(cell: &CellView) -> Result<String, String> {
     if attrs.blink.is_some() {
         flags.push('K');
     }
-    if attrs.inverse {
+    if attrs.inverse != reverse_screen {
         flags.push('R');
     }
 
