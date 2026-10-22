@@ -253,7 +253,9 @@ libvterm_tests! {
         // "Set default colours", // SETDEFAULTCOL is libvterm API
     ],
     screen_protect: "65screen_protect" => [
-        // "Selective erase", // DECSCA unsupported
+        // Protected chars (DECSCA) are supported by xterm, but most terminals
+        // (VTE, kitty, Alacritty) ignore them, so we do too.
+        // "Selective erase",
         "Non-selective erase",
     ],
     screen_extent: "66screen_extent" => [

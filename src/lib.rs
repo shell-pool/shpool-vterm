@@ -1173,7 +1173,8 @@ impl vte::Perform for State {
             }
             // ED (Erase in Display)
             // DECSED (Selective Erase in Display, CSI ? n J). We don't track
-            // the protected attribute (DECSCA), so this is the same as ED.
+            // the protected attribute (DECSCA), so this is the same as ED,
+            // like in VTE.
             'J' if plain || intermediates == [b'?'] => while let Some(code) = params_iter.next() {
                 let fill = self.cursor_attrs.bgcolor;
                 match code {
@@ -1700,6 +1701,11 @@ impl vte::Perform for State {
                     Err(e) => warn!(self.logger, "parsing cursor style: {:?}", e),
                 }
             },
+            // DECSCA (Select Character Protection Attribute) protects the
+            // chars printed after it from DECSED and DECSEL. xterm supports
+            // it, but most terminals (VTE, kitty, Alacritty) ignore it, so we
+            // do too.
+            'q' if intermediates == [b'"'] => debug!(self.logger, "ignoring DECSCA"),
             // DECSTBM (Set Scroll Region)
             'r' if plain => {
                 let height = self.screen.size.height;
