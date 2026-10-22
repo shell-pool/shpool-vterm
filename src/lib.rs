@@ -1810,6 +1810,14 @@ impl vte::Perform for State {
             // (ESC % @). We only speak utf-8.
             ([b'%'], b'G' | b'@') => {}
 
+            // DECALN (Screen Alignment Pattern, ESC # 8)
+            ([b'#'], b'8') => self.screen.fill_alignment_pattern(),
+            // DECDHL, DECSWL and DECDWL (ESC # 3 through 6) make the cursor
+            // line double height or double width. xterm supports them, but
+            // most terminals (VTE, kitty, Alacritty) ignore them, so we do
+            // too.
+            ([b'#'], b'3'..=b'6') => debug!(self.logger, "ignoring double width/height line"),
+
             // OSC terminators that get sent to the esc handler as well,
             // we can ignore them.
             ([], 92) => {}

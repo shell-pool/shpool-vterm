@@ -164,7 +164,10 @@ libvterm_tests! {
         "RIS clears tabstops",
     ],
     state_dbl_wh: "28state_dbl_wh" => [
-        // "Double Width, Single Height", // want 1,1, got 0,41
+        // Double width/height lines (ESC # 3 through 6) are supported by
+        // xterm, but most terminals (VTE, kitty, Alacritty) ignore them, so
+        // we do too.
+        // "Double Width, Single Height",
         "Double Height",
     ],
     state_pen: "30state_pen" => [
@@ -240,10 +243,11 @@ libvterm_tests! {
     ],
     screen_dbl_wh: "67screen_dbl_wh" => [
         "Single Width, Single Height",
-        // "Double Width, Single Height", // DECDWL unsupported
-        // "Double Height", // DECDHL unsupported
-        // "Late change", // DECDWL unsupported
-        // "DWL doesn't spill over on scroll", // DECDWL unsupported
+        // Double width/height lines are unsupported, see 28state_dbl_wh.
+        // "Double Width, Single Height",
+        // "Double Height",
+        // "Late change",
+        // "DWL doesn't spill over on scroll",
     ],
     screen_reflow: "69screen_reflow" => [
         "Resize wider reflows wide lines",
@@ -252,7 +256,7 @@ libvterm_tests! {
         "Cursor goes missing",
     ],
     vttest_01_movement_1: "90vttest_01-movement-1" => [
-        // "Output", // DECALN (ESC # 8) unsupported
+        "Output",
     ],
     vttest_01_movement_2: "90vttest_01-movement-2" => [
         "Output",

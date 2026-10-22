@@ -768,6 +768,30 @@ impl Screen {
         self.grids.scrollback.erase_scrollback(self.size);
     }
 
+    /// DECALN (ESC # 8). Fill the active screen with `E`s, the way the
+    /// alignment test of a DEC terminal does. Like in xterm and VTE, this
+    /// also drops the scroll region, the margins and origin mode, and homes
+    /// the cursor.
+    pub fn fill_alignment_pattern(&mut self) {
+        self.set_scroll_region(ScrollRegion::TrackSize);
+        if self.left_right_margin_mode() {
+            self.side_margins = SideMargins::Full;
+        }
+        self.origin_mode = OriginMode::Term;
+        self.pending_wrap = false;
+        self.cursor = Pos { row: 0, col: 0 };
+
+        let row = Line {
+            cells: vec![Cell::new('E', term::Attrs::default()); self.size.width],
+            ..Line::new()
+        };
+        for i in 0..self.size.height {
+            if let Some(line) = self.grids.active_mut().ensure_line(self.size, i) {
+                *line = row.clone();
+            }
+        }
+    }
+
     /// Gets the current line. If the cursor is not currently over an actual
     /// line, this returns nothing.
     pub fn get_line_mut(&mut self) -> Option<&mut Line> {
