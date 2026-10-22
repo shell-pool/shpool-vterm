@@ -1579,6 +1579,12 @@ impl vte::Perform for State {
                     [2] => self.cursor_attrs.font_weight = Some(FontWeight::Faint),
                     [22] => self.cursor_attrs.font_weight = None,
 
+                    // Alternate fonts. xterm, VTE, kitty and Alacritty all
+                    // ignore these, so we do too.
+                    [n] if (10..=19).contains(n) => {
+                        debug!(self.logger, "ignoring alternate font 'CSI {} m'", n)
+                    }
+
                     // Italic Handling.
                     [3] => self.cursor_attrs.italic = true,
                     [23] => self.cursor_attrs.italic = false,

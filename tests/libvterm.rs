@@ -177,7 +177,9 @@ libvterm_tests! {
         "Italic",
         "Blink",
         "Reverse",
-        // "Font Selection", // alternate fonts (SGR 10-19) unsupported
+        // Alternate fonts (SGR 10-19) are ignored by xterm, VTE, kitty and
+        // Alacritty, so we ignore them too.
+        // "Font Selection",
         "Foreground",
         "Background",
         // "Bold+ANSI colour == highbright", // harness.c turns on bold_highbright
@@ -225,7 +227,8 @@ libvterm_tests! {
         "Italic",
         "Underline",
         "Reset",
-        // "Font", // alternate fonts (SGR 10-19) unsupported
+        // Alternate fonts are ignored, see 30state_pen.
+        // "Font",
         "Foreground",
         "Background",
         // "Super/subscript", // super/subscript (SGR 73-75) unsupported
