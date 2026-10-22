@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.9](https://github.com/shell-pool/shpool-vterm/compare/v0.2.8...v0.2.9) - 2026-10-22
+
+### Added
+
+- add reverse screen mode support
+- track fg color for blank cells
+- add DECALN support
+- add LF/NL mode support
+- add support for all vterm test query modes
+- add test driver for libvterm tests
+
+### Other
+
+- update README
+- mark DECSCA intentionally unsupported
+- enable resize taller libvterm test
+- ignore some more libvterm tests
+- mark alt fonts ignored
+- mark reflow divergence intentional
+- mark 13state_edit/IL intentionally ignored
+- mark HPB/VPB intentionally unsupported
+- clean up callback only vterm tests
+
 ## [0.2.8](https://github.com/shell-pool/shpool-vterm/compare/v0.2.7...v0.2.8) - 2026-10-14
 
 ### Added
