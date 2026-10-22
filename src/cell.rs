@@ -36,6 +36,15 @@ pub(crate) fn empty() -> &'static Cell {
     EMPTY_CELL.get_or_init(|| Cell::empty())
 }
 
+/// The colors that the blanks left behind by erasing, inserting blanks and
+/// scrolling get painted with, which are the current foreground and
+/// background colors (see `Cell::blank`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct Fill {
+    pub fg: term::Color,
+    pub bg: term::Color,
+}
+
 /// A cell in a terminal.
 #[derive(Clone, Eq, PartialEq)]
 pub(crate) struct Cell {
@@ -101,14 +110,19 @@ impl Cell {
     }
 
     /// The blank cell that erasing, inserting blanks and scrolling leave
-    /// behind while `bgcolor` is the current background color.
+    /// behind while `fill` holds the current colors.
     ///
     /// Terminals paint these with the current background color, which is
     /// what lets apps fill the screen with a color just by clearing it
-    /// ("bce" in terminfo), but none of the other attrs carry over. A blank
-    /// that got erased while underline was on is not underlined.
-    pub fn blank(bgcolor: term::Color) -> Self {
-        Cell::empty_with_attrs(term::Attrs { bgcolor, ..term::Attrs::default() })
+    /// ("bce" in terminfo). Like in xterm they keep the foreground color as
+    /// well, but none of the other attrs carry over. A blank that got erased
+    /// while underline was on is not underlined.
+    pub fn blank(fill: Fill) -> Self {
+        Cell::empty_with_attrs(term::Attrs {
+            fgcolor: fill.fg,
+            bgcolor: fill.bg,
+            ..term::Attrs::default()
+        })
     }
 
     /// The padding that fills the columns to the right of a wide char. It
@@ -157,6 +171,11 @@ impl Cell {
 
     pub fn attrs(&self) -> &term::Attrs {
         &self.attrs
+    }
+
+    /// The colors of the cell, which are all that a blank keeps.
+    pub fn fill(&self) -> Fill {
+        Fill { fg: self.attrs.fgcolor, bg: self.attrs.bgcolor }
     }
 
     /// True for a cell that looks just like one nothing has been written to:

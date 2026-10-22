@@ -18,7 +18,7 @@
 
 use crate::{
     altscreen::AltScreen,
-    cell::Cell,
+    cell::{Cell, Fill},
     charset::Charsets,
     line::Line,
     log,
@@ -633,9 +633,9 @@ impl Screen {
         }
         self.cursor.clamp_to(self.size);
 
-        // The background color that a scroll paints the new line with if the
-        // cell has to wrap onto it at the bottom of the scroll region.
-        let fill = cell.attrs().bgcolor;
+        // The colors that a scroll paints the new line with if the cell has
+        // to wrap onto it at the bottom of the scroll region.
+        let fill = cell.fill();
         if self.pending_wrap {
             if autowrap {
                 self.wrap(fill);
@@ -670,7 +670,7 @@ impl Screen {
         };
         if insert_mode {
             // The blanks this opens up get written over right away.
-            line.insert_character_in(width, col, right, cell_width, term::Color::Default);
+            line.insert_character_in(width, col, right, cell_width, Fill::default());
         }
         line.set_cell(width, col, cell).context("setting cell")?;
 
@@ -685,7 +685,7 @@ impl Screen {
     }
 
     /// Move to the start of the next line because the current one is full.
-    fn wrap(&mut self, fill: term::Color) {
+    fn wrap(&mut self, fill: Fill) {
         // The line only continues onto the next one if the cursor is really
         // going to get there. Below the scroll region on the last row it has
         // nowhere to go, so the next char just overwrites this line.
@@ -716,7 +716,7 @@ impl Screen {
     ///
     /// `fill` is the background color that scrolling paints the new row with
     /// (see `Cell::blank`).
-    pub fn linefeed(&mut self, fill: term::Color) {
+    pub fn linefeed(&mut self, fill: Fill) {
         self.pending_wrap = false;
         let (_, bottom) = self.scroll_region.as_region(&self.size).row_bounds();
         if self.cursor.row + 1 == bottom {
@@ -731,7 +731,7 @@ impl Screen {
     /// Erase whichever screen is currently active from the cursor
     /// position to the bottom, leaving blanks painted with `fill` behind. Used
     /// to implement 'CSI 0 J'
-    pub fn erase_to_end(&mut self, fill: term::Color) {
+    pub fn erase_to_end(&mut self, fill: Fill) {
         self.pending_wrap = false;
         let width = self.size.width;
         match self.grids.active_mut() {
@@ -743,7 +743,7 @@ impl Screen {
     /// Erase whichever screen is currently active from the top to the
     /// cursor position, leaving blanks painted with `fill` behind. Used to
     /// implement 'CSI 1 J'
-    pub fn erase_from_start(&mut self, fill: term::Color) {
+    pub fn erase_from_start(&mut self, fill: Fill) {
         self.pending_wrap = false;
         let width = self.size.width;
         match self.grids.active_mut() {
@@ -754,7 +754,7 @@ impl Screen {
 
     /// Erase whichever screen is currently active, not including scrollback,
     /// leaving blanks painted with `fill` behind. Used to implement 'CSI 2 J'.
-    pub fn erase(&mut self, fill: term::Color) {
+    pub fn erase(&mut self, fill: Fill) {
         self.pending_wrap = false;
         match self.grids.active_mut() {
             GridMut::Scrollback(s) => s.erase(self.size, fill),
@@ -805,8 +805,8 @@ impl Screen {
     /// only leaves plain blanks behind has nothing to do there and this
     /// returns nothing, but blanks painted with a background color have to
     /// be stored.
-    pub fn line_to_erase(&mut self, fill: term::Color) -> Option<&mut Line> {
-        if fill != term::Color::Default {
+    pub fn line_to_erase(&mut self, fill: Fill) -> Option<&mut Line> {
+        if fill != Fill::default() {
             self.grids.active_mut().ensure_line(self.size, self.cursor.row)
         } else {
             self.get_line_mut()
@@ -817,7 +817,7 @@ impl Screen {
     /// opening rows of `fill` at the bottom. The cursor does not move.
     ///
     /// With margins in place, only what is between them moves.
-    pub fn scroll_up(&mut self, n: usize, fill: term::Color) {
+    pub fn scroll_up(&mut self, n: usize, fill: Fill) {
         if self.margins().is_some() {
             let (top, bottom) = self.scroll_region.as_region(&self.size).row_bounds();
             self.scroll_between_margins(top, bottom, n, true, fill);
@@ -833,7 +833,7 @@ impl Screen {
     /// opening rows of `fill` at the top. The cursor does not move.
     ///
     /// With margins in place, only what is between them moves.
-    pub fn scroll_down(&mut self, n: usize, fill: term::Color) {
+    pub fn scroll_down(&mut self, n: usize, fill: Fill) {
         if self.margins().is_some() {
             let (top, bottom) = self.scroll_region.as_region(&self.size).row_bounds();
             self.scroll_between_margins(top, bottom, n, false, fill);
@@ -871,7 +871,7 @@ impl Screen {
     ///
     /// With margins in place, only what is between them moves and the
     /// cursor goes to the left margin. Outside of them, nothing happens.
-    pub fn insert_lines(&mut self, n: usize, fill: term::Color) {
+    pub fn insert_lines(&mut self, n: usize, fill: Fill) {
         if !self.cursor_in_scroll_region() || !self.cursor_between_margins() {
             return;
         }
@@ -899,7 +899,7 @@ impl Screen {
     /// scroll region.
     ///
     /// With margins in place, it is like IL between them too.
-    pub fn delete_lines(&mut self, n: usize, fill: term::Color) {
+    pub fn delete_lines(&mut self, n: usize, fill: Fill) {
         if !self.cursor_in_scroll_region() || !self.cursor_between_margins() {
             return;
         }
@@ -921,7 +921,7 @@ impl Screen {
     /// ICH (CSI @). Insert `n` blanks of `fill` at the cursor, shifting what
     /// is right of it along towards the right margin, past which it is
     /// lost. Outside of the margins, nothing happens.
-    pub fn insert_chars(&mut self, n: usize, fill: term::Color) {
+    pub fn insert_chars(&mut self, n: usize, fill: Fill) {
         if !self.cursor_between_margins() {
             return;
         }
@@ -936,7 +936,7 @@ impl Screen {
     /// DCH (CSI P). Delete `n` cells at the cursor, pulling in what is right
     /// of it up to the right margin, in front of which blanks of `fill` open
     /// up. Outside of the margins, nothing happens.
-    pub fn delete_chars(&mut self, n: usize, fill: term::Color) {
+    pub fn delete_chars(&mut self, n: usize, fill: Fill) {
         if !self.cursor_between_margins() {
             return;
         }
@@ -960,7 +960,7 @@ impl Screen {
         bottom: usize,
         n: usize,
         up: bool,
-        fill: term::Color,
+        fill: Fill,
     ) {
         let Some((left, right)) = self.margins() else {
             return;
@@ -1541,7 +1541,7 @@ mod tests {
     // go. None of that takes storing any cells.
     #[test]
     fn painting_the_screen_stores_no_cells() {
-        let fill = term::Color::Idx(4);
+        let fill = Fill { fg: term::Color::Default, bg: term::Color::Idx(4) };
 
         let mut screen = Screen::new(100, Size { width: 80, height: 24 });
         screen.erase(fill);
@@ -1553,7 +1553,7 @@ mod tests {
         assert!(!sb.buf.is_empty());
         for line in sb.buf.iter() {
             assert!(line.cells.is_empty());
-            assert_eq!(line.blank_bgcolor, fill);
+            assert_eq!(line.blank_fill(), fill);
         }
     }
 
@@ -1561,7 +1561,7 @@ mod tests {
     // store no cells, so a shorter screen keeps them.
     #[test]
     fn painted_rows_survive_the_screen_getting_shorter() {
-        let fill = term::Color::Idx(4);
+        let fill = Fill { fg: term::Color::Default, bg: term::Color::Idx(4) };
 
         let mut screen = Screen::new(100, Size { width: 5, height: 4 });
         screen.erase(fill);

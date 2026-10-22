@@ -91,10 +91,10 @@ frag! {
             term::ControlCodes::bgcolor_idx(4)
 }
 
-// Only the background color carries over. The blanks don't get underlined
-// just because underline was on when they got erased.
+// Only the colors carry over. The blanks don't get underlined just because
+// underline was on when they got erased.
 frag! {
-    el_only_takes_bgcolor { scrollback_lines: 100, width: 5, height: 3 }
+    el_only_takes_colors { scrollback_lines: 100, width: 5, height: 3 }
     <= term::Raw::from("abc"),
        term::ControlCodes::cursor_position(1, 2),
        term::ControlCodes::fgcolor_idx(1),
@@ -105,7 +105,15 @@ frag! {
     => ContentRegion::All =>
             reset_codes,
             term::Raw::from("a"),
-            blue(4),
+            term::ControlCode::fuse_csi([
+                term::ControlCodes::fgcolor_idx(1),
+                term::ControlCodes::bgcolor_idx(4),
+            ]),
+            term::Raw::from("    "),
+            term::ControlCode::fuse_csi([
+                term::control_codes().fgcolor_default.clone(),
+                term::control_codes().bgcolor_default.clone(),
+            ]),
             term::ControlCodes::cursor_position(1, 2),
             term::control_codes().clear_attrs,
             term::ControlCode::fuse_csi([

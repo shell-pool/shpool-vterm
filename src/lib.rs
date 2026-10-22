@@ -15,7 +15,7 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    cell::Cell,
+    cell::{Cell, Fill},
     charset::{Charset, Charsets},
     screen::{SavedCursor, Screen},
     term::{
@@ -449,6 +449,12 @@ impl State {
         self.logger = logger;
     }
 
+    /// The colors that the blanks left behind by erasing, inserting blanks
+    /// and scrolling get, which are the current cursor colors.
+    fn fill(&self) -> Fill {
+        Fill { fg: self.cursor_attrs.fgcolor, bg: self.cursor_attrs.bgcolor }
+    }
+
     fn resize(&mut self, size: Size) {
         let orig_len = self.tabstops.len();
         self.tabstops.resize(size.width, false);
@@ -785,7 +791,7 @@ impl State {
     /// Like in xterm, the alt screen otherwise keeps whatever it held the
     /// last time it was active.
     fn enter_alt_screen(&mut self, erase: bool) {
-        let fill = self.cursor_attrs.bgcolor;
+        let fill = self.fill();
         let screen = &mut self.screen;
         screen.enter_alt_screen();
         if erase {
@@ -796,7 +802,7 @@ impl State {
     /// Switch back to the main screen. With `erase`, the alt screen gets
     /// erased with the current background color on the way out.
     fn exit_alt_screen(&mut self, erase: bool) {
-        let fill = self.cursor_attrs.bgcolor;
+        let fill = self.fill();
         let screen = &mut self.screen;
         if screen.alt_active() {
             if erase {
@@ -914,7 +920,7 @@ impl vte::Perform for State {
         match byte {
             // LF, along with VT and FF, which terminals treat as LF too.
             b'\n' | term::VERTICAL_TAB | term::FORM_FEED => {
-                let fill = self.cursor_attrs.bgcolor;
+                let fill = self.fill();
                 self.screen.linefeed(fill);
                 if self.modes.contains(Modes::LINEFEED_NEWLINE) {
                     self.screen.carriage_return();
@@ -1176,7 +1182,7 @@ impl vte::Perform for State {
             // the protected attribute (DECSCA), so this is the same as ED,
             // like in VTE.
             'J' if plain || intermediates == [b'?'] => while let Some(code) = params_iter.next() {
-                let fill = self.cursor_attrs.bgcolor;
+                let fill = self.fill();
                 match code {
                     [] | [0] => self.screen.erase_to_end(fill),
                     [1] => self.screen.erase_from_start(fill),
@@ -1201,7 +1207,7 @@ impl vte::Perform for State {
                     }
                 };
 
-                let fill = self.cursor_attrs.bgcolor;
+                let fill = self.fill();
                 let screen = &mut self.screen;
                 screen.pending_wrap = false;
                 let width = screen.size.width;
@@ -1212,19 +1218,19 @@ impl vte::Perform for State {
             // IL (Insert Line)
             'L' if plain => {
                 let n = param_or(&mut params_iter, 1) as usize;
-                let fill = self.cursor_attrs.bgcolor;
+                let fill = self.fill();
                 self.screen.insert_lines(n, fill);
             }
             // DL (Delete Line)
             'M' if plain => {
                 let n = param_or(&mut params_iter, 1) as usize;
-                let fill = self.cursor_attrs.bgcolor;
+                let fill = self.fill();
                 self.screen.delete_lines(n, fill);
             }
             // SU (Scroll Up)
             'S' if plain => {
                 let n = param_or(&mut params_iter, 1) as usize;
-                let fill = self.cursor_attrs.bgcolor;
+                let fill = self.fill();
                 self.screen.scroll_up(n as usize, fill);
             }
             // CTC (Cusor Tabulation Control)
@@ -1283,27 +1289,27 @@ impl vte::Perform for State {
             // highlight tracking, which has nothing to do with scrolling.
             'T' if plain && params.len() <= 1 => {
                 let n = param_or(&mut params_iter, 1) as usize;
-                let fill = self.cursor_attrs.bgcolor;
+                let fill = self.fill();
                 self.screen.scroll_down(n as usize, fill);
             }
 
             // ICH (Insert Character)
             '@' if plain => {
                 let n = param_or(&mut params_iter, 1) as usize;
-                let fill = self.cursor_attrs.bgcolor;
+                let fill = self.fill();
                 self.screen.insert_chars(n, fill);
             }
             // DCH (Delete Character)
             'P' if plain => {
                 let n = param_or(&mut params_iter, 1) as usize;
-                let fill = self.cursor_attrs.bgcolor;
+                let fill = self.fill();
                 self.screen.delete_chars(n, fill);
             }
             // ECH (Erase Character)
             'X' if plain => {
                 let n = param_or(&mut params_iter, 1) as usize;
 
-                let fill = self.cursor_attrs.bgcolor;
+                let fill = self.fill();
                 let screen = &mut self.screen;
                 screen.pending_wrap = false;
                 let width = screen.size.width;
@@ -1760,14 +1766,14 @@ impl vte::Perform for State {
             ([], b'8') => self.restore_cursor(),
             // IND (Index) moves the cursor down a row, just like LF.
             ([], b'D') => {
-                let fill = self.cursor_attrs.bgcolor;
+                let fill = self.fill();
                 self.screen.linefeed(fill);
             }
             // NEL (Next Line) is CR LF in one. Like in xterm, the LF goes
             // first, so it is the column the cursor starts out in that
             // decides whether it scrolls between the margins.
             ([], b'E') => {
-                let fill = self.cursor_attrs.bgcolor;
+                let fill = self.fill();
                 let screen = &mut self.screen;
                 screen.linefeed(fill);
                 screen.carriage_return();
@@ -1779,7 +1785,7 @@ impl vte::Perform for State {
             }
             // RI (Reverse Index)
             ([], b'M') => {
-                let fill = self.cursor_attrs.bgcolor;
+                let fill = self.fill();
                 let screen = &mut self.screen;
                 screen.pending_wrap = false;
                 let (scroll_top, _) =

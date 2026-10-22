@@ -17,7 +17,7 @@
 //! a complete terminal representation in lib.rs.
 
 use crate::{
-    cell::Cell,
+    cell::{Cell, Fill},
     line::{self, Line},
     log,
     term::{self, AsTermInput, Pos, ScrollRegion},
@@ -311,6 +311,9 @@ impl Scrollback {
                 }
             }
 
+            // The cells past the end of the last row are the rest of the
+            // logical line, and they reach the edge at any width.
+            let blank = line.blank_fill();
             logical_line.extend(line.cells);
             // The last line has nothing to continue onto, even if it claims
             // to wrap.
@@ -318,9 +321,6 @@ impl Scrollback {
                 continue;
             }
 
-            // The cells past the end of the last row are the rest of the
-            // logical line, and they reach the edge at any width.
-            let blank = line.blank_bgcolor;
             let mut rows = rewrap(&mut logical_line, new_width, blank);
             for (offset, new_pos) in offsets.iter_mut().zip(new_positions.iter_mut()) {
                 let Some(offset) = offset.take() else {
@@ -362,7 +362,7 @@ impl Scrollback {
                 *new_pos = Some((new_lines.len() + nth, col));
             }
             if let Some((_, last_row)) = rows.last_mut() {
-                last_row.blank_bgcolor = blank;
+                last_row.set_blank_fill(blank);
             }
             new_lines.extend(rows.into_iter().map(|(_, row)| row));
             logical_line.clear();
@@ -438,15 +438,15 @@ impl Scrollback {
         self.get_line_mut(size, row)
     }
 
-    /// Store every screen row down to and including `row` if `fill` has a
-    /// background color to paint.
+    /// Store every screen row down to and including `row` if `fill` has
+    /// colors to paint with.
     ///
     /// The rows below the last stored line are blank already, which is all
-    /// an erase or scroll has to leave behind when it has no color to paint
-    /// with. A row painted with a background color has to be stored, even
-    /// though none of its cells do (see `Line::blank_bgcolor`).
-    fn ensure_line_for_fill(&mut self, size: crate::Size, row: usize, fill: term::Color) {
-        if fill != term::Color::Default {
+    /// an erase or scroll has to leave behind when it has no colors to paint
+    /// with. A row painted with colors has to be stored, even though none of
+    /// its cells do (see `Line::blank_bgcolor`).
+    fn ensure_line_for_fill(&mut self, size: crate::Size, row: usize, fill: Fill) {
+        if fill != Fill::default() {
             self.ensure_line(size, std::cmp::min(row, size.height.saturating_sub(1)));
         }
     }
@@ -458,7 +458,7 @@ impl Scrollback {
     /// ED 0 (CSI 0 J). Erase from the cursor to the end of the screen. Like
     /// the rest of ED, this covers the whole screen whatever the scroll
     /// region and origin mode are.
-    pub fn erase_to_end(&mut self, size: crate::Size, cursor: Pos, fill: term::Color) {
+    pub fn erase_to_end(&mut self, size: crate::Size, cursor: Pos, fill: Fill) {
         self.ensure_line_for_fill(size, size.height.saturating_sub(1), fill);
 
         if let Some(snip_line) = self.get_line_mut(size, cursor.row) {
@@ -472,7 +472,7 @@ impl Scrollback {
     }
 
     /// ED 1 (CSI 1 J). Erase from the top of the screen to the cursor.
-    pub fn erase_from_start(&mut self, size: crate::Size, cursor: Pos, fill: term::Color) {
+    pub fn erase_from_start(&mut self, size: crate::Size, cursor: Pos, fill: Fill) {
         self.ensure_line_for_fill(size, cursor.row, fill);
 
         for i in 0..cursor.row {
@@ -486,7 +486,7 @@ impl Scrollback {
     }
 
     /// ED 2 (CSI 2 J). Erase the whole screen, but not the scrollback.
-    pub fn erase(&mut self, size: crate::Size, fill: term::Color) {
+    pub fn erase(&mut self, size: crate::Size, fill: Fill) {
         self.ensure_line_for_fill(size, size.height.saturating_sub(1), fill);
 
         for i in 0..size.height {
@@ -513,7 +513,7 @@ impl Scrollback {
         size: &crate::Size,
         scroll_region: &ScrollRegion,
         n: usize,
-        fill: term::Color,
+        fill: Fill,
     ) {
         match *scroll_region {
             ScrollRegion::TrackSize => {
@@ -577,7 +577,7 @@ impl Scrollback {
         size: &crate::Size,
         scroll_region: &ScrollRegion,
         n: usize,
-        fill: term::Color,
+        fill: Fill,
     ) {
         let top = match scroll_region {
             ScrollRegion::TrackSize => 0,
@@ -593,7 +593,7 @@ impl Scrollback {
         size: &crate::Size,
         scroll_region: &ScrollRegion,
         n: usize,
-        fill: term::Color,
+        fill: Fill,
     ) {
         let bottom = match *scroll_region {
             ScrollRegion::TrackSize => size.height,
@@ -657,7 +657,7 @@ impl Scrollback {
         size: &crate::Size,
         scroll_region: &ScrollRegion,
         n: usize,
-        fill: term::Color,
+        fill: Fill,
     ) {
         let bottom = match *scroll_region {
             ScrollRegion::TrackSize => size.height,
@@ -723,14 +723,14 @@ impl Scrollback {
 /// char that is wider than a whole row gets a row of its own, padding and
 /// all, which only happens on a one column screen.
 ///
-/// `blank` is the background color of the blanks that make up the rest of
-/// the logical line past the end of `cells`.
+/// `blank` holds the colors of the blanks that make up the rest of the
+/// logical line past the end of `cells`.
 ///
 /// `width` must not be zero.
-fn rewrap(cells: &mut Vec<Cell>, width: usize, blank: term::Color) -> Vec<(usize, Line)> {
+fn rewrap(cells: &mut Vec<Cell>, width: usize, blank: Fill) -> Vec<(usize, Line)> {
     // Blank cells at the end of the line are just part of the blank space
     // past the end of it. They should not spill over onto rows of their own.
-    while cells.last().is_some_and(|cell| cell.is_erased() && cell.attrs().bgcolor == blank) {
+    while cells.last().is_some_and(|cell| cell.is_erased() && cell.fill() == blank) {
         cells.pop();
     }
 
@@ -760,8 +760,8 @@ fn rewrap(cells: &mut Vec<Cell>, width: usize, blank: term::Color) -> Vec<(usize
             start,
             Line {
                 cells: cells[start..end].to_vec(),
-                blank_bgcolor: term::Color::Default,
                 is_wrapped: end < cells.len(),
+                ..Line::new()
             },
         ));
         start = end;
@@ -775,8 +775,8 @@ fn rewrap(cells: &mut Vec<Cell>, width: usize, blank: term::Color) -> Vec<(usize
     rows
 }
 
-/// Pad `line` out to `width` cells with blanks painted with `blank`.
-fn pad_line(line: &mut Line, width: usize, blank: term::Color) {
+/// Pad `line` out to `width` cells with blanks with the colors in `blank`.
+fn pad_line(line: &mut Line, width: usize, blank: Fill) {
     if line.cells.len() < width {
         line.cells.resize(width, Cell::blank(blank));
     }

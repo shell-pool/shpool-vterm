@@ -17,7 +17,7 @@
 //! alt screen.
 
 use crate::{
-    cell::{self, Cell},
+    cell::{self, Cell, Fill},
     term::{self, AsTermInput},
 };
 
@@ -35,6 +35,9 @@ pub(crate) struct Line {
     /// `Cell::blank`). Keeping that here means a painted line costs no more
     /// to store than a plain one.
     pub blank_bgcolor: term::Color,
+    /// The foreground color of every cell past the end of `cells`, which
+    /// the blanks keep along with the background color, like in xterm.
+    pub blank_fgcolor: term::Color,
     /// If true, indicates that this line was automatically wrapped due to
     /// the terminal width. The following line is part of the same logical
     /// line and should be reflowed together with this line on terminal resize.
@@ -68,6 +71,9 @@ impl AsTermInput for Line {
         let mut covered_until = 0;
         let end = self.painted_width();
         for (col, cell) in self.cells[..end].iter().enumerate() {
+            // The attrs of a blank that don't show up on a blank, like the
+            // fg color it got erased with, are not worth painting.
+            let cell = if cell.looks_unused() { cell::empty() } else { cell };
             if cell.attrs() != current_attrs {
                 for code in current_attrs.transition_to(cell.attrs()) {
                     code.term_input_into(buf);
@@ -104,21 +110,32 @@ impl AsTermInput for Line {
 /// to have the grid width passed down by the grid implementation.
 impl Line {
     pub fn new() -> Self {
-        Line::blank(term::Color::Default)
+        Line::blank(Fill::default())
     }
 
     /// A line full of the blanks that erasing and scrolling leave behind
-    /// while `fill` is the background color (see `Cell::blank`). They are
+    /// while `fill` holds the current colors (see `Cell::blank`). They are
     /// all past the end of the line, so none of them have to be stored.
-    pub fn blank(fill: term::Color) -> Self {
-        Line { cells: vec![], blank_bgcolor: fill, is_wrapped: false }
+    pub fn blank(fill: Fill) -> Self {
+        Line { cells: vec![], blank_bgcolor: fill.bg, blank_fgcolor: fill.fg, is_wrapped: false }
+    }
+
+    /// The colors of the cells past the end of the line.
+    pub fn blank_fill(&self) -> Fill {
+        Fill { fg: self.blank_fgcolor, bg: self.blank_bgcolor }
+    }
+
+    /// Set the colors of the cells past the end of the line.
+    pub fn set_blank_fill(&mut self, fill: Fill) {
+        self.blank_fgcolor = fill.fg;
+        self.blank_bgcolor = fill.bg;
     }
 
     /// Store copies of the blanks past the end of the line out to `len`, for
     /// an edit that changes cells in front of there.
     fn pad_to(&mut self, len: usize) {
         if self.cells.len() < len {
-            self.cells.resize(len, Cell::blank(self.blank_bgcolor));
+            self.cells.resize(len, Cell::blank(self.blank_fill()));
         }
     }
 
@@ -132,7 +149,7 @@ impl Line {
         if self.is_wrapped {
             return;
         }
-        let blank = Cell::blank(self.blank_bgcolor);
+        let blank = Cell::blank(self.blank_fill());
         while self.cells.last() == Some(&blank) {
             self.cells.pop();
         }
@@ -187,16 +204,18 @@ impl Line {
     }
 
     /// Get the cell at the given grid position. Past the end of the stored
-    /// cells, that is a blank painted with the line's `blank_bgcolor`.
+    /// cells, that is a blank with the line's `blank_fill`.
     pub fn get_cell(&self, width: usize, col: usize) -> Option<Cow<'_, Cell>> {
         if col >= width {
             return None;
         }
 
         if col >= self.cells.len() {
-            return Some(match self.blank_bgcolor {
-                term::Color::Default => Cow::Borrowed(cell::empty()),
-                bgcolor => Cow::Owned(Cell::blank(bgcolor)),
+            let fill = self.blank_fill();
+            return Some(if fill == Fill::default() {
+                Cow::Borrowed(cell::empty())
+            } else {
+                Cow::Owned(Cell::blank(fill))
             });
         }
 
@@ -325,17 +344,17 @@ impl Line {
     }
 
     /// Clobber the given section with the blanks that erasing leaves behind
-    /// while `fill` is the background color. Erasing out to the end of the
-    /// line makes `fill` the line's `blank_bgcolor` rather than storing any
-    /// of them.
-    pub fn erase(&mut self, width: usize, section: Section, fill: term::Color) {
+    /// while `fill` holds the current colors. Erasing out to the end of the
+    /// line makes `fill` the line's `blank_fill` rather than storing any of
+    /// them.
+    pub fn erase(&mut self, width: usize, section: Section, fill: Fill) {
         match section {
             Section::StartTo(col) => {
                 let end = std::cmp::min(col + 1, width);
                 self.blank_out_wide_char_at(end);
                 // The cells past the end of the line only look like the
-                // blanks already if they have the same background color.
-                if fill != self.blank_bgcolor {
+                // blanks already if they have the same colors.
+                if fill != self.blank_fill() {
                     self.pad_to(end);
                 }
                 let blank = Cell::blank(fill);
@@ -347,31 +366,30 @@ impl Line {
             Section::ToEnd(col) => {
                 self.truncate(col);
                 self.is_wrapped = false;
-                // The cells in front of `col` keep their old background
-                // color.
-                if fill != self.blank_bgcolor {
+                // The cells in front of `col` keep their old colors.
+                if fill != self.blank_fill() {
                     self.pad_to(col);
-                    self.blank_bgcolor = fill;
+                    self.set_blank_fill(fill);
                 }
                 self.trim_blanks();
             }
             Section::Whole => {
                 self.truncate(0);
                 self.is_wrapped = false;
-                self.blank_bgcolor = fill;
+                self.set_blank_fill(fill);
             }
         }
     }
 
-    /// Insert n new blank cells painted with `fill` at the current position,
-    /// dropping any cells which spill over width.
-    pub fn insert_character(&mut self, width: usize, col: usize, n: usize, fill: term::Color) {
+    /// Insert n new blank cells with the colors in `fill` at the current
+    /// position, dropping any cells which spill over width.
+    pub fn insert_character(&mut self, width: usize, col: usize, n: usize, fill: Fill) {
         if col >= width {
             return;
         }
         // Past the end of the line, inserting cells that look just like the
         // ones already there changes nothing.
-        if col >= self.cells.len() && fill == self.blank_bgcolor {
+        if col >= self.cells.len() && fill == self.blank_fill() {
             return;
         }
         self.pad_to(col);
@@ -391,7 +409,7 @@ impl Line {
         col: usize,
         right: usize,
         n: usize,
-        fill: term::Color,
+        fill: Fill,
     ) {
         if right >= width {
             self.insert_character(width, col, n, fill);
@@ -413,10 +431,10 @@ impl Line {
 
     /// Delete n cells at the current position, sucking cells to the
     /// right towards the cursor, and backfilling their old position
-    /// with blanks painted with `fill`.
+    /// with blanks with the colors in `fill`.
     ///
     /// This implements DCH (Delete Character).
-    pub fn delete_character(&mut self, width: usize, col: usize, fill: term::Color, n: usize) {
+    pub fn delete_character(&mut self, width: usize, col: usize, fill: Fill, n: usize) {
         if col >= width {
             return;
         }
@@ -426,10 +444,10 @@ impl Line {
         self.blank_out_wide_char_at(col + n);
 
         // The backfill goes in at the right edge. If it has the line's
-        // `blank_bgcolor`, the cells past the end of the line that get pulled
+        // `blank_fill`, the cells past the end of the line that get pulled
         // in look just like it, so only the stored cells have to move.
         // Otherwise the whole line has to be stored.
-        let backfill = fill != self.blank_bgcolor;
+        let backfill = fill != self.blank_fill();
         if backfill {
             self.pad_to(width);
         }
@@ -455,7 +473,7 @@ impl Line {
         width: usize,
         col: usize,
         right: usize,
-        fill: term::Color,
+        fill: Fill,
         n: usize,
     ) {
         if right >= width {
@@ -480,15 +498,15 @@ impl Line {
     /// delete, this leaves the cells in place, just clobbers their contents.
     ///
     /// This implements ECH (Erase Character)
-    pub fn erase_character(&mut self, width: usize, col: usize, fill: term::Color, n: usize) {
+    pub fn erase_character(&mut self, width: usize, col: usize, fill: Fill, n: usize) {
         if col >= width {
             return;
         }
 
         let erase_to = std::cmp::min(width, col.saturating_add(n));
         // The cells past the end of the line only look like the blanks
-        // already if they have the same background color.
-        if fill != self.blank_bgcolor {
+        // already if they have the same colors.
+        if fill != self.blank_fill() {
             self.pad_to(erase_to);
         }
         self.blank_out_wide_char_at(col);
@@ -673,7 +691,7 @@ mod tests {
         assert_eq!(buf, b"a b");
     }
 
-    const BLUE: term::Color = term::Color::Idx(4);
+    const BLUE: Fill = Fill { fg: term::Color::Default, bg: term::Color::Idx(4) };
 
     #[test]
     fn set_blank_at_end_is_not_stored() -> anyhow::Result<()> {
@@ -693,7 +711,7 @@ mod tests {
     }
 
     #[test]
-    fn erase_to_end_only_changes_the_blank_bgcolor() -> anyhow::Result<()> {
+    fn erase_to_end_only_changes_the_blank_fill() -> anyhow::Result<()> {
         let width = 5;
         let mut line = Line::new();
         for (col, c) in "abc".chars().enumerate() {
@@ -705,17 +723,17 @@ mod tests {
         assert_eq!(line.get_cell(width, 4).as_deref(), Some(&Cell::blank(BLUE)));
 
         // Past the end of the cells, the ones in front of the erase keep
-        // their old background color.
-        line.erase(width, Section::ToEnd(3), term::Color::Default);
+        // their old colors.
+        line.erase(width, Section::ToEnd(3), Fill::default());
         assert_eq!(
             line.cells,
             vec![Cell::new('a', term::Attrs::default()), Cell::blank(BLUE), Cell::blank(BLUE)]
         );
-        assert_eq!(line.blank_bgcolor, term::Color::Default);
+        assert_eq!(line.blank_fill(), Fill::default());
 
         line.erase(width, Section::Whole, BLUE);
         assert!(line.cells.is_empty());
-        assert_eq!(line.blank_bgcolor, BLUE);
+        assert_eq!(line.blank_fill(), BLUE);
 
         Ok(())
     }
@@ -723,7 +741,7 @@ mod tests {
     // Blanks that look just like the cells past the end of the line don't need
     // storing there.
     #[test]
-    fn edits_with_the_blank_bgcolor_store_nothing_past_the_end() -> anyhow::Result<()> {
+    fn edits_with_the_blank_fill_store_nothing_past_the_end() -> anyhow::Result<()> {
         let width = 10;
         let mut line = Line::blank(BLUE);
         line.set_cell(width, 0, Cell::new('a', term::Attrs::default()))?;
@@ -733,9 +751,35 @@ mod tests {
         line.delete_character(width, 3, BLUE, 2);
         assert_eq!(line.cells.len(), 1);
 
-        // Blanks with a different background color do have to be stored.
-        line.erase_character(width, 3, term::Color::Default, 2);
+        // Blanks with different colors do have to be stored.
+        line.erase_character(width, 3, Fill::default(), 2);
         assert_eq!(line.cells.len(), 5);
+
+        Ok(())
+    }
+
+    // Blanks keep the fg color they got erased with, but it doesn't show on a
+    // blank, so it doesn't get painted.
+    #[test]
+    fn erase_keeps_the_fgcolor_without_painting_it() -> anyhow::Result<()> {
+        let width = 5;
+        let red = Fill { fg: term::Color::Idx(1), bg: term::Color::Default };
+        let mut line = Line::new();
+        for (col, c) in "abc".chars().enumerate() {
+            line.set_cell(width, col, Cell::new(c, term::Attrs::default()))?;
+        }
+
+        line.erase(width, Section::ToEnd(1), red);
+        line.erase_character(width, 0, red, 1);
+        line.set_cell(width, 1, Cell::new('b', term::Attrs::default()))?;
+        assert_eq!(line.blank_fill(), red);
+        assert_eq!(line.get_cell(width, 0).as_deref(), Some(&Cell::blank(red)));
+        assert_eq!(line.get_cell(width, 4).as_deref(), Some(&Cell::blank(red)));
+
+        assert!(matches!(line.shown_at(width), Cow::Borrowed(_)));
+        let mut buf = vec![];
+        line.term_input_into(&mut buf);
+        assert_eq!(buf, b" b");
 
         Ok(())
     }
@@ -760,7 +804,7 @@ mod tests {
         }
         line.is_wrapped = true;
 
-        line.erase_character(width, 3, term::Color::Default, 2);
+        line.erase_character(width, 3, Fill::default(), 2);
         assert_eq!(format!("{line}"), "abc**⏎\n");
 
         Ok(())
@@ -794,11 +838,11 @@ mod tests {
 
         // The margin is in front of the "e".
         let mut inserted = line.clone();
-        inserted.insert_character_in(width, 1, 4, 1, term::Color::Default);
+        inserted.insert_character_in(width, 1, 4, 1, Fill::default());
         assert_eq!(format!("{inserted}"), "a*bcef\n");
 
         let mut deleted = line.clone();
-        deleted.delete_character_in(width, 1, 4, term::Color::Default, 1);
+        deleted.delete_character_in(width, 1, 4, Fill::default(), 1);
         assert_eq!(format!("{deleted}"), "acd*ef\n");
 
         Ok(())

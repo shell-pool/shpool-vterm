@@ -247,8 +247,7 @@ libvterm_tests! {
         "Background",
         // Superscript/subscript are ignored, see 30state_pen.
         // "Super/subscript",
-        // erased cells don't keep the fg color
-        // "EL sets only colours to end of line, not other attrs",
+        "EL sets only colours to end of line, not other attrs",
         // "DECSCNM xors reverse for entire screen", // DECSCNM unsupported
         // "Set default colours", // SETDEFAULTCOL is libvterm API
     ],
